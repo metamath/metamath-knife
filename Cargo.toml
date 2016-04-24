@@ -1,0 +1,6 @@
+[package]
+name = "smetamath"
+version = "0.1.0"
+authors = ["Stefan O'Rear <stefanor@cox.net>"]
+
+[dependencies]
