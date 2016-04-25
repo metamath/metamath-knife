@@ -1,6 +1,12 @@
-type BufferRef = Arc<Vec<u8>>;
+use std::mem;
+use std::str;
+use std::sync::Arc;
+
+pub type BufferRef = Arc<Vec<u8>>;
 /// change me if you want to parse files > 4GB
 pub type FilePos = u32;
+pub type StatementIndex = i32;
+pub const NO_STATEMENT: StatementIndex = -1;
 
 #[derive(Copy,Clone,Eq,PartialEq,Debug)]
 pub struct Span {
@@ -14,15 +20,15 @@ impl Span {
     }
 
     fn new2(start: FilePos, end: FilePos) -> Span {
-        Span { start, end }
+        Span { start: start, end: end }
     }
 
     fn null() -> Span {
         Span::new(0, 0)
     }
 
-    fn as_ref(&self, buf: &[u8]) -> &[u8] {
-        buf[self.start .. self.end]
+    fn as_ref(self, buf: &[u8]) -> &[u8] {
+        &buf[self.start as usize .. self.end as usize]
     }
 }
 
@@ -36,7 +42,7 @@ pub struct Segment {
     // crossed outputs
 }
 
-#[derive(Debug,Clone,Eq)]
+#[derive(Debug,Clone,Eq,PartialEq)]
 pub enum Diagnostic {
     BadCharacter(Span, u8),
     CommentMarkerNotStart(Span),
@@ -47,10 +53,25 @@ pub enum Diagnostic {
     BadLabel(Span),
     UnclosedMath,
     UnclosedProof,
+    SpuriousLabel(Span),
+    MissingLabel,
+    RepeatedLabel(Span, Span),
+    MissingProof(Span),
+    SpuriousProof(Span),
+    EmptyMathString,
+    EmptyFilename,
+    FilenameSpaces,
+    FilenameDollar,
+    UnclosedInclude,
+    DisjointSingle,
+    BadFloating,
+    UnmatchedCloseGroup,
+    UnclosedBeforeInclude(StatementIndex),
+    UnclosedBeforeEof,
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
-enum StatementType {
+pub enum StatementType {
     /// Psuedo statement used only to record end-of-file whitespace
     Eof,
     /// Statement is damaged enough that there's no sense passing it to later stages
@@ -68,7 +89,7 @@ enum StatementType {
     Constant,
     Variable,
 }
-use StatementType::*;
+use self::StatementType::*;
 
 impl StatementType {
     fn takes_label(self) -> bool {
@@ -87,10 +108,12 @@ impl StatementType {
 }
 
 #[derive(Clone,Debug)]
-struct Statement {
-    type: StatementType,
+pub struct Statement {
+    stype: StatementType,
     span: Span,
     label: Span,
+    group: StatementIndex,
+    group_end: StatementIndex,
     math: Vec<Span>,
     proof: Vec<Span>,
     diagnostics: Vec<Diagnostic>,
@@ -104,19 +127,22 @@ struct Scanner<'a> {
     unget: Option<Span>,
     labels: Vec<Span>,
     statement_start: FilePos,
+    has_bad_labels: bool,
+    invalidated: bool,
 }
 
-const mm_valid_spaces: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) |
+const MM_VALID_SPACES: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) |
     (1u64 << 32);
 
 fn is_mm_space_c0(byte: u8) -> bool {
-    (mm_valid_spaces & (1u64 << byte)) != 0
+    (MM_VALID_SPACES & (1u64 << byte)) != 0
 }
 
 fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
 
+#[derive(Eq,PartialEq,Copy,Clone)]
 enum CommentType {
     Normal,
     Typesetting,
@@ -163,13 +189,13 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn get_comment(&mut self, opener: Span, mid_statement: bool) -> (Span, CommentType) {
-        let mut type = CommentType::Normal;
+    fn get_comment(&mut self, opener: Span, mid_statement: bool) -> CommentType {
+        let mut ctype = CommentType::Normal;
         let mut first = true;
         while let Some(tok) = self.get_raw() {
             let tok_ref = tok.as_ref(self.buffer);
             if tok_ref == b"$)" {
-                return (Span::new2(opener.start, tok.end), type)
+                return ctype
             } else if tok_ref == b"$j" || tok_ref == b"$t" {
                 if !first {
                     self.diagnostics.push(Diagnostic::CommentMarkerNotStart(tok))
@@ -177,13 +203,13 @@ impl<'a> Scanner<'a> {
                     self.diagnostics.push(Diagnostic::MidStatementCommentMarker(tok))
                 } else {
                     if tok_ref == b"$j" {
-                        type = CommentType::Extra;
+                        ctype = CommentType::Extra;
                     } else {
-                        type = CommentType::Typesetting;
+                        ctype = CommentType::Typesetting;
                     }
                 }
-            } else if tok_ref.contains(b'$') {
-                let tok_str = str::from(tok_ref).unwrap();
+            } else if tok_ref.contains(&b'$') {
+                let tok_str = str::from_utf8(tok_ref).unwrap();
                 if tok_str.contains("$)") {
                     self.diagnostics.push(Diagnostic::BadCommentEnd(tok, opener));
                 }
@@ -195,9 +221,9 @@ impl<'a> Scanner<'a> {
             first = false;
         }
 
-        let cspan = Span::new2(opener.start, self.buffer.len());
+        let cspan = Span::new2(opener.start, self.buffer.len() as FilePos);
         self.diagnostics.push(Diagnostic::UnclosedComment(cspan));
-        (cspan, type)
+        ctype
     }
 
     fn get(&mut self) -> Option<Span> {
@@ -217,9 +243,10 @@ impl<'a> Scanner<'a> {
         None
     }
 
-    fn out_statement(&mut self, type: StatementType, label: Span, math: Vec<Span>, proof: Vec<Span>) -> Statement {
+    fn out_statement(&mut self, stype: StatementType, label: Span, math: Vec<Span>, proof: Vec<Span>) -> Statement {
         Statement {
-            type, label, math, proof,
+            stype: stype, label: label, math: math, proof: proof,
+            group: NO_STATEMENT, group_end: NO_STATEMENT,
             diagnostics: mem::replace(&mut self.diagnostics, Vec::new()),
             span: Span::new2(mem::replace(&mut self.statement_start, self.position), self.position),
         }
@@ -229,13 +256,13 @@ impl<'a> Scanner<'a> {
         if let Some(ftok) = self.get_raw() {
             let ftok_ref = ftok.as_ref(self.buffer);
             if ftok_ref == b"$(" {
-                let (cspan, ctype) = self.get_comment(ftok, false);
-                let type if ctype == CommentType::Typesetting {
+                let ctype = self.get_comment(ftok, false);
+                let stype = if ctype == CommentType::Typesetting {
                     TypesettingComment
                 } else {
                     Comment
                 };
-                return Some(self.out_statement(type, Span::null(), Vec::new(), Vec::new()));
+                return Some(self.out_statement(stype, Span::null(), Vec::new(), Vec::new()));
             } else {
                 self.unget = Some(ftok);
             }
@@ -248,7 +275,7 @@ impl<'a> Scanner<'a> {
         self.labels.clear();
         while let Some(ltok) = self.get() {
             let lref = ltok.as_ref(self.buffer);
-            if lref.contains(b'$') {
+            if lref.contains(&b'$') {
                 self.unget = Some(ltok);
                 break;
             } else if !is_valid_label(lref) {
@@ -262,7 +289,7 @@ impl<'a> Scanner<'a> {
 
     fn get_no_label(&mut self) {
         // none of these are invalidations...
-        for lspan in &self.labels {
+        for &lspan in &self.labels {
             self.diagnostics.push(Diagnostic::SpuriousLabel(lspan));
         }
     }
@@ -275,7 +302,7 @@ impl<'a> Scanner<'a> {
             self.invalidated = true;
             Span::null()
         } else {
-            for addl in self.labels.iter().skip(1) {
+            for &addl in self.labels.iter().skip(1) {
                 self.diagnostics.push(Diagnostic::RepeatedLabel(addl, self.labels[0]));
             }
             // have to invalidate because we don't know which to use
@@ -288,7 +315,7 @@ impl<'a> Scanner<'a> {
         let mut out = Vec::new();
         while let Some(tokn) = self.get() {
             let toknref = tokn.as_ref(self.buffer);
-            if toknref.contains(b'$') {
+            if toknref.contains(&b'$') {
                 if toknref == b"$." {
                     // string is closed with no proof
                     if expect_proof {
@@ -303,7 +330,7 @@ impl<'a> Scanner<'a> {
                     return (out, true);
                 } else {
                     // string is closed with no proof and with an error, whoops
-                    self.unget = true;
+                    self.unget = Some(tokn);
                     break;
                 }
             } else {
@@ -331,7 +358,7 @@ impl<'a> Scanner<'a> {
             // diagnostic already generated if unwanted.  this is NOT an invalidation as $p
             // statements don't need proofs (I mean you should have a ? but we know what you mean)
             (Vec::new(), false)
-        }
+        };
         (math_str, proof_str)
     }
 
@@ -343,9 +370,9 @@ impl<'a> Scanner<'a> {
                 break;
             } else if tref == b"$=" {
                 // this is definitely not it
-            } else if tref.contains(b'$') {
+            } else if tref.contains(&b'$') {
                 // might be the start of the next statement
-                self.unget = true;
+                self.unget = Some(tok);
                 break;
             }
         }
@@ -363,7 +390,7 @@ impl<'a> Scanner<'a> {
                 } else if count > 1 {
                     self.diagnostics.push(Diagnostic::FilenameSpaces);
                     self.invalidated = true;
-                } else if res.as_ref(self.buffer).contains(b'$') {
+                } else if res.as_ref(self.buffer).contains(&b'$') {
                     self.diagnostics.push(Diagnostic::FilenameDollar);
                 }
                 return res;
@@ -388,10 +415,10 @@ impl<'a> Scanner<'a> {
 
         self.read_labels();
 
-        let mut type = Eof;
+        let mut stype = Eof;
         if let Some(kwtok) = self.get() {
             let kwtok_ref = kwtok.as_ref(self.buffer);
-            type = if kwtok_ref.len() == 2 && kwtok_ref[0] == b'$' {
+            stype = if kwtok_ref.len() == 2 && kwtok_ref[0] == b'$' {
                 match kwtok_ref[1] {
                     b'[' => FileInclude,
                     b'a' => Axiom,
@@ -406,25 +433,25 @@ impl<'a> Scanner<'a> {
                     _ => Invalid,
                 }
             } else {
-                Invalid,
+                Invalid
             };
         }
         self.invalidated = false;
 
-        let label = if type.takes_label() {
+        let mut label = if stype.takes_label() {
             self.get_label()
         } else {
             self.get_no_label();
             Span::null()
         };
 
-        let (math, proof) = if type.takes_math() {
-            self.get_strings(type == Provable)
+        let (math, proof) = if stype.takes_math() {
+            self.get_strings(stype == Provable)
         } else {
             (Vec::new(), Vec::new())
         };
 
-        match type {
+        match stype {
             FileInclude => {
                 label = self.get_file_include();
             }
@@ -437,7 +464,7 @@ impl<'a> Scanner<'a> {
             }
             Floating => {
                 if math.len() != 0 && math.len() != 2 {
-                    self.diagnostics.push(Diagnostics::BadFloating);
+                    self.diagnostics.push(Diagnostic::BadFloating);
                     self.invalidated = true;
                 }
             }
@@ -449,63 +476,68 @@ impl<'a> Scanner<'a> {
         }
 
         if self.invalidated {
-            type = Invalid;
+            stype = Invalid;
         }
 
-        self.out_statement(type, label, math, proof)
+        self.out_statement(stype, label, math, proof)
     }
 
     fn get_segment(&mut self) -> Segment {
-        let mut statements = Vec::new();
+        let mut statements = Vec::<Statement>::new();
         let mut top_group = NO_STATEMENT;
 
         loop {
-            let stmt = self.get_statement();
+            let mut stmt = self.get_statement();
+            assert!(statements.len() < StatementIndex::max_value() as usize);
             let index = statements.len();
             stmt.group = top_group;
 
             // TODO record name usage
-            match stmt.type {
+            match stmt.stype {
                 OpenGroup => {
-                    top_group = index;
+                    top_group = index as StatementIndex;
                 }
                 CloseGroup => {
                     if top_group == NO_STATEMENT {
                         stmt.diagnostics.push(Diagnostic::UnmatchedCloseGroup);
                     } else {
-                        statements[top_group].group_end = index;
-                        top_group = statements[top_group].group;
+                        statements[top_group as usize].group_end = index as StatementIndex;
+                        top_group = statements[top_group as usize].group;
                     }
                 }
                 FileInclude => {
                     while top_group != NO_STATEMENT {
-                        statements[top_group].group_end = index;
-                        statements[top_group].diagnostics.push(Diagnostic::UnclosedBeforeInclude(index));
-                        top_group = statements[top_group].group;
+                        statements[top_group as usize].group_end = index as StatementIndex;
+                        statements[top_group as usize].diagnostics.push(
+                            Diagnostic::UnclosedBeforeInclude(index as StatementIndex));
+                        top_group = statements[top_group as usize].group;
                     }
                     return Segment {
-                        statements,
+                        statements: statements,
                         next_file: stmt.label,
                     };
                 }
                 Eof => {
                     while top_group != NO_STATEMENT {
-                        statements[top_group].group_end = index;
-                        statements[top_group].diagnostics.push(Diagnostic::UnclosedBeforeEof);
-                        top_group = statements[top_group].group;
+                        statements[top_group as usize].group_end = index as StatementIndex;
+                        statements[top_group as usize].diagnostics.push(Diagnostic::UnclosedBeforeEof);
+                        top_group = statements[top_group as usize].group;
                     }
                     return Segment {
-                        statements,
+                        statements: statements,
                         next_file: Span::null(),
                     };
                 }
+                _ => {}
             }
+
+            statements.push(stmt);
         }
     }
 }
 
 fn is_valid_label(label: &[u8]) -> bool {
-    for c in label {
+    for &c in label {
         if !(c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') || (c >= b'0' && c <= b'9') || (c >= b'A' && c <= b'Z')) {
             return false;
         }
@@ -526,12 +558,13 @@ fn is_valid_label(label: &[u8]) -> bool {
 pub fn parse_segments(input: &BufferRef) -> Vec<Segment> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner { buffer: input, ..Scanner::default() };
+    assert!(input.len() < FilePos::max_value() as usize);
 
     loop {
         let seg = scanner.get_segment();
         let last = seg.next_file == Span::null();
         closed_spans.push(seg);
-        if (last) {
+        if last {
             return closed_spans;
         }
     }
