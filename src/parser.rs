@@ -454,6 +454,54 @@ impl<'a> Scanner<'a> {
 
         self.out_statement(type, label, math, proof)
     }
+
+    fn get_segment(&mut self) -> Segment {
+        let mut statements = Vec::new();
+        let mut top_group = NO_STATEMENT;
+
+        loop {
+            let stmt = self.get_statement();
+            let index = statements.len();
+            stmt.group = top_group;
+
+            // TODO record name usage
+            match stmt.type {
+                OpenGroup => {
+                    top_group = index;
+                }
+                CloseGroup => {
+                    if top_group == NO_STATEMENT {
+                        stmt.diagnostics.push(Diagnostic::UnmatchedCloseGroup);
+                    } else {
+                        statements[top_group].group_end = index;
+                        top_group = statements[top_group].group;
+                    }
+                }
+                FileInclude => {
+                    while top_group != NO_STATEMENT {
+                        statements[top_group].group_end = index;
+                        statements[top_group].diagnostics.push(Diagnostic::UnclosedBeforeInclude(index));
+                        top_group = statements[top_group].group;
+                    }
+                    return Segment {
+                        statements,
+                        next_file: stmt.label,
+                    };
+                }
+                Eof => {
+                    while top_group != NO_STATEMENT {
+                        statements[top_group].group_end = index;
+                        statements[top_group].diagnostics.push(Diagnostic::UnclosedBeforeEof);
+                        top_group = statements[top_group].group;
+                    }
+                    return Segment {
+                        statements,
+                        next_file: Span::null(),
+                    };
+                }
+            }
+        }
+    }
 }
 
 fn is_valid_label(label: &[u8]) -> bool {
@@ -479,9 +527,12 @@ pub fn parse_segments(input: &BufferRef) -> Vec<Segment> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner { buffer: input, ..Scanner::default() };
 
-    while let Some(token) = scanner.get_raw() {
-        let tok_ref = tok.as_ref(self.buffer);
-
-
+    loop {
+        let seg = scanner.get_segment();
+        let last = seg.next_file == Span::null();
+        closed_spans.push(seg);
+        if (last) {
+            return closed_spans;
+        }
     }
 }
