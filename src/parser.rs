@@ -7,6 +7,7 @@ pub type BufferRef = Arc<Vec<u8>>;
 pub type FilePos = u32;
 pub type StatementIndex = i32;
 pub const NO_STATEMENT: StatementIndex = -1;
+pub const STMT_END_DATABASE: StatementIndex = -2;
 
 #[derive(Copy,Clone,Eq,PartialEq,Debug)]
 pub struct Span {
@@ -32,16 +33,63 @@ impl Span {
     }
 }
 
+// TODO don't default this, assign it properly
+#[derive(Copy,Clone,Eq,PartialEq,Default)]
+pub struct SegmentId(pub u32);
+pub type TokenIndex = i32;
+
+#[derive(Copy,Clone)]
+pub struct GlobalRange {
+    pub segment: SegmentId,
+    pub statement_start: StatementIndex,
+    pub statement_end: StatementIndex, // or STMT_END_DATABASE
+}
+
+// TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
+pub struct GlobalDv {
+    pub valid: GlobalRange,
+    pub vars: Vec<Vec<u8>>,
+}
+
+pub struct ConstantDef {
+    pub valid: GlobalRange,
+    pub name: Vec<u8>,
+    pub ordinal: TokenIndex,
+}
+
+pub struct VariableDef {
+    pub valid: GlobalRange,
+    pub name: Vec<u8>,
+    pub ordinal: TokenIndex,
+}
+
+pub struct LabelDef {
+    pub valid: GlobalRange,
+    pub name: Vec<u8>,
+    // start-1 is the statement in question
+}
+
+pub struct FloatDef {
+    pub valid: GlobalRange,
+    pub name: Vec<u8>,
+    pub type_: Vec<u8>,
+}
+
 /// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
 /// the future have an "unpacked" segment which is used for active editing, as well as a "lazy" or
 /// "mmap" segment type for fast incremental startup.
 pub struct Segment {
+    pub id: SegmentId,
+    pub buffer: BufferRef,
     // straight outputs
     pub statements: Vec<Statement>,
     pub next_file: Span,
     // crossed outputs
-    // TODO names, types, and live ranges of all names
-    // TODO top-level $d and $f information
+    pub global_dvs: Vec<GlobalDv>,
+    pub constants: Vec<ConstantDef>,
+    pub variables: Vec<VariableDef>,
+    pub labels: Vec<LabelDef>,
+    pub floats: Vec<FloatDef>,
 }
 
 #[derive(Debug,Clone,Eq,PartialEq)]
@@ -71,6 +119,8 @@ pub enum Diagnostic {
     UnmatchedCloseGroup,
     UnclosedBeforeInclude(StatementIndex),
     UnclosedBeforeEof,
+    ConstantNotTopLevel,
+    EssentialNotTopLevel,
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
@@ -124,7 +174,9 @@ pub struct Statement {
 
 #[derive(Default)]
 struct Scanner<'a> {
+    segment_id: SegmentId,
     buffer: &'a [u8],
+    buffer_ref: BufferRef,
     position: FilePos,
     diagnostics: Vec<Diagnostic>,
     unget: Option<Span>,
@@ -490,55 +542,123 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_segment(&mut self) -> Segment {
-        let mut statements = Vec::<Statement>::new();
+        let mut seg = Segment {
+            id: self.segment_id, statements: Vec::new(), next_file: Span::null(),
+            variables: Vec::new(), constants: Vec::new(), global_dvs: Vec::new(),
+            floats: Vec::new(), labels: Vec::new(), buffer: self.buffer_ref.clone(),
+        };
         let mut top_group = NO_STATEMENT;
+        let end_diag;
 
         loop {
+            let index = seg.statements.len() as StatementIndex;
             let mut stmt = self.get_statement();
-            assert!(statements.len() < StatementIndex::max_value() as usize);
-            let index = statements.len();
             stmt.group = top_group;
+            seg.statements.push(stmt);
 
             // TODO record name usage
-            match stmt.stype {
+            match seg.statements[index as usize].stype {
                 OpenGroup => {
-                    top_group = index as StatementIndex;
+                    top_group = index;
                 }
                 CloseGroup => {
                     if top_group == NO_STATEMENT {
-                        stmt.diagnostics.push(Diagnostic::UnmatchedCloseGroup);
+                        seg.statements[index as usize].diagnostics.push(Diagnostic::UnmatchedCloseGroup);
                     } else {
-                        statements[top_group as usize].group_end = index as StatementIndex;
-                        top_group = statements[top_group as usize].group;
+                        seg.statements[top_group as usize].group_end = index;
+                        top_group = seg.statements[top_group as usize].group;
+                    }
+                }
+                Constant => {
+                    if top_group != NO_STATEMENT {
+                        seg.statements[index as usize].diagnostics.push(Diagnostic::ConstantNotTopLevel);
+                    }
+                }
+                Essential => {
+                    if top_group != NO_STATEMENT {
+                        seg.statements[index as usize].diagnostics.push(Diagnostic::EssentialNotTopLevel);
                     }
                 }
                 FileInclude => {
-                    while top_group != NO_STATEMENT {
-                        statements[top_group as usize].group_end = index as StatementIndex;
-                        statements[top_group as usize].diagnostics.push(
-                            Diagnostic::UnclosedBeforeInclude(index as StatementIndex));
-                        top_group = statements[top_group as usize].group;
-                    }
-                    return Segment {
-                        statements: statements,
-                        next_file: stmt.label,
-                    };
+                    seg.next_file = seg.statements[index as usize].label;
+                    end_diag = Diagnostic::UnclosedBeforeInclude(index);
+                    break;
                 }
                 Eof => {
-                    while top_group != NO_STATEMENT {
-                        statements[top_group as usize].group_end = index as StatementIndex;
-                        statements[top_group as usize].diagnostics.push(Diagnostic::UnclosedBeforeEof);
-                        top_group = statements[top_group as usize].group;
-                    }
-                    return Segment {
-                        statements: statements,
-                        next_file: Span::null(),
-                    };
+                    end_diag = Diagnostic::UnclosedBeforeEof;
+                    break;
                 }
                 _ => {}
             }
+        }
 
-            statements.push(stmt);
+        while top_group != NO_STATEMENT {
+            seg.statements[top_group as usize].group_end =
+                seg.statements.len() as StatementIndex;
+            seg.statements[top_group as usize].diagnostics.push(end_diag.clone());
+            top_group = seg.statements[top_group as usize].group;
+        }
+
+        collect_definitions(&mut seg);
+        seg
+    }
+}
+
+fn collect_definitions(seg: &mut Segment) {
+    let buf: &[u8] = &seg.buffer;
+    for (index, &ref stmt) in seg.statements.iter().enumerate() {
+        let scope_end = if stmt.group == NO_STATEMENT {
+            STMT_END_DATABASE
+        } else {
+            seg.statements[stmt.group as usize].group_end
+        };
+        let valid = GlobalRange {
+            segment: seg.id, statement_start: index as StatementIndex, statement_end: scope_end,
+        };
+
+        if stmt.stype.takes_label() {
+            seg.labels.push(LabelDef {
+                valid: valid, name: stmt.label.as_ref(buf).to_owned()
+            });
+        }
+
+        match stmt.stype {
+            Constant => {
+                if scope_end != STMT_END_DATABASE {
+                    continue;
+                }
+                for (sindex, &span) in stmt.math.iter().enumerate() {
+                    seg.constants.push(ConstantDef {
+                        valid: valid, name: span.as_ref(buf).to_owned(),
+                        ordinal: sindex as TokenIndex,
+                    });
+                }
+            }
+            Variable => {
+                for (sindex, &span) in stmt.math.iter().enumerate() {
+                    seg.variables.push(VariableDef {
+                        valid: valid, name: span.as_ref(buf).to_owned(),
+                        ordinal: sindex as TokenIndex,
+                    });
+                }
+            }
+            Disjoint => {
+                if scope_end != STMT_END_DATABASE {
+                    continue;
+                }
+                seg.global_dvs.push(GlobalDv {
+                    valid: valid,
+                    vars: stmt.math.iter().map(|sp| sp.as_ref(buf).to_owned()).collect(),
+                });
+            }
+            Floating => {
+                seg.floats.push(FloatDef {
+                    valid: valid,
+                    type_: stmt.math[0].as_ref(buf).to_owned(),
+                    name: stmt.math[1].as_ref(buf).to_owned(),
+                });
+            }
+            _ => {}
         }
     }
 }
@@ -564,7 +684,7 @@ fn is_valid_label(label: &[u8]) -> bool {
 /// statements at the top nesting level (this has been approved by Norman Megill).
 pub fn parse_segments(input: &BufferRef) -> Vec<Segment> {
     let mut closed_spans = Vec::new();
-    let mut scanner = Scanner { buffer: input, ..Scanner::default() };
+    let mut scanner = Scanner { buffer_ref: input.clone(), buffer: input, ..Scanner::default() };
     assert!(input.len() < FilePos::max_value() as usize);
 
     loop {
