@@ -40,6 +40,8 @@ pub struct Segment {
     pub statements: Vec<Statement>,
     pub next_file: Span,
     // crossed outputs
+    // TODO names, types, and live ranges of all names
+    // TODO top-level $d and $f information
 }
 
 #[derive(Debug,Clone,Eq,PartialEq)]
@@ -50,6 +52,7 @@ pub enum Diagnostic {
     NestedComment(Span, Span),
     BadCommentEnd(Span, Span),
     UnclosedComment(Span),
+    UnknownKeyword(Span),
     BadLabel(Span),
     UnclosedMath,
     UnclosedProof,
@@ -142,6 +145,7 @@ fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
 
+// TODO: add outline comment detection
 #[derive(Eq,PartialEq,Copy,Clone)]
 enum CommentType {
     Normal,
@@ -435,6 +439,9 @@ impl<'a> Scanner<'a> {
             } else {
                 Invalid
             };
+            if stype == Invalid {
+                self.diagnostics.push(Diagnostic::UnknownKeyword(kwtok));
+            }
         }
         self.invalidated = false;
 
