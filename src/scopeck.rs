@@ -9,6 +9,7 @@ use parser::SymbolType;
 use parser::SegmentOrder;
 use parser::Token;
 use parser::TokenAddress;
+use parser::TokenRef;
 use parser::NO_STATEMENT;
 use std::collections::HashMap;
 use std::cmp::Ordering;
@@ -32,12 +33,17 @@ use std::cmp::Ordering;
 // 3. Constant/nested variable collisions are special because they don't involve scope overlaps.
 // The constant wins, the variable must notify.
 
+struct LocalVarInfo {
+    start: TokenAddress,
+    end: StatementIndex,
+}
+
 struct ScopeState<'a> {
     diagnostics: HashMap<StatementIndex, Vec<Diagnostic>>,
     // segment: &'a Segment,
     order: &'a SegmentOrder,
     gnames: NameReader<'a>,
-    local_vars: HashMap<Token, TokenAddress>,
+    local_vars: HashMap<Token, Vec<LocalVarInfo>>,
 }
 
 fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic) {
@@ -85,6 +91,24 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
     }
 }
 
+fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
+    end == NO_STATEMENT || cur < end
+}
+
+// factored out to make a useful borrow scope
+fn maybe_add_local_var(state: &mut ScopeState, sref: StatementRef, tokref: TokenRef) -> Option<TokenAddress> {
+    let lv_slot = state.local_vars.entry(tokref.slice.to_owned()).or_insert(Vec::new());
+
+    if let Some(lv_most_recent) = lv_slot.last() {
+        if check_endpoint(sref.index, lv_most_recent.end) {
+            return Some(lv_most_recent.start);
+        }
+    }
+
+    lv_slot.push(LocalVarInfo { start: tokref.address, end: sref.statement.group_end });
+    None
+}
+
 fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
     for tokref in sref.math_iter() {
         if let Some(ldef) = state.gnames.lookup_label(tokref.slice) {
@@ -110,15 +134,10 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
                 }
             }
 
-            if state.local_vars.len() > 0 {
-                if let Some(prev_addr) = state.local_vars.get(tokref.slice).map(|&x| x) {
-                    // local/local conflict
-                    push_diagnostic(state, sref.index, Diagnostic::SymbolRedeclared(tokref.index(), prev_addr));
-                    continue;
-                }
+            if let Some(prev_addr) = maybe_add_local_var(state, sref, tokref) {
+                // local/local conflict
+                push_diagnostic(state, sref.index, Diagnostic::SymbolRedeclared(tokref.index(), prev_addr));
             }
-
-            state.local_vars.insert(tokref.slice.to_owned(), tokref.address);
         }
     }
 }
@@ -150,8 +169,6 @@ pub fn scope_check(_names: &Nameset, seg: &Segment) {
                 // spit out a frame
             }
             StatementType::Variable => scope_check_variable(&mut state, sref),
-            StatementType::OpenGroup => {}
-            StatementType::CloseGroup => {}
             _ => {}
         }
     }

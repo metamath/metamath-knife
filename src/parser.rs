@@ -714,6 +714,12 @@ impl<'a> Scanner<'a> {
             top_group = seg.statements[top_group as usize].group;
         }
 
+        for index in 0 .. seg.statements.len() {
+            if seg.statements[index].group != NO_STATEMENT && seg.statements[index].stype != OpenGroup {
+                seg.statements[index].group_end = seg.statements[seg.statements[index].group as usize].group_end;
+            }
+        }
+
         collect_definitions(&mut seg);
         seg
     }
