@@ -1,6 +1,8 @@
 use std::mem;
 use std::str;
 use std::sync::Arc;
+use std::slice;
+use std::cmp::Ordering;
 
 pub type BufferRef = Arc<Vec<u8>>;
 /// change me if you want to parse files > 4GB
@@ -34,9 +36,42 @@ impl Span {
 }
 
 // TODO don't default this, assign it properly
-#[derive(Copy,Clone,Eq,PartialEq,Default)]
+#[derive(Copy,Clone,Debug,Eq,PartialEq,Default,Hash)]
 pub struct SegmentId(pub u32);
 pub type TokenIndex = i32;
+
+#[derive(Clone,Debug)]
+pub struct SegmentOrder {
+    next: SegmentId,
+}
+
+impl SegmentOrder {
+    pub fn cmp(&self, left: SegmentId, right: SegmentId) -> Ordering {
+        unimplemented!()
+    }
+
+    pub fn cmp_2(&self, left: StatementAddress, right: StatementAddress) -> Ordering {
+        let order = self.cmp(left.segment_id, right.segment_id);
+        (order, left.index).cmp(&(Ordering::Equal, right.index))
+    }
+
+    pub fn cmp_3(&self, left: TokenAddress, right: TokenAddress) -> Ordering {
+        let order = self.cmp_2(left.statement, right.statement);
+        (order, left.token_index).cmp(&(Ordering::Equal, right.token_index))
+    }
+}
+
+#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+pub struct StatementAddress {
+    pub segment_id: SegmentId,
+    pub index: StatementIndex,
+}
+
+#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+pub struct TokenAddress {
+    pub statement: StatementAddress,
+    pub token_index: TokenIndex,
+}
 
 #[derive(Copy,Clone)]
 pub struct GlobalRange {
@@ -45,34 +80,33 @@ pub struct GlobalRange {
     pub statement_end: StatementIndex, // or STMT_END_DATABASE
 }
 
+pub type Token = Vec<u8>;
+
 // TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
 pub struct GlobalDv {
     pub valid: GlobalRange,
-    pub vars: Vec<Vec<u8>>,
+    pub vars: Vec<Token>,
 }
 
-pub struct ConstantDef {
+#[derive(Eq,PartialEq,Copy,Clone,Debug)]
+pub enum SymbolType {
+    Variable,
+    Constant,
+    Label,
+}
+
+pub struct SymbolDef {
+    pub name: Token,
+    pub stype: SymbolType,
     pub valid: GlobalRange,
-    pub name: Vec<u8>,
     pub ordinal: TokenIndex,
-}
-
-pub struct VariableDef {
-    pub valid: GlobalRange,
-    pub name: Vec<u8>,
-    pub ordinal: TokenIndex,
-}
-
-pub struct LabelDef {
-    pub valid: GlobalRange,
-    pub name: Vec<u8>,
-    // start-1 is the statement in question
 }
 
 pub struct FloatDef {
     pub valid: GlobalRange,
-    pub name: Vec<u8>,
-    pub type_: Vec<u8>,
+    pub name: Token,
+    pub label: Token,
+    pub type_: Token,
 }
 
 /// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
@@ -86,10 +120,25 @@ pub struct Segment {
     pub next_file: Span,
     // crossed outputs
     pub global_dvs: Vec<GlobalDv>,
-    pub constants: Vec<ConstantDef>,
-    pub variables: Vec<VariableDef>,
-    pub labels: Vec<LabelDef>,
+    pub symbols: Vec<SymbolDef>,
     pub floats: Vec<FloatDef>,
+}
+
+impl Segment {
+    pub fn statement_iter(&self) -> StatementIter {
+        unimplemented!()
+    }
+}
+
+#[derive(Clone)]
+pub struct ParserResult {
+    segments: Vec<Option<Arc<Segment>>>
+}
+
+impl ParserResult {
+    pub fn get_segment(&self, id: SegmentId) -> &Segment {
+        self.segments[id.0 as usize].as_ref().unwrap()
+    }
 }
 
 #[derive(Debug,Clone,Eq,PartialEq)]
@@ -121,6 +170,10 @@ pub enum Diagnostic {
     UnclosedBeforeEof,
     ConstantNotTopLevel,
     EssentialNotTopLevel,
+    DuplicateLabel(StatementAddress),
+    SymbolDuplicatesLabel(TokenIndex, StatementAddress),
+    SymbolRedeclared(TokenIndex, TokenAddress),
+    VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
@@ -162,14 +215,76 @@ impl StatementType {
 
 #[derive(Clone,Debug)]
 pub struct Statement {
-    stype: StatementType,
+    pub stype: StatementType,
     span: Span,
     label: Span,
-    group: StatementIndex,
-    group_end: StatementIndex,
+    pub group: StatementIndex,
+    pub group_end: StatementIndex,
     math: Vec<Span>,
     proof: Vec<Span>,
-    diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Copy,Clone)]
+pub struct StatementRef<'a> {
+    pub segment: &'a Segment,
+    pub statement: &'a Statement,
+    pub index: StatementIndex,
+}
+
+impl<'a> StatementRef<'a> {
+    pub fn address(&self) -> StatementAddress {
+        StatementAddress { segment_id: self.segment.id, index: self.index }
+    }
+
+    pub fn label(&self) -> &[u8] {
+        self.statement.label.as_ref(&self.segment.buffer)
+    }
+
+    pub fn math_iter(&self) -> TokenIter {
+        TokenIter { slice_iter: self.statement.math.iter(), buffer: &self.segment.buffer, stmt_address: self.address(), index: 0 }
+    }
+}
+
+pub struct StatementIter<'a> {
+    slice_iter: slice::Iter<'a, Statement>,
+    segment: &'a Segment,
+    index: StatementIndex,
+}
+
+impl<'a> Iterator for StatementIter<'a> {
+    type Item = StatementRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unimplemented!()
+    }
+}
+
+pub struct TokenIter<'a> {
+    slice_iter: slice::Iter<'a, Span>,
+    buffer: &'a [u8],
+    stmt_address: StatementAddress,
+    index: TokenIndex,
+}
+
+#[derive(Copy,Clone)]
+pub struct TokenRef<'a> {
+    pub slice: &'a [u8],
+    pub address: TokenAddress,
+}
+
+impl<'a> TokenRef<'a> {
+    pub fn index(self) -> TokenIndex {
+        self.address.token_index
+    }
+}
+
+impl<'a> Iterator for TokenIter<'a> {
+    type Item = TokenRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unimplemented!()
+    }
 }
 
 #[derive(Default)]
@@ -544,8 +659,8 @@ impl<'a> Scanner<'a> {
     fn get_segment(&mut self) -> Segment {
         let mut seg = Segment {
             id: self.segment_id, statements: Vec::new(), next_file: Span::null(),
-            variables: Vec::new(), constants: Vec::new(), global_dvs: Vec::new(),
-            floats: Vec::new(), labels: Vec::new(), buffer: self.buffer_ref.clone(),
+            symbols: Vec::new(), global_dvs: Vec::new(),
+            floats: Vec::new(), buffer: self.buffer_ref.clone(),
         };
         let mut top_group = NO_STATEMENT;
         let end_diag;
@@ -604,6 +719,7 @@ impl<'a> Scanner<'a> {
     }
 }
 
+// TODO: filter out local $fv
 fn collect_definitions(seg: &mut Segment) {
     let buf: &[u8] = &seg.buffer;
     for (index, &ref stmt) in seg.statements.iter().enumerate() {
@@ -617,7 +733,8 @@ fn collect_definitions(seg: &mut Segment) {
         };
 
         if stmt.stype.takes_label() {
-            seg.labels.push(LabelDef {
+            seg.symbols.push(SymbolDef {
+                stype: SymbolType::Label, ordinal: 0,
                 valid: valid, name: stmt.label.as_ref(buf).to_owned()
             });
         }
@@ -628,7 +745,8 @@ fn collect_definitions(seg: &mut Segment) {
                     continue;
                 }
                 for (sindex, &span) in stmt.math.iter().enumerate() {
-                    seg.constants.push(ConstantDef {
+                    seg.symbols.push(SymbolDef {
+                        stype: SymbolType::Constant,
                         valid: valid, name: span.as_ref(buf).to_owned(),
                         ordinal: sindex as TokenIndex,
                     });
@@ -636,7 +754,8 @@ fn collect_definitions(seg: &mut Segment) {
             }
             Variable => {
                 for (sindex, &span) in stmt.math.iter().enumerate() {
-                    seg.variables.push(VariableDef {
+                    seg.symbols.push(SymbolDef {
+                        stype: SymbolType::Variable,
                         valid: valid, name: span.as_ref(buf).to_owned(),
                         ordinal: sindex as TokenIndex,
                     });
@@ -655,6 +774,7 @@ fn collect_definitions(seg: &mut Segment) {
                 seg.floats.push(FloatDef {
                     valid: valid,
                     type_: stmt.math[0].as_ref(buf).to_owned(),
+                    label: stmt.label.as_ref(buf).to_owned(),
                     name: stmt.math[1].as_ref(buf).to_owned(),
                 });
             }
