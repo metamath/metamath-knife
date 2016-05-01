@@ -1,26 +1,30 @@
 // TODO experiment with FNV hashers, etc.
 use std::collections::{HashMap, HashSet};
-use parser::{GlobalRange, Segment, SegmentId, StatementAddress, SymbolType, Token, TokenAddress, TokenIndex};
+use parser::{GlobalRange, Segment, SegmentId, SegmentRef, StatementAddress, SymbolType, Token, TokenAddress, TokenIndex};
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
 // pub struct Atom(u32);
 
 struct GlobalDvInfo {
-    valid: GlobalRange,
+    address: StatementAddress,
     vars: Vec<Token>,
+}
+
+struct LabelInfo {
+    address: StatementAddress,
 }
 
 struct SymbolInfo {
     stype: SymbolType,
-    valid: GlobalRange,
+    address: StatementAddress,
     ordinal: TokenIndex,
 }
 
 struct FloatInfo {
-    valid: GlobalRange,
+    address: StatementAddress,
     label: Token,
-    ttype: Token,
+    typecode: Token,
 }
 
 pub struct Nameset {
@@ -32,28 +36,31 @@ pub struct Nameset {
     float_types: HashMap<Token, Vec<FloatInfo>>,
 }
 
-pub fn add_parsed_segment(set: &mut Nameset, seg: &Segment) {
+pub fn add_parsed_segment(set: &mut Nameset, seg: SegmentRef) {
     if set.segments.contains(&seg.id) {
         return;
     }
 
     set.segments.insert(seg.id);
 
-    for &ref symdef in &seg.symbols {
+    for &ref symdef in &seg.segment.symbols {
         set.symbols.entry(symdef.name.clone()).or_insert(Vec::new()).push(SymbolInfo {
-           stype: symdef.stype, valid: symdef.valid, ordinal: symdef.ordinal,
+            address: StatementAddress { segment_id: seg.id, index: symdef.start },
+            stype: symdef.stype, ordinal: symdef.ordinal,
         });
     }
 
-    for &ref floatdef in &seg.floats {
+    for &ref floatdef in &seg.segment.floats {
         set.float_types.entry(floatdef.name.clone()).or_insert(Vec::new()).push(FloatInfo {
-           valid: floatdef.valid, label: floatdef.label.clone(), ttype: floatdef.type_.clone(),
+            address: StatementAddress { segment_id: seg.id, index: floatdef.start },
+            label: floatdef.label.clone(), typecode: floatdef.typecode.clone(),
         });
     }
 
-    for &ref dvdef in &seg.global_dvs {
+    for &ref dvdef in &seg.segment.global_dvs {
         set.dv_info.push(GlobalDvInfo {
-            valid: dvdef.valid, vars: dvdef.vars.clone()
+            address: StatementAddress { segment_id: seg.id, index: dvdef.start },
+            vars: dvdef.vars.clone()
         })
     }
 }

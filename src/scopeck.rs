@@ -1,7 +1,7 @@
 use nameck::NameReader;
 use nameck::Nameset;
 use parser::Diagnostic;
-use parser::Segment;
+use parser::SegmentRef;
 use parser::StatementAddress;
 use parser::StatementRef;
 use parser::StatementIndex;
@@ -311,7 +311,7 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
     }
 }
 
-pub fn scope_check(_names: &Nameset, seg: &Segment) {
+pub fn scope_check(_names: &Nameset, seg: SegmentRef) {
     let mut state: ScopeState = unimplemented!();
 
     for sref in seg.statement_iter() {

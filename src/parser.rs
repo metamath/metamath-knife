@@ -35,19 +35,65 @@ impl Span {
     }
 }
 
-// TODO don't default this, assign it properly
-#[derive(Copy,Clone,Debug,Eq,PartialEq,Default,Hash)]
+#[derive(Copy,Clone,Debug,Eq,PartialEq,Hash)]
 pub struct SegmentId(pub u32);
 pub type TokenIndex = i32;
 
+// This is an example of an "order-maintenance data structure", actually a very simple one.
+// We can plug in the Dietz & Sleator 1987 algorithm if this gets too slow.
 #[derive(Clone,Debug)]
 pub struct SegmentOrder {
-    next: SegmentId,
+    high_water: u32,
+    free_list: Vec<SegmentId>,
+    order: Vec<SegmentId>,
+    reverse: Vec<usize>,
 }
 
 impl SegmentOrder {
+    pub fn new() -> Self {
+        let mut n = SegmentOrder {
+            high_water: 1,
+            free_list: Vec::new(),
+            order: Vec::new(),
+            reverse: Vec::new()
+        };
+        n.alloc_id();
+        n.reindex();
+        n
+    }
+
+    pub fn start(&self) -> SegmentId { SegmentId(1) }
+
+    fn alloc_id(&mut self) -> SegmentId {
+        self.free_list.pop().unwrap_or_else(|| {
+            let index = self.high_water;
+            self.high_water += 1;
+            SegmentId(index)
+        })
+    }
+
+    fn reindex(&mut self) {
+        self.reverse = vec![0; self.high_water as usize];
+        for (ordinal, &id) in self.order.iter().enumerate() {
+            self.reverse[id.0 as usize] = ordinal;
+        }
+    }
+
+    pub fn free_id(&mut self, id: SegmentId) {
+        self.order.remove(self.reverse[id.0 as usize] as usize);
+        self.free_list.push(id);
+        self.reindex();
+    }
+
+    pub fn new_after(&mut self, after: SegmentId) -> SegmentId {
+        let id = self.alloc_id();
+        self.order.insert(self.reverse[after.0 as usize] as usize + 1, id);
+        self.reindex();
+        id
+    }
+
     pub fn cmp(&self, left: SegmentId, right: SegmentId) -> Ordering {
-        unimplemented!()
+        self.reverse[left.0 as usize].cmp(&self.reverse[right.0 as usize])
     }
 
     pub fn cmp_2(&self, left: StatementAddress, right: StatementAddress) -> Ordering {
@@ -84,7 +130,7 @@ pub type Token = Vec<u8>;
 
 // TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
 pub struct GlobalDv {
-    pub valid: GlobalRange,
+    pub start: StatementIndex,
     pub vars: Vec<Token>,
 }
 
@@ -92,28 +138,31 @@ pub struct GlobalDv {
 pub enum SymbolType {
     Variable,
     Constant,
-    Label,
+}
+
+pub struct LabelDef {
+    pub label: Token,
+    pub index: StatementIndex,
 }
 
 pub struct SymbolDef {
     pub name: Token,
     pub stype: SymbolType,
-    pub valid: GlobalRange,
+    pub start: StatementIndex,
     pub ordinal: TokenIndex,
 }
 
 pub struct FloatDef {
-    pub valid: GlobalRange,
+    pub start: StatementIndex,
     pub name: Token,
     pub label: Token,
-    pub type_: Token,
+    pub typecode: Token,
 }
 
 /// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
 /// the future have an "unpacked" segment which is used for active editing, as well as a "lazy" or
 /// "mmap" segment type for fast incremental startup.
 pub struct Segment {
-    pub id: SegmentId,
     pub buffer: BufferRef,
     // straight outputs
     pub statements: Vec<Statement>,
@@ -121,12 +170,17 @@ pub struct Segment {
     // crossed outputs
     pub global_dvs: Vec<GlobalDv>,
     pub symbols: Vec<SymbolDef>,
+    pub labels: Vec<LabelDef>,
     pub floats: Vec<FloatDef>,
 }
 
-impl Segment {
-    pub fn statement_iter(&self) -> StatementIter {
-        unimplemented!()
+impl<'a> SegmentRef<'a> {
+    pub fn statement_iter(self) -> StatementIter<'a> {
+        StatementIter {
+            slice_iter: self.segment.statements.iter(),
+            segment: self,
+            index: 0,
+        }
     }
 }
 
@@ -234,8 +288,14 @@ pub struct Statement {
 }
 
 #[derive(Copy,Clone)]
-pub struct StatementRef<'a> {
+pub struct SegmentRef<'a> {
     pub segment: &'a Segment,
+    pub id: SegmentId,
+}
+
+#[derive(Copy,Clone)]
+pub struct StatementRef<'a> {
+    pub segment: SegmentRef<'a>,
     pub statement: &'a Statement,
     pub index: StatementIndex,
 }
@@ -246,11 +306,11 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn label(&self) -> &[u8] {
-        self.statement.label.as_ref(&self.segment.buffer)
+        self.statement.label.as_ref(&self.segment.segment.buffer)
     }
 
     pub fn math_iter(&self) -> TokenIter {
-        TokenIter { slice_iter: self.statement.math.iter(), buffer: &self.segment.buffer, stmt_address: self.address(), index: 0 }
+        TokenIter { slice_iter: self.statement.math.iter(), buffer: &self.segment.segment.buffer, stmt_address: self.address(), index: 0 }
     }
 
     pub fn math_len(&self) -> TokenIndex {
@@ -259,7 +319,7 @@ impl<'a> StatementRef<'a> {
 
     pub fn math_at(&self, ix: TokenIndex) -> TokenRef {
         TokenRef {
-            slice: self.statement.math[ix as usize].as_ref(&self.segment.buffer),
+            slice: self.statement.math[ix as usize].as_ref(&self.segment.segment.buffer),
             address: TokenAddress {
                 statement: self.address(),
                 token_index: ix,
@@ -270,7 +330,7 @@ impl<'a> StatementRef<'a> {
 
 pub struct StatementIter<'a> {
     slice_iter: slice::Iter<'a, Statement>,
-    segment: &'a Segment,
+    segment: SegmentRef<'a>,
     index: StatementIndex,
 }
 
@@ -278,7 +338,15 @@ impl<'a> Iterator for StatementIter<'a> {
     type Item = StatementRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unimplemented!()
+        self.slice_iter.next().map(|st_ref| {
+            let index = self.index;
+            self.index += 1;
+            StatementRef {
+                segment: self.segment,
+                statement: st_ref,
+                index: index,
+            }
+        })
     }
 }
 
@@ -321,7 +389,6 @@ impl<'a> Iterator for TokenIter<'a> {
 
 #[derive(Default)]
 struct Scanner<'a> {
-    segment_id: SegmentId,
     buffer: &'a [u8],
     buffer_ref: BufferRef,
     position: FilePos,
@@ -690,8 +757,8 @@ impl<'a> Scanner<'a> {
 
     fn get_segment(&mut self) -> Segment {
         let mut seg = Segment {
-            id: self.segment_id, statements: Vec::new(), next_file: Span::null(),
-            symbols: Vec::new(), global_dvs: Vec::new(),
+            statements: Vec::new(), next_file: Span::null(),
+            symbols: Vec::new(), global_dvs: Vec::new(), labels: Vec::new(),
             floats: Vec::new(), buffer: self.buffer_ref.clone(),
         };
         let mut top_group = NO_STATEMENT;
@@ -757,35 +824,26 @@ impl<'a> Scanner<'a> {
     }
 }
 
-// TODO: filter out local $fv
 fn collect_definitions(seg: &mut Segment) {
     let buf: &[u8] = &seg.buffer;
     for (index, &ref stmt) in seg.statements.iter().enumerate() {
-        let scope_end = if stmt.group == NO_STATEMENT {
-            STMT_END_DATABASE
-        } else {
-            seg.statements[stmt.group as usize].group_end
-        };
-        let valid = GlobalRange {
-            segment: seg.id, statement_start: index as StatementIndex, statement_end: scope_end,
-        };
-
+        let index = index as StatementIndex;
         if stmt.stype.takes_label() {
-            seg.symbols.push(SymbolDef {
-                stype: SymbolType::Label, ordinal: 0,
-                valid: valid, name: stmt.label.as_ref(buf).to_owned()
+            seg.labels.push(LabelDef {
+                index: index, label: stmt.label.as_ref(buf).to_owned()
             });
+        }
+
+        if stmt.group_end != NO_STATEMENT {
+            continue;
         }
 
         match stmt.stype {
             Constant => {
-                if scope_end != STMT_END_DATABASE {
-                    continue;
-                }
                 for (sindex, &span) in stmt.math.iter().enumerate() {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Constant,
-                        valid: valid, name: span.as_ref(buf).to_owned(),
+                        start: index, name: span.as_ref(buf).to_owned(),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -794,24 +852,21 @@ fn collect_definitions(seg: &mut Segment) {
                 for (sindex, &span) in stmt.math.iter().enumerate() {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Variable,
-                        valid: valid, name: span.as_ref(buf).to_owned(),
+                        start: index, name: span.as_ref(buf).to_owned(),
                         ordinal: sindex as TokenIndex,
                     });
                 }
             }
             Disjoint => {
-                if scope_end != STMT_END_DATABASE {
-                    continue;
-                }
                 seg.global_dvs.push(GlobalDv {
-                    valid: valid,
+                    start: index,
                     vars: stmt.math.iter().map(|sp| sp.as_ref(buf).to_owned()).collect(),
                 });
             }
             Floating => {
                 seg.floats.push(FloatDef {
-                    valid: valid,
-                    type_: stmt.math[0].as_ref(buf).to_owned(),
+                    start: index,
+                    typecode: stmt.math[0].as_ref(buf).to_owned(),
                     label: stmt.label.as_ref(buf).to_owned(),
                     name: stmt.math[1].as_ref(buf).to_owned(),
                 });
