@@ -2,6 +2,7 @@ use nameck::NameReader;
 use nameck::Nameset;
 use parser::Diagnostic;
 use parser::Segment;
+use parser::StatementAddress;
 use parser::StatementRef;
 use parser::StatementIndex;
 use parser::StatementType;
@@ -33,9 +34,18 @@ use std::cmp::Ordering;
 // 3. Constant/nested variable collisions are special because they don't involve scope overlaps.
 // The constant wins, the variable must notify.
 
+#[derive(Clone,Copy)]
 struct LocalVarInfo {
     start: TokenAddress,
     end: StatementIndex,
+}
+
+#[derive(Clone,Debug)]
+struct LocalFloatInfo {
+    start: StatementAddress,
+    end: StatementIndex,
+    typecode: Token,
+    label: Token,
 }
 
 struct ScopeState<'a> {
@@ -44,6 +54,7 @@ struct ScopeState<'a> {
     order: &'a SegmentOrder,
     gnames: NameReader<'a>,
     local_vars: HashMap<Token, Vec<LocalVarInfo>>,
+    local_floats: HashMap<Token, Vec<LocalFloatInfo>>,
 }
 
 fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic) {
@@ -61,14 +72,76 @@ fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> bool {
     true
 }
 
-fn check_eap(state: &mut ScopeState, sref: StatementRef) {
+fn check_math_symbol(state: &mut ScopeState, sref: StatementRef, tref: TokenRef) -> Option<SymbolType> {
+    // active global definition?
+    if let Some(sdef) = state.gnames.lookup_symbol(tref.slice) {
+        if state.order.cmp_3(sdef.address, tref.address) == Ordering::Less {
+            return Some(sdef.stype);
+        }
+    }
+
+    // active local definition?
+    if let Some(local_slot) = state.local_vars.get(tref.slice).and_then(|slot| slot.last()) {
+        if check_endpoint(sref.index, local_slot.end) {
+            return Some(SymbolType::Variable);
+        }
+    }
+
+    push_diagnostic(state, sref.index, Diagnostic::NotActiveSymbol(tref.index()));
+    return None
+}
+
+fn lookup_float(state: &mut ScopeState, sref: StatementRef, tref: TokenRef) -> Option<LocalFloatInfo> {
+    // active global definition?
+    if let Some(fdef) = state.gnames.lookup_float(tref.slice) {
+        if state.order.cmp_2(fdef.address, sref.address()) == Ordering::Less {
+            return Some(LocalFloatInfo { start: fdef.address, typecode: fdef.typecode, label: fdef.label.clone(), end: NO_STATEMENT });
+        }
+    }
+
+    // active local definition?
+    if let Some(local_slot) = state.local_floats.get(tref.slice).and_then(|slot| slot.last()) {
+        if check_endpoint(sref.index, local_slot.end) {
+            return Some(local_slot.clone()); // TODO shouldn't allocate
+        }
+    }
+
+    None
+}
+
+fn check_eap(state: &mut ScopeState, sref: StatementRef) -> bool {
     // does the math string consist of active tokens, where the first is a constant and all variables have typecodes in scope?
-    unimplemented!()
+    let mut bad = false;
+
+    for tref in sref.math_iter() {
+        match check_math_symbol(state, sref, tref) {
+            None => {
+                bad = true;
+            }
+            Some(SymbolType::Constant) => {
+            }
+            _ => {
+                if tref.index() == 0 {
+                    push_diagnostic(state, sref.index, Diagnostic::ExprNotConstantPrefix(0));
+                    bad = true;
+                } else if lookup_float(state, sref, tref).is_none() {
+                    push_diagnostic(state, sref.index, Diagnostic::VariableMissingFloat(tref.index()));
+                    bad = true;
+                }
+            }
+        }
+    }
+
+    !bad
 }
 
 fn scope_check_axiom(state: &mut ScopeState, sref: StatementRef) {
-    check_label_dup(state, sref);
-    check_eap(state, sref);
+    if !check_label_dup(state, sref) {
+        return;
+    }
+    if !check_eap(state, sref) {
+        return;
+    }
     // TODO spit out a frame
 }
 
@@ -91,6 +164,92 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
     }
 }
 
+fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
+    let mut used = HashMap::new();
+    let mut bad = false;
+
+    for tref in sref.math_iter() {
+        match check_math_symbol(state, sref, tref) {
+            None => {
+                bad = true;
+            }
+            Some(SymbolType::Constant) => {
+                push_diagnostic(state, sref.index, Diagnostic::DjNotVariable(tref.index()));
+                bad = true;
+            }
+            _ => {
+                if let Some(&previx) = used.get(tref.slice) {
+                    push_diagnostic(state, sref.index, Diagnostic::DjRepeatedVariable(tref.index(), previx));
+                    bad = true;
+                    continue;
+                }
+
+                used.insert(tref.slice, tref.index());
+            }
+        }
+    }
+
+    if bad {
+        return;
+    }
+
+    // TODO: record the dv somewhere it can be used for frame-building
+}
+
+fn scope_check_essential(state: &mut ScopeState, sref: StatementRef) {
+    if !check_label_dup(state, sref) {
+        return;
+    }
+    if !check_eap(state, sref) {
+        return;
+    }
+    // TODO spit out a frame
+}
+
+fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
+    let mut bad = false;
+    assert!(sref.math_len() == 2);
+    let const_tok = sref.math_at(0);
+    let var_tok = sref.math_at(1);
+
+    match check_math_symbol(state, sref, const_tok) {
+        None => {
+            bad = true;
+        }
+        Some(SymbolType::Constant) => {}
+        _ => {
+            push_diagnostic(state, sref.index, Diagnostic::FloatNotConstant(0));
+            bad = true;
+        }
+    }
+
+    match check_math_symbol(state, sref, var_tok) {
+        None => {
+            bad = true;
+        }
+        Some(SymbolType::Variable) => {}
+        _ => {
+            push_diagnostic(state, sref.index, Diagnostic::FloatNotVariable(1));
+            bad = true;
+        }
+    }
+
+    if bad {
+        return;
+    }
+
+    if let Some(prev) = lookup_float(state, sref, sref.math_at(1)) {
+        push_diagnostic(state, sref.index, Diagnostic::FloatRedeclared(prev.start));
+        return;
+    }
+
+    // record the $f
+
+    state.local_floats.entry(var_tok.slice.to_owned()).or_insert(Vec::new()).push(LocalFloatInfo {
+        typecode: const_tok.slice.to_owned(), label: sref.label().to_owned(), start: sref.address(), end: sref.statement.group_end
+    });
+}
+
 fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
     end == NO_STATEMENT || cur < end
 }
@@ -107,6 +266,16 @@ fn maybe_add_local_var(state: &mut ScopeState, sref: StatementRef, tokref: Token
 
     lv_slot.push(LocalVarInfo { start: tokref.address, end: sref.statement.group_end });
     None
+}
+
+fn scope_check_provable(state: &mut ScopeState, sref: StatementRef) {
+    if !check_label_dup(state, sref) {
+        return;
+    }
+    if !check_eap(state, sref) {
+        return;
+    }
+    // TODO spit out a frame
 }
 
 fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
@@ -149,25 +318,10 @@ pub fn scope_check(_names: &Nameset, seg: &Segment) {
         match sref.statement.stype {
             StatementType::Axiom => scope_check_axiom(&mut state, sref),
             StatementType::Constant => scope_check_constant(&mut state, sref),
-            StatementType::Disjoint => {
-                // check math string, including $f (?)
-            }
-            StatementType::Essential => {
-                check_label_dup(&mut state, sref);
-                check_eap(&mut state, sref);
-                // push on hyp stack
-            }
-            StatementType::Floating => {
-                check_label_dup(&mut state, sref);
-                // check $f duplication
-                // check variables active in scope
-                // push on hyp stack
-            }
-            StatementType::Provable => {
-                check_label_dup(&mut state, sref);
-                check_eap(&mut state, sref);
-                // spit out a frame
-            }
+            StatementType::Disjoint => scope_check_dv(&mut state, sref),
+            StatementType::Essential => scope_check_essential(&mut state, sref),
+            StatementType::Floating => scope_check_float(&mut state, sref),
+            StatementType::Provable => scope_check_provable(&mut state, sref),
             StatementType::Variable => scope_check_variable(&mut state, sref),
             _ => {}
         }

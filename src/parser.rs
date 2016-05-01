@@ -174,6 +174,14 @@ pub enum Diagnostic {
     SymbolDuplicatesLabel(TokenIndex, StatementAddress),
     SymbolRedeclared(TokenIndex, TokenAddress),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
+    NotActiveSymbol(TokenIndex),
+    DjNotVariable(TokenIndex),
+    DjRepeatedVariable(TokenIndex, TokenIndex),
+    ExprNotConstantPrefix(TokenIndex),
+    FloatNotConstant(TokenIndex),
+    FloatNotVariable(TokenIndex),
+    FloatRedeclared(StatementAddress),
+    VariableMissingFloat(TokenIndex),
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
@@ -244,6 +252,20 @@ impl<'a> StatementRef<'a> {
     pub fn math_iter(&self) -> TokenIter {
         TokenIter { slice_iter: self.statement.math.iter(), buffer: &self.segment.buffer, stmt_address: self.address(), index: 0 }
     }
+
+    pub fn math_len(&self) -> TokenIndex {
+        self.statement.math.len() as TokenIndex
+    }
+
+    pub fn math_at(&self, ix: TokenIndex) -> TokenRef {
+        TokenRef {
+            slice: self.statement.math[ix as usize].as_ref(&self.segment.buffer),
+            address: TokenAddress {
+                statement: self.address(),
+                token_index: ix,
+            }
+        }
+    }
 }
 
 pub struct StatementIter<'a> {
@@ -283,7 +305,17 @@ impl<'a> Iterator for TokenIter<'a> {
     type Item = TokenRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unimplemented!()
+        self.slice_iter.next().map(|spanref| {
+            let index = self.index;
+            self.index += 1;
+            TokenRef {
+                slice: spanref.as_ref(self.buffer),
+                address: TokenAddress {
+                    statement: self.stmt_address,
+                    token_index: index,
+                }
+            }
+        })
     }
 }
 

@@ -97,7 +97,7 @@ impl<'a> NameReader<'a> {
     }
 
     // TODO: consider merging this with lookup_symbol
-    pub fn lookup_float(&mut self, _symbol: &[u8]) -> Option<StatementAddress> {
+    pub fn lookup_float(&mut self, _symbol: &[u8]) -> Option<LookupFloat> {
         unimplemented!()
     }
 }
