@@ -8,8 +8,7 @@ pub type BufferRef = Arc<Vec<u8>>;
 /// change me if you want to parse files > 4GB
 pub type FilePos = u32;
 pub type StatementIndex = i32;
-pub const NO_STATEMENT: StatementIndex = -1;
-pub const STMT_END_DATABASE: StatementIndex = -2;
+pub const NO_STATEMENT: StatementIndex = -1; // TODO: evaluate just using Option
 
 #[derive(Copy,Clone,Eq,PartialEq,Debug)]
 pub struct Span {
@@ -123,7 +122,7 @@ pub struct TokenAddress {
 pub struct GlobalRange {
     pub segment: SegmentId,
     pub statement_start: StatementIndex,
-    pub statement_end: StatementIndex, // or STMT_END_DATABASE
+    pub statement_end: StatementIndex, // or NO_STATEMENT
 }
 
 pub type Token = Vec<u8>;
@@ -303,6 +302,10 @@ pub struct StatementRef<'a> {
 impl<'a> StatementRef<'a> {
     pub fn address(&self) -> StatementAddress {
         StatementAddress { segment_id: self.segment.id, index: self.index }
+    }
+
+    pub fn scope_range(&self) -> GlobalRange {
+        GlobalRange { segment: self.segment.id, statement_start: self.index, statement_end: self.statement.group_end }
     }
 
     pub fn label(&self) -> &[u8] {

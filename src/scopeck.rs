@@ -1,6 +1,7 @@
 use nameck::NameReader;
 use nameck::Nameset;
 use parser::Diagnostic;
+use parser::GlobalRange;
 use parser::SegmentRef;
 use parser::StatementAddress;
 use parser::StatementRef;
@@ -48,6 +49,48 @@ struct LocalFloatInfo {
     label: Token,
 }
 
+#[derive(Clone,Debug)]
+struct LocalDvInfo {
+    address: StatementAddress,
+    end: StatementIndex,
+    vars: Vec<Token>,
+}
+
+#[derive(Clone,Debug)]
+struct LocalEssentialInfo {
+    address: StatementAddress,
+    end: StatementIndex,
+    label: Token,
+    string: Vec<Token>,
+}
+
+pub type MandVarIndex = usize;
+
+pub enum ExprFragment {
+    Var(MandVarIndex),
+    Constant(Vec<u8>),
+}
+
+pub struct Hyp {
+    pub address: StatementAddress,
+    pub label: Token,
+    pub is_float: bool,
+    pub typecode: Token,
+    pub expr: Vec<ExprFragment>,
+}
+
+pub struct Frame {
+    pub stype: StatementType,
+    pub valid: GlobalRange,
+    pub hypotheses: Vec<Hyp>,
+    pub target_code: Token,
+    pub target_expr: Vec<ExprFragment>,
+    pub target_vars: Vec<MandVarIndex>,
+    pub mandatory_vars: Vec<Token>,
+    pub mandatory_dv: Vec<(MandVarIndex, MandVarIndex)>,
+    pub optional_dv: Vec<(Token, Token)>,
+}
+
 struct ScopeState<'a> {
     diagnostics: HashMap<StatementIndex, Vec<Diagnostic>>,
     // segment: &'a Segment,
@@ -55,6 +98,9 @@ struct ScopeState<'a> {
     gnames: NameReader<'a>,
     local_vars: HashMap<Token, Vec<LocalVarInfo>>,
     local_floats: HashMap<Token, Vec<LocalFloatInfo>>,
+    local_dv: Vec<LocalDvInfo>,
+    local_essen: Vec<LocalEssentialInfo>,
+    frames_out: Vec<Frame>,
 }
 
 fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic) {
@@ -135,6 +181,35 @@ fn check_eap(state: &mut ScopeState, sref: StatementRef) -> bool {
     !bad
 }
 
+fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef) {
+    // gets data for $e and $f statements; these are not frames but they are referenced by proofs using a frame-like structure
+    let mut mathi = sref.math_iter();
+    let typecode_tr = mathi.next().expect("parser checks $e token count");
+    let typecode = typecode_tr.slice.to_owned();
+    let expr : Vec<_> = mathi.map(|tref| {
+        ExprFragment::Constant(tref.slice.to_owned())
+    }).collect();
+
+    state.frames_out.push(Frame {
+       stype: sref.statement.stype,
+       valid: sref.scope_range(),
+       hypotheses: Vec::new(),
+       target_code: typecode,
+       target_expr: expr,
+       target_vars: Vec::new(),
+       mandatory_vars: Vec::new(),
+       mandatory_dv: Vec::new(),
+       optional_dv: Vec::new(),
+    });
+}
+
+fn construct_full_frame(state: &mut ScopeState, sref: StatementRef) {
+    // collect $e and $f in scope
+    // collect mandatory variables
+    // generate hypothesis fragments
+    // generate result fragments
+}
+
 fn scope_check_axiom(state: &mut ScopeState, sref: StatementRef) {
     if !check_label_dup(state, sref) {
         return;
@@ -167,6 +242,7 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
 fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
     let mut used = HashMap::new();
     let mut bad = false;
+    let mut vars = Vec::new();
 
     for tref in sref.math_iter() {
         match check_math_symbol(state, sref, tref) {
@@ -185,6 +261,7 @@ fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
                 }
 
                 used.insert(tref.slice, tref.index());
+                vars.push(tref.slice.to_owned());
             }
         }
     }
@@ -193,7 +270,9 @@ fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
         return;
     }
 
-    // TODO: record the dv somewhere it can be used for frame-building
+    state.local_dv.push(LocalDvInfo {
+        address: sref.address(), end: sref.statement.group_end, vars: vars,
+    })
 }
 
 fn scope_check_essential(state: &mut ScopeState, sref: StatementRef) {
@@ -203,7 +282,7 @@ fn scope_check_essential(state: &mut ScopeState, sref: StatementRef) {
     if !check_eap(state, sref) {
         return;
     }
-    // TODO spit out a frame
+    construct_stub_frame(state, sref);
 }
 
 fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
@@ -244,10 +323,13 @@ fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
     }
 
     // record the $f
+    if sref.statement.group_end != NO_STATEMENT {
+        state.local_floats.entry(var_tok.slice.to_owned()).or_insert(Vec::new()).push(LocalFloatInfo {
+            typecode: const_tok.slice.to_owned(), label: sref.label().to_owned(), start: sref.address(), end: sref.statement.group_end
+        });
+    }
 
-    state.local_floats.entry(var_tok.slice.to_owned()).or_insert(Vec::new()).push(LocalFloatInfo {
-        typecode: const_tok.slice.to_owned(), label: sref.label().to_owned(), start: sref.address(), end: sref.statement.group_end
-    });
+    construct_stub_frame(state, sref);
 }
 
 fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
