@@ -112,17 +112,22 @@ pub struct StatementAddress {
     pub index: StatementIndex,
 }
 
+impl StatementAddress {
+    pub fn unbounded_range(self) -> GlobalRange {
+        GlobalRange { start: self, end: NO_STATEMENT }
+    }
+}
+
 #[derive(Copy,Clone,Eq,PartialEq,Debug)]
 pub struct TokenAddress {
     pub statement: StatementAddress,
     pub token_index: TokenIndex,
 }
 
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone,Debug)]
 pub struct GlobalRange {
-    pub segment: SegmentId,
-    pub statement_start: StatementIndex,
-    pub statement_end: StatementIndex, // or NO_STATEMENT
+    pub start: StatementAddress,
+    pub end: StatementIndex, // or NO_STATEMENT
 }
 
 pub type Token = Vec<u8>;
@@ -305,7 +310,7 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn scope_range(&self) -> GlobalRange {
-        GlobalRange { segment: self.segment.id, statement_start: self.index, statement_end: self.statement.group_end }
+        GlobalRange { start: self.address(), end: self.statement.group_end }
     }
 
     pub fn label(&self) -> &[u8] {

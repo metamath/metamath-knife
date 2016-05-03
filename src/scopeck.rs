@@ -43,23 +43,20 @@ struct LocalVarInfo {
 
 #[derive(Clone,Debug)]
 struct LocalFloatInfo {
-    start: StatementAddress,
-    end: StatementIndex,
+    valid: GlobalRange,
     typecode: Token,
     label: Token,
 }
 
 #[derive(Clone,Debug)]
 struct LocalDvInfo {
-    address: StatementAddress,
-    end: StatementIndex,
+    valid: GlobalRange,
     vars: Vec<Token>,
 }
 
 #[derive(Clone,Debug)]
 struct LocalEssentialInfo {
-    address: StatementAddress,
-    end: StatementIndex,
+    valid: GlobalRange,
     label: Token,
     string: Vec<Token>,
 }
@@ -141,13 +138,13 @@ fn lookup_float(state: &mut ScopeState, sref: StatementRef, tref: TokenRef) -> O
     // active global definition?
     if let Some(fdef) = state.gnames.lookup_float(tref.slice) {
         if state.order.cmp_2(fdef.address, sref.address()) == Ordering::Less {
-            return Some(LocalFloatInfo { start: fdef.address, typecode: fdef.typecode, label: fdef.label.clone(), end: NO_STATEMENT });
+            return Some(LocalFloatInfo { valid: fdef.address.unbounded_range(), typecode: fdef.typecode, label: fdef.label.clone() });
         }
     }
 
     // active local definition?
     if let Some(local_slot) = state.local_floats.get(tref.slice).and_then(|slot| slot.last()) {
-        if check_endpoint(sref.index, local_slot.end) {
+        if check_endpoint(sref.index, local_slot.valid.end) {
             return Some(local_slot.clone()); // TODO shouldn't allocate
         }
     }
@@ -270,9 +267,7 @@ fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
         return;
     }
 
-    state.local_dv.push(LocalDvInfo {
-        address: sref.address(), end: sref.statement.group_end, vars: vars,
-    })
+    state.local_dv.push(LocalDvInfo { valid: sref.scope_range(), vars: vars });
 }
 
 fn scope_check_essential(state: &mut ScopeState, sref: StatementRef) {
@@ -282,7 +277,12 @@ fn scope_check_essential(state: &mut ScopeState, sref: StatementRef) {
     if !check_eap(state, sref) {
         return;
     }
+
     construct_stub_frame(state, sref);
+    state.local_essen.push(LocalEssentialInfo {
+        valid: sref.scope_range(), label: sref.label().to_owned(),
+        string: sref.math_iter().map(|t| t.slice.to_owned()).collect(),
+    });
 }
 
 fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
@@ -318,14 +318,14 @@ fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
     }
 
     if let Some(prev) = lookup_float(state, sref, sref.math_at(1)) {
-        push_diagnostic(state, sref.index, Diagnostic::FloatRedeclared(prev.start));
+        push_diagnostic(state, sref.index, Diagnostic::FloatRedeclared(prev.valid.start));
         return;
     }
 
     // record the $f
     if sref.statement.group_end != NO_STATEMENT {
         state.local_floats.entry(var_tok.slice.to_owned()).or_insert(Vec::new()).push(LocalFloatInfo {
-            typecode: const_tok.slice.to_owned(), label: sref.label().to_owned(), start: sref.address(), end: sref.statement.group_end
+            typecode: const_tok.slice.to_owned(), label: sref.label().to_owned(), valid: sref.scope_range()
         });
     }
 
