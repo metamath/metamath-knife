@@ -1,6 +1,6 @@
 // TODO experiment with FNV hashers, etc.
 use std::collections::{HashMap, HashSet};
-use parser::{GlobalRange, Segment, SegmentId, SegmentRef, StatementAddress, SymbolType, Token, TokenAddress, TokenIndex};
+use parser::{SegmentId, SegmentRef, StatementAddress, SymbolType, Token, TokenAddress, TokenIndex, TokenPtr};
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
@@ -83,10 +83,15 @@ pub struct LookupSymbol {
 }
 
 // TODO without allocating
-pub struct LookupFloat {
+pub struct LookupFloat<'a> {
     pub address: StatementAddress,
-    pub label: Token,
-    pub typecode: Token,
+    pub label: TokenPtr<'a>,
+    pub typecode: TokenPtr<'a>,
+}
+
+pub struct LookupGlobalDv<'a> {
+    pub address: StatementAddress,
+    pub vars: &'a [TokenPtr<'a>],
 }
 
 impl<'a> NameReader<'a> {
@@ -104,7 +109,11 @@ impl<'a> NameReader<'a> {
     }
 
     // TODO: consider merging this with lookup_symbol
-    pub fn lookup_float(&mut self, _symbol: &[u8]) -> Option<LookupFloat> {
+    pub fn lookup_float(&mut self, _symbol: &[u8]) -> Option<LookupFloat<'a>> {
+        unimplemented!()
+    }
+
+    pub fn lookup_global_dv(&mut self) -> &[LookupGlobalDv] {
         unimplemented!()
     }
 }

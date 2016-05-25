@@ -131,6 +131,7 @@ pub struct GlobalRange {
 }
 
 pub type Token = Vec<u8>;
+pub type TokenPtr<'a> = &'a [u8];
 
 // TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
 pub struct GlobalDv {
@@ -313,11 +314,11 @@ impl<'a> StatementRef<'a> {
         GlobalRange { start: self.address(), end: self.statement.group_end }
     }
 
-    pub fn label(&self) -> &[u8] {
+    pub fn label(&self) -> &'a [u8] {
         self.statement.label.as_ref(&self.segment.segment.buffer)
     }
 
-    pub fn math_iter(&self) -> TokenIter {
+    pub fn math_iter(&self) -> TokenIter<'a> {
         TokenIter { slice_iter: self.statement.math.iter(), buffer: &self.segment.segment.buffer, stmt_address: self.address(), index: 0 }
     }
 
@@ -325,7 +326,7 @@ impl<'a> StatementRef<'a> {
         self.statement.math.len() as TokenIndex
     }
 
-    pub fn math_at(&self, ix: TokenIndex) -> TokenRef {
+    pub fn math_at(&self, ix: TokenIndex) -> TokenRef<'a> {
         TokenRef {
             slice: self.statement.math[ix as usize].as_ref(&self.segment.segment.buffer),
             address: TokenAddress {

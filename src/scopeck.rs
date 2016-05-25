@@ -11,10 +11,13 @@ use parser::SymbolType;
 use parser::SegmentOrder;
 use parser::Token;
 use parser::TokenAddress;
+use parser::TokenPtr;
 use parser::TokenRef;
 use parser::NO_STATEMENT;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::cmp::Ordering;
+use std::mem;
 
 // This module calculates 3 things which are related only by the fact that they can be done
 // at the same time:
@@ -41,48 +44,61 @@ struct LocalVarInfo {
     end: StatementIndex,
 }
 
-#[derive(Clone,Debug)]
-struct LocalFloatInfo {
+#[derive(Copy,Clone,Debug)]
+struct LocalFloatInfo<'a> {
     valid: GlobalRange,
-    typecode: Token,
-    label: Token,
+    typecode: TokenPtr<'a>,
+    label: TokenPtr<'a>,
+}
+
+#[derive(Copy,Clone,Debug)]
+enum CheckedToken<'a> {
+    Const(TokenPtr<'a>),
+    Var(TokenPtr<'a>, LocalFloatInfo<'a>),
 }
 
 #[derive(Clone,Debug)]
-struct LocalDvInfo {
+struct LocalDvInfo<'a> {
     valid: GlobalRange,
-    vars: Vec<Token>,
+    vars: Vec<TokenPtr<'a>>,
 }
 
 #[derive(Clone,Debug)]
-struct LocalEssentialInfo {
+struct LocalEssentialInfo<'a> {
     valid: GlobalRange,
-    label: Token,
-    string: Vec<Token>,
+    label: TokenPtr<'a>,
+    string: Vec<CheckedToken<'a>>,
 }
 
 pub type MandVarIndex = usize;
 
+#[derive(Clone,Debug)]
 pub enum ExprFragment {
     Var(MandVarIndex),
     Constant(Vec<u8>),
 }
 
+#[derive(Clone,Debug)]
+pub struct VerifyExpr {
+    pub typecode: Token,
+    pub tail: Vec<ExprFragment>,
+}
+
+#[derive(Clone,Debug)]
 pub struct Hyp {
     pub address: StatementAddress,
     pub label: Token,
     pub is_float: bool,
-    pub typecode: Token,
-    pub expr: Vec<ExprFragment>,
+    pub variable_index: MandVarIndex,
+    pub expr: VerifyExpr,
 }
 
+#[derive(Clone,Debug)]
 pub struct Frame {
     pub stype: StatementType,
     pub valid: GlobalRange,
     pub hypotheses: Vec<Hyp>,
-    pub target_code: Token,
-    pub target_expr: Vec<ExprFragment>,
-    pub target_vars: Vec<MandVarIndex>,
+    pub target: VerifyExpr,
     pub mandatory_vars: Vec<Token>,
     pub mandatory_dv: Vec<(MandVarIndex, MandVarIndex)>,
     pub optional_dv: Vec<(Token, Token)>,
@@ -94,9 +110,9 @@ struct ScopeState<'a> {
     order: &'a SegmentOrder,
     gnames: NameReader<'a>,
     local_vars: HashMap<Token, Vec<LocalVarInfo>>,
-    local_floats: HashMap<Token, Vec<LocalFloatInfo>>,
-    local_dv: Vec<LocalDvInfo>,
-    local_essen: Vec<LocalEssentialInfo>,
+    local_floats: HashMap<Token, Vec<LocalFloatInfo<'a>>>,
+    local_dv: Vec<LocalDvInfo<'a>>,
+    local_essen: Vec<LocalEssentialInfo<'a>>,
     frames_out: Vec<Frame>,
 }
 
@@ -134,27 +150,28 @@ fn check_math_symbol(state: &mut ScopeState, sref: StatementRef, tref: TokenRef)
     return None
 }
 
-fn lookup_float(state: &mut ScopeState, sref: StatementRef, tref: TokenRef) -> Option<LocalFloatInfo> {
+fn lookup_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>, tref: TokenRef<'a>) -> Option<LocalFloatInfo<'a>> {
     // active global definition?
     if let Some(fdef) = state.gnames.lookup_float(tref.slice) {
         if state.order.cmp_2(fdef.address, sref.address()) == Ordering::Less {
-            return Some(LocalFloatInfo { valid: fdef.address.unbounded_range(), typecode: fdef.typecode, label: fdef.label.clone() });
+            return Some(LocalFloatInfo { valid: fdef.address.unbounded_range(), typecode: &fdef.typecode, label: &fdef.label });
         }
     }
 
     // active local definition?
     if let Some(local_slot) = state.local_floats.get(tref.slice).and_then(|slot| slot.last()) {
         if check_endpoint(sref.index, local_slot.valid.end) {
-            return Some(local_slot.clone()); // TODO shouldn't allocate
+            return Some(*local_slot);
         }
     }
 
     None
 }
 
-fn check_eap(state: &mut ScopeState, sref: StatementRef) -> bool {
+fn check_eap<'a,'b>(state: &'b mut ScopeState<'a>, sref: StatementRef<'a>) -> Option<Vec<CheckedToken<'a>>> {
     // does the math string consist of active tokens, where the first is a constant and all variables have typecodes in scope?
     let mut bad = false;
+    let mut out = Vec::new();
 
     for tref in sref.math_iter() {
         match check_math_symbol(state, sref, tref) {
@@ -162,20 +179,28 @@ fn check_eap(state: &mut ScopeState, sref: StatementRef) -> bool {
                 bad = true;
             }
             Some(SymbolType::Constant) => {
+                out.push(CheckedToken::Const(tref.slice));
             }
-            _ => {
+            Some(SymbolType::Variable) => {
                 if tref.index() == 0 {
                     push_diagnostic(state, sref.index, Diagnostic::ExprNotConstantPrefix(0));
                     bad = true;
-                } else if lookup_float(state, sref, tref).is_none() {
-                    push_diagnostic(state, sref.index, Diagnostic::VariableMissingFloat(tref.index()));
-                    bad = true;
+                } else {
+                    match lookup_float(state, sref, tref) {
+                        None => {
+                            push_diagnostic(state, sref.index, Diagnostic::VariableMissingFloat(tref.index()));
+                            bad = true;
+                        }
+                        Some(lfi) => {
+                            out.push(CheckedToken::Var(tref.slice, lfi))
+                        }
+                    }
                 }
             }
         }
     }
 
-    !bad
+    if bad { None } else { Some(out) }
 }
 
 fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef) {
@@ -191,30 +216,142 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef) {
        stype: sref.statement.stype,
        valid: sref.scope_range(),
        hypotheses: Vec::new(),
-       target_code: typecode,
-       target_expr: expr,
-       target_vars: Vec::new(),
+       target: VerifyExpr {
+           typecode: typecode,
+           tail: expr,
+       },
        mandatory_vars: Vec::new(),
        mandatory_dv: Vec::new(),
        optional_dv: Vec::new(),
     });
 }
 
-fn construct_full_frame(state: &mut ScopeState, sref: StatementRef) {
-    // collect $e and $f in scope
-    // collect mandatory variables
-    // generate hypothesis fragments
-    // generate result fragments
+struct InchoateFrame<'a> {
+    variables: HashMap<TokenPtr<'a>, (MandVarIndex, LocalFloatInfo<'a>)>,
+    var_list: Vec<Token>,
+    mandatory_dv: Vec<(MandVarIndex, MandVarIndex)>,
+    optional_dv: Vec<(Token, Token)>,
 }
 
-fn scope_check_axiom(state: &mut ScopeState, sref: StatementRef) {
+fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]) -> VerifyExpr {
+    let mut iter = expr.iter();
+    let mut head = match iter.next().expect("parser checks $eap token count") {
+        &CheckedToken::Const(tptr) => tptr,
+        _ => unreachable!(),
+    };
+    let mut open_const = Vec::new();
+    let mut tail = Vec::new();
+
+    while let Some(ctok) = iter.next() {
+        match *ctok {
+            CheckedToken::Const(tref) => {
+                open_const.extend_from_slice(tref);
+                open_const.push(b' ');
+            }
+            CheckedToken::Var(tref, lfi) => {
+                if !open_const.is_empty() {
+                    tail.push(ExprFragment::Constant(mem::replace(&mut open_const, Vec::new())));
+                }
+
+                let index = match iframe.variables.get(&tref).map(|&(x,_)| x) {
+                    Some(mvarindex) => mvarindex,
+                    None => {
+                        let index = iframe.variables.len();
+                        iframe.var_list.push(tref.to_owned());
+                        iframe.variables.insert(tref, (index, lfi));
+                        index
+                    }
+                };
+                tail.push(ExprFragment::Var(index));
+            }
+        }
+    }
+
+    if !open_const.is_empty() {
+        tail.push(ExprFragment::Constant(mem::replace(&mut open_const, Vec::new())));
+    }
+
+    VerifyExpr {
+        typecode: head.to_owned(),
+        tail: tail
+    }
+}
+
+fn scan_dv<'a>(iframe: &mut InchoateFrame<'a>, var_set: &[TokenPtr<'a>]) {
+    for (lefti, &lefttok) in var_set.iter().enumerate() {
+        let leftmvi = iframe.variables.get(&lefttok).map(|&(ix,_)| ix);
+        for &righttok in &var_set[lefti + 1 ..] {
+            if let Some(leftix) = leftmvi {
+                if let Some(rightix) = iframe.variables.get(&righttok).map(|&(ix,_)| ix) {
+                    iframe.mandatory_dv.push((leftix, rightix));
+                }
+            }
+            iframe.optional_dv.push((lefttok.to_owned(), righttok.to_owned()));
+        }
+    }
+}
+
+fn construct_full_frame<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>, expr: &[CheckedToken<'a>]) {
+    state.local_essen.retain(|hyp| check_endpoint(sref.index, hyp.valid.end));
+    state.local_dv.retain(|hyp| check_endpoint(sref.index, hyp.valid.end));
+    // local_essen and local_dv now contain only things still in scope
+
+    // collect mandatory variables
+    let mut iframe = InchoateFrame { variables: HashMap::new(), var_list: Vec::new(), optional_dv: Vec::new(), mandatory_dv: Vec::new() };
+    let mut hyps = Vec::new();
+
+    for ess in &state.local_essen {
+        let scanned = scan_expression(&mut iframe, &ess.string);
+        hyps.push(Hyp {
+            address: ess.valid.start,
+            label: ess.label.to_owned(),
+            is_float: false,
+            variable_index: 0,
+            expr: scanned,
+        });
+    }
+
+    let scan_res = scan_expression(&mut iframe, expr);
+
+    // include any mandatory $f hyps
+    for &(index, ref lfi) in iframe.variables.values() {
+        hyps.push(Hyp {
+            address: lfi.valid.start,
+            label: lfi.label.to_owned(),
+            is_float: true,
+            variable_index: index,
+            expr: VerifyExpr { typecode: lfi.typecode.to_owned(), tail: vec![ExprFragment::Var(index)] },
+        })
+    }
+
+    hyps.sort_by(|h1, h2| state.order.cmp_2(h1.address, h2.address));
+
+    for &ref dv in state.gnames.lookup_global_dv() {
+        scan_dv(&mut iframe, dv.vars)
+    }
+
+    for &ref dv in &state.local_dv {
+        scan_dv(&mut iframe, &dv.vars);
+    }
+
+    state.frames_out.push(Frame {
+        stype: sref.statement.stype,
+        valid: sref.scope_range(),
+        hypotheses: hyps,
+        target: scan_res,
+        mandatory_vars: iframe.var_list,
+        mandatory_dv: iframe.mandatory_dv,
+        optional_dv: iframe.optional_dv,
+    });
+}
+
+fn scope_check_axiom<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if !check_label_dup(state, sref) {
         return;
     }
-    if !check_eap(state, sref) {
-        return;
+    if let Some(expr) = check_eap(state, sref) {
+        construct_full_frame(state, sref, &expr);
     }
-    // TODO spit out a frame
 }
 
 fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
@@ -236,7 +373,7 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
     }
 }
 
-fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
+fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let mut used = HashMap::new();
     let mut bad = false;
     let mut vars = Vec::new();
@@ -258,7 +395,7 @@ fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
                 }
 
                 used.insert(tref.slice, tref.index());
-                vars.push(tref.slice.to_owned());
+                vars.push(tref.slice);
             }
         }
     }
@@ -270,22 +407,19 @@ fn scope_check_dv(state: &mut ScopeState, sref: StatementRef) {
     state.local_dv.push(LocalDvInfo { valid: sref.scope_range(), vars: vars });
 }
 
-fn scope_check_essential(state: &mut ScopeState, sref: StatementRef) {
+fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if !check_label_dup(state, sref) {
         return;
     }
-    if !check_eap(state, sref) {
-        return;
+    if let Some(expr) = check_eap(state, sref) {
+        construct_stub_frame(state, sref);
+        state.local_essen.push(LocalEssentialInfo {
+            valid: sref.scope_range(), label: sref.label(), string: expr,
+        });
     }
-
-    construct_stub_frame(state, sref);
-    state.local_essen.push(LocalEssentialInfo {
-        valid: sref.scope_range(), label: sref.label().to_owned(),
-        string: sref.math_iter().map(|t| t.slice.to_owned()).collect(),
-    });
 }
 
-fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
+fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let mut bad = false;
     assert!(sref.math_len() == 2);
     let const_tok = sref.math_at(0);
@@ -296,7 +430,7 @@ fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
             bad = true;
         }
         Some(SymbolType::Constant) => {}
-        _ => {
+        Some(SymbolType::Variable) => {
             push_diagnostic(state, sref.index, Diagnostic::FloatNotConstant(0));
             bad = true;
         }
@@ -325,7 +459,7 @@ fn scope_check_float(state: &mut ScopeState, sref: StatementRef) {
     // record the $f
     if sref.statement.group_end != NO_STATEMENT {
         state.local_floats.entry(var_tok.slice.to_owned()).or_insert(Vec::new()).push(LocalFloatInfo {
-            typecode: const_tok.slice.to_owned(), label: sref.label().to_owned(), valid: sref.scope_range()
+            typecode: const_tok.slice, label: sref.label(), valid: sref.scope_range()
         });
     }
 
@@ -350,14 +484,13 @@ fn maybe_add_local_var(state: &mut ScopeState, sref: StatementRef, tokref: Token
     None
 }
 
-fn scope_check_provable(state: &mut ScopeState, sref: StatementRef) {
+fn scope_check_provable<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if !check_label_dup(state, sref) {
         return;
     }
-    if !check_eap(state, sref) {
-        return;
+    if let Some(expr) = check_eap(state, sref) {
+        construct_full_frame(state, sref, &expr);
     }
-    // TODO spit out a frame
 }
 
 fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
