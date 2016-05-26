@@ -43,7 +43,6 @@ pub type TokenIndex = i32;
 #[derive(Clone,Debug)]
 pub struct SegmentOrder {
     high_water: u32,
-    free_list: Vec<SegmentId>,
     order: Vec<SegmentId>,
     reverse: Vec<usize>,
 }
@@ -52,7 +51,6 @@ impl SegmentOrder {
     pub fn new() -> Self {
         let mut n = SegmentOrder {
             high_water: 1,
-            free_list: Vec::new(),
             order: Vec::new(),
             reverse: Vec::new()
         };
@@ -64,11 +62,10 @@ impl SegmentOrder {
     pub fn start(&self) -> SegmentId { SegmentId(1) }
 
     fn alloc_id(&mut self) -> SegmentId {
-        self.free_list.pop().unwrap_or_else(|| {
-            let index = self.high_water;
-            self.high_water += 1;
-            SegmentId(index)
-        })
+        let index = self.high_water;
+        assert!(index < u32::max_value());
+        self.high_water += 1;
+        SegmentId(index)
     }
 
     fn reindex(&mut self) {
@@ -80,7 +77,6 @@ impl SegmentOrder {
 
     pub fn free_id(&mut self, id: SegmentId) {
         self.order.remove(self.reverse[id.0 as usize] as usize);
-        self.free_list.push(id);
         self.reindex();
     }
 
