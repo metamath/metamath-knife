@@ -1,6 +1,7 @@
 // TODO experiment with FNV hashers, etc.
+use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::cmp::Ordering;
+use std::hash::Hash;
 use std::sync::Arc;
 use parser::{Comparer, Segment, SegmentId, SegmentOrder, StatementAddress, SymbolType, Token, TokenAddress, TokenPtr};
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
@@ -8,24 +9,41 @@ use parser::{Comparer, Segment, SegmentId, SegmentOrder, StatementAddress, Symbo
 
 // pub struct Atom(u32);
 
-struct GlobalDvInfo {
-    address: StatementAddress,
-    vars: Vec<Token>,
+type NameSlot<A, V> = Vec<(A, V)>;
+
+fn slot_insert<A, C, V>(slot: &mut NameSlot<A, V>, comparer: &C, address: A, value: V)
+    where C: Comparer<A>
+{
+    slot.push((address, value));
+    slot.sort_by(|x, y| comparer.cmp(&x.0, &y.0));
 }
 
-struct LabelInfo {
-    address: StatementAddress,
+fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: A) {
+    slot.retain(|x| x.0 != address);
 }
 
+fn autoviv<K, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V where K: Hash + Eq {
+    map.entry(key).or_insert_with(Default::default)
+}
+
+fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F) where F: FnOnce(&mut V), K: Borrow<Q>, Q: Hash + Eq, K: Hash + Eq, V: Default + Eq {
+    let kill = match map.get_mut(key) {
+        None => false,
+        Some(rval) => {
+            fun(rval);
+            *rval == Default::default()
+        }
+    };
+    if kill {
+        map.remove(key);
+    }
+}
+
+#[derive(Default, PartialEq, Eq)]
 struct SymbolInfo {
-    stype: SymbolType,
-    address: TokenAddress,
-}
-
-struct FloatInfo {
-    address: StatementAddress,
-    label: Token,
-    typecode: Token,
+    all: NameSlot<TokenAddress, SymbolType>,
+    constant: NameSlot<TokenAddress, ()>,
+    float: NameSlot<StatementAddress, (Token, Token)>,
 }
 
 pub struct Nameset {
@@ -33,46 +51,71 @@ pub struct Nameset {
     // unused_atoms: Vec<Atom>,
     order: Arc<SegmentOrder>,
     segments: HashMap<SegmentId, Arc<Segment>>,
-    dv_info: Vec<GlobalDvInfo>,
-    labels: HashMap<Token, Vec<LabelInfo>>,
-    symbols: HashMap<Token, Vec<SymbolInfo>>,
-    float_types: HashMap<Token, Vec<FloatInfo>>,
+    dv_info: NameSlot<StatementAddress, Vec<Token>>,
+    labels: HashMap<Token, NameSlot<StatementAddress, ()>>,
+    symbols: HashMap<Token, SymbolInfo>,
 }
 
-pub fn add_parsed_segment(set: &mut Nameset, id: SegmentId, seg: Arc<Segment>) {
-    if set.segments.contains_key(&id) {
-        return;
+impl Nameset {
+    pub fn add_segment(&mut self, id: SegmentId, seg: Arc<Segment>) {
+        if self.segments.contains_key(&id) {
+            return;
+        }
+
+        self.segments.insert(id, seg.clone());
+
+        for &ref symdef in &seg.symbols {
+            let slot = autoviv(&mut self.symbols, symdef.name.clone());
+            let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
+            slot_insert(&mut slot.all, &*self.order, address, symdef.stype);
+            if symdef.stype == SymbolType::Constant {
+                slot_insert(&mut slot.constant, &*self.order, address, ());
+            }
+        }
+
+        for &ref labdef in &seg.labels {
+            let slot = autoviv(&mut self.labels, labdef.label.clone());
+            slot_insert(slot, &*self.order, StatementAddress::new(id, labdef.index), ());
+        }
+
+        for &ref floatdef in &seg.floats {
+            let slot = autoviv(&mut self.symbols, floatdef.name.clone());
+            let address = StatementAddress::new(id, floatdef.start);
+            slot_insert(&mut slot.float, &*self.order, address, (floatdef.label.clone(), floatdef.typecode.clone()));
+        }
+
+        for &ref dvdef in &seg.global_dvs {
+            slot_insert(&mut self.dv_info, &*self.order, StatementAddress::new(id, dvdef.start), dvdef.vars.clone());
+        }
     }
 
-    set.segments.insert(id, seg.clone());
+    pub fn remove_segment(&mut self, id: SegmentId) {
+        if let Some(seg) = self.segments.remove(&id) {
+            for &ref symdef in &seg.symbols {
+                deviv(&mut self.symbols, &symdef.name, |slot| {
+                    let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
+                    slot_remove(&mut slot.all, address);
+                    slot_remove(&mut slot.constant, address);
+                });
+            }
 
-    for &ref symdef in &seg.symbols {
-        set.symbols.entry(symdef.name.clone()).or_insert(Vec::new()).push(SymbolInfo {
-            address: TokenAddress {
-                statement: StatementAddress { segment_id: id, index: symdef.start },
-                token_index: symdef.ordinal,
-            }, stype: symdef.stype,
-        });
-    }
+            for &ref labdef in &seg.labels {
+                deviv(&mut self.labels, &labdef.label, |slot| {
+                    slot_remove(slot, StatementAddress::new(id, labdef.index));
+                });
+            }
 
-    for &ref labdef in &seg.labels {
-        set.labels.entry(labdef.label.clone()).or_insert(Vec::new()).push(LabelInfo {
-            address: StatementAddress { segment_id: id, index: labdef.index },
-        });
-    }
+            for &ref floatdef in &seg.floats {
+                deviv(&mut self.symbols, &floatdef.name, |slot| {
+                    let address = StatementAddress::new(id, floatdef.start);
+                    slot_remove(&mut slot.float, address);
+                });
+            }
 
-    for &ref floatdef in &seg.floats {
-        set.float_types.entry(floatdef.name.clone()).or_insert(Vec::new()).push(FloatInfo {
-            address: StatementAddress { segment_id: id, index: floatdef.start },
-            label: floatdef.label.clone(), typecode: floatdef.typecode.clone(),
-        });
-    }
-
-    for &ref dvdef in &seg.global_dvs {
-        set.dv_info.push(GlobalDvInfo {
-            address: StatementAddress { segment_id: id, index: dvdef.start },
-            vars: dvdef.vars.clone()
-        })
+            for &ref dvdef in &seg.global_dvs {
+                slot_remove(&mut self.dv_info, StatementAddress::new(id, dvdef.start));
+            }
+        }
     }
 }
 
@@ -106,26 +149,6 @@ pub struct LookupGlobalDv<'a> {
     pub vars: Vec<TokenPtr<'a>>,
 }
 
-fn unvector<T>(vec: Option<&Vec<T>>) -> &[T] {
-    vec.map(|v| &v[..]).unwrap_or_default()
-}
-
-
-fn min_by<I, CP, GK, K>(iter: I, compare: CP, mut get_key: GK) -> Option<I::Item>
-                    where I: IntoIterator, CP: Comparer<K>, GK: FnMut(&I::Item) -> K
-{
-    iter.into_iter().fold(None, |best, item| {
-        match best {
-            None => Some(item),
-            Some(pbest) => if compare.cmp(&get_key(&item), &get_key(&pbest)) == Ordering::Less {
-                Some(item)
-            } else {
-                Some(pbest)
-            }
-        }
-    })
-}
-
 impl<'a> NameReader<'a> {
     pub fn new(nameset: &'a Nameset) -> Self {
         NameReader { nameset: nameset }
@@ -133,38 +156,32 @@ impl<'a> NameReader<'a> {
 
     // TODO: add versions which fetch less data, to reduce dep tracking overhead
     pub fn lookup_label(&mut self, label: TokenPtr) -> Option<LookupLabel> {
-        let lis = unvector(self.nameset.labels.get(label));
-        min_by(lis, &*self.nameset.order, |li| li.address).map(|limin| LookupLabel {
-            address: limin.address
+        self.nameset.labels.get(label).and_then(|&ref lslot| {
+            lslot.first().map(|&(addr, _)| LookupLabel { address: addr })
         })
     }
 
     pub fn lookup_symbol(&mut self, symbol: TokenPtr) -> Option<LookupSymbol> {
-        let sis = unvector(self.nameset.symbols.get(symbol));
-        let min_any = min_by(sis, &*self.nameset.order, |x| x.address);
-        let min_const = min_by(sis.iter().filter(|x| x.stype == SymbolType::Constant), &*self.nameset.order, |x| x.address);
-        min_any.map(|simin| LookupSymbol {
-            stype: simin.stype,
-            address: simin.address,
-            const_address: min_const.map(|si| si.address),
+        self.nameset.symbols.get(symbol).and_then(|&ref syminfo| {
+            syminfo.all.first().map(|&(addr, stype)| LookupSymbol {
+                stype: stype, address: addr,
+                const_address: syminfo.constant.first().map(|&(addr, _)| addr),
+            })
         })
     }
 
     // TODO: consider merging this with lookup_symbol
     pub fn lookup_float(&mut self, symbol: TokenPtr) -> Option<LookupFloat<'a>> {
-        let fis = unvector(self.nameset.float_types.get(symbol));
-        min_by(fis, &*self.nameset.order, |x| x.address).map(|fimin| {
-            LookupFloat {
-                address: fimin.address,
-                label: &fimin.label,
-                typecode: &fimin.typecode,
-            }
+        self.nameset.symbols.get(symbol).and_then(|&ref syminfo| {
+            syminfo.float.first().map(|&(addr, (ref label, ref typecode))| LookupFloat {
+                address: addr, label: &label, typecode: &typecode
+            })
         })
     }
 
     pub fn lookup_global_dv(&mut self) -> Vec<LookupGlobalDv> {
-        self.nameset.dv_info.iter().map(|dvinfo| LookupGlobalDv {
-            address: dvinfo.address, vars: dvinfo.vars.iter().map(|x| x as TokenPtr).collect(),
+        self.nameset.dv_info.iter().map(|&(addr, ref vars)| LookupGlobalDv {
+            address: addr, vars: vars.iter().map(|x| x as TokenPtr).collect(),
         }).collect()
     }
 }

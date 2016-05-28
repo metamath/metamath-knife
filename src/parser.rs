@@ -125,6 +125,12 @@ pub struct StatementAddress {
 }
 
 impl StatementAddress {
+    pub fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
+        StatementAddress { segment_id: segment_id, index: index }
+    }
+}
+
+impl StatementAddress {
     pub fn unbounded_range(self) -> GlobalRange {
         GlobalRange { start: self, end: NO_STATEMENT }
     }
@@ -134,6 +140,12 @@ impl StatementAddress {
 pub struct TokenAddress {
     pub statement: StatementAddress,
     pub token_index: TokenIndex,
+}
+
+impl TokenAddress {
+    pub fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
+        TokenAddress { statement: StatementAddress::new(segment_id, index), token_index: token }
+    }
 }
 
 #[derive(Copy,Clone,Debug)]
