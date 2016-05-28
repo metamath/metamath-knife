@@ -186,6 +186,7 @@ pub struct FloatDef {
 #[derive(Debug)]
 pub struct Segment {
     pub buffer: BufferRef,
+    pub filepath: String,
     // straight outputs
     pub statements: Vec<Statement>,
     pub next_file: Span,
@@ -416,6 +417,7 @@ impl<'a> Iterator for TokenIter<'a> {
 #[derive(Default)]
 struct Scanner<'a> {
     buffer: &'a [u8],
+    path: String,
     buffer_ref: BufferRef,
     position: FilePos,
     diagnostics: Vec<Diagnostic>,
@@ -786,6 +788,7 @@ impl<'a> Scanner<'a> {
             statements: Vec::new(), next_file: Span::null(),
             symbols: Vec::new(), global_dvs: Vec::new(), labels: Vec::new(),
             floats: Vec::new(), buffer: self.buffer_ref.clone(),
+            filepath: self.path.clone(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -924,9 +927,9 @@ fn is_valid_label(label: &[u8]) -> bool {
 /// useful for our purposes to parse comments that are strictly between statements as if they were
 /// statements (SMM2 did this too; may revisit) and we require file inclusions to be between
 /// statements at the top nesting level (this has been approved by Norman Megill).
-pub fn parse_segments(input: &BufferRef) -> Vec<Segment> {
+pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
     let mut closed_spans = Vec::new();
-    let mut scanner = Scanner { buffer_ref: input.clone(), buffer: input, ..Scanner::default() };
+    let mut scanner = Scanner { path: path, buffer_ref: input.clone(), buffer: input, ..Scanner::default() };
     assert!(input.len() < FilePos::max_value() as usize);
 
     loop {
