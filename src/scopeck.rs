@@ -1,5 +1,6 @@
 use nameck::NameReader;
 use nameck::Nameset;
+use parser::Comparer;
 use parser::Diagnostic;
 use parser::GlobalRange;
 use parser::SegmentRef;
@@ -15,7 +16,6 @@ use parser::TokenPtr;
 use parser::TokenRef;
 use parser::NO_STATEMENT;
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::cmp::Ordering;
 use std::mem;
 
@@ -134,7 +134,7 @@ fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> bool {
 fn check_math_symbol(state: &mut ScopeState, sref: StatementRef, tref: TokenRef) -> Option<SymbolType> {
     // active global definition?
     if let Some(sdef) = state.gnames.lookup_symbol(tref.slice) {
-        if state.order.cmp_3(sdef.address, tref.address) == Ordering::Less {
+        if state.order.cmp(&sdef.address, &tref.address) == Ordering::Less {
             return Some(sdef.stype);
         }
     }
@@ -153,7 +153,7 @@ fn check_math_symbol(state: &mut ScopeState, sref: StatementRef, tref: TokenRef)
 fn lookup_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>, tref: TokenRef<'a>) -> Option<LocalFloatInfo<'a>> {
     // active global definition?
     if let Some(fdef) = state.gnames.lookup_float(tref.slice) {
-        if state.order.cmp_2(fdef.address, sref.address()) == Ordering::Less {
+        if state.order.cmp(&fdef.address, &sref.address()) == Ordering::Less {
             return Some(LocalFloatInfo { valid: fdef.address.unbounded_range(), typecode: &fdef.typecode, label: &fdef.label });
         }
     }
@@ -235,7 +235,7 @@ struct InchoateFrame<'a> {
 
 fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]) -> VerifyExpr {
     let mut iter = expr.iter();
-    let mut head = match iter.next().expect("parser checks $eap token count") {
+    let head = match iter.next().expect("parser checks $eap token count") {
         &CheckedToken::Const(tptr) => tptr,
         _ => unreachable!(),
     };
@@ -324,10 +324,10 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>, 
         })
     }
 
-    hyps.sort_by(|h1, h2| state.order.cmp_2(h1.address, h2.address));
+    hyps.sort_by(|h1, h2| state.order.cmp(&h1.address, &h2.address));
 
-    for &ref dv in state.gnames.lookup_global_dv() {
-        scan_dv(&mut iframe, dv.vars)
+    for &ref dv in &state.gnames.lookup_global_dv() {
+        scan_dv(&mut iframe, &dv.vars)
     }
 
     for &ref dv in &state.local_dv {
@@ -509,7 +509,7 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
         } else {
             // nested $v, may conflict with an outer scope $v, top level $v/$c, or a _later_ $c
             if let Some(cdef) = state.gnames.lookup_symbol(tokref.slice) {
-                if state.order.cmp_3(cdef.address, tokref.address) == Ordering::Less {
+                if state.order.cmp(&cdef.address, &tokref.address) == Ordering::Less {
                     push_diagnostic(state, sref.index, Diagnostic::SymbolRedeclared(tokref.index(), cdef.address));
                     continue;
                 } else if cdef.stype == SymbolType::Constant {
@@ -526,18 +526,18 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
     }
 }
 
-pub fn scope_check(_names: &Nameset, seg: SegmentRef) {
-    let mut state: ScopeState = unimplemented!();
+pub fn scope_check(_names: &Nameset, _seg: SegmentRef) {
+    let mut _state: ScopeState = unimplemented!();
 
-    for sref in seg.statement_iter() {
+    for sref in _seg.statement_iter() {
         match sref.statement.stype {
-            StatementType::Axiom => scope_check_axiom(&mut state, sref),
-            StatementType::Constant => scope_check_constant(&mut state, sref),
-            StatementType::Disjoint => scope_check_dv(&mut state, sref),
-            StatementType::Essential => scope_check_essential(&mut state, sref),
-            StatementType::Floating => scope_check_float(&mut state, sref),
-            StatementType::Provable => scope_check_provable(&mut state, sref),
-            StatementType::Variable => scope_check_variable(&mut state, sref),
+            StatementType::Axiom => scope_check_axiom(&mut _state, sref),
+            StatementType::Constant => scope_check_constant(&mut _state, sref),
+            StatementType::Disjoint => scope_check_dv(&mut _state, sref),
+            StatementType::Essential => scope_check_essential(&mut _state, sref),
+            StatementType::Floating => scope_check_float(&mut _state, sref),
+            StatementType::Provable => scope_check_provable(&mut _state, sref),
+            StatementType::Variable => scope_check_variable(&mut _state, sref),
             _ => {}
         }
     }

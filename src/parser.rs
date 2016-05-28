@@ -86,19 +86,35 @@ impl SegmentOrder {
         self.reindex();
         id
     }
+}
 
-    pub fn cmp(&self, left: SegmentId, right: SegmentId) -> Ordering {
+pub trait Comparer<T> {
+    fn cmp(&self, left: &T, right: &T) -> Ordering;
+}
+
+impl Comparer<SegmentId> for SegmentOrder {
+    fn cmp(&self, left: &SegmentId, right: &SegmentId) -> Ordering {
         self.reverse[left.0 as usize].cmp(&self.reverse[right.0 as usize])
     }
+}
 
-    pub fn cmp_2(&self, left: StatementAddress, right: StatementAddress) -> Ordering {
-        let order = self.cmp(left.segment_id, right.segment_id);
+impl Comparer<StatementAddress> for SegmentOrder {
+    fn cmp(&self, left: &StatementAddress, right: &StatementAddress) -> Ordering {
+        let order = self.cmp(&left.segment_id, &right.segment_id);
         (order, left.index).cmp(&(Ordering::Equal, right.index))
     }
+}
 
-    pub fn cmp_3(&self, left: TokenAddress, right: TokenAddress) -> Ordering {
-        let order = self.cmp_2(left.statement, right.statement);
+impl Comparer<TokenAddress> for SegmentOrder {
+    fn cmp(&self, left: &TokenAddress, right: &TokenAddress) -> Ordering {
+        let order = self.cmp(&left.statement, &right.statement);
         (order, left.token_index).cmp(&(Ordering::Equal, right.token_index))
+    }
+}
+
+impl<'a, T, C: Comparer<T>> Comparer<T> for &'a C {
+    fn cmp(&self, left: &T, right: &T) -> Ordering {
+        (*self).cmp(left, right)
     }
 }
 
