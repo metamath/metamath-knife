@@ -49,7 +49,7 @@ struct SymbolInfo {
 pub struct Nameset {
     // next_atom: u32,
     // unused_atoms: Vec<Atom>,
-    order: Arc<SegmentOrder>,
+    pub order: Arc<SegmentOrder>,
     segments: HashMap<SegmentId, Arc<Segment>>,
     dv_info: NameSlot<StatementAddress, Vec<Token>>,
     labels: HashMap<Token, NameSlot<StatementAddress, ()>>,

@@ -526,19 +526,38 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
     }
 }
 
-pub fn scope_check(_names: &Nameset, _seg: SegmentRef) {
-    let mut _state: ScopeState = unimplemented!();
+pub struct SegmentScopeResult {
+    diagnostics: HashMap<StatementIndex, Vec<Diagnostic>>,
+    frames_out: Vec<Frame>,
+}
 
-    for sref in _seg.statement_iter() {
+pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResult {
+    let mut state = ScopeState {
+        diagnostics: HashMap::new(),
+        order: &names.order,
+        gnames: NameReader::new(names),
+        local_vars: HashMap::new(),
+        local_floats: HashMap::new(),
+        local_dv: Vec::new(),
+        local_essen: Vec::new(),
+        frames_out: Vec::new(),
+    };
+
+    for sref in seg.statement_iter() {
         match sref.statement.stype {
-            StatementType::Axiom => scope_check_axiom(&mut _state, sref),
-            StatementType::Constant => scope_check_constant(&mut _state, sref),
-            StatementType::Disjoint => scope_check_dv(&mut _state, sref),
-            StatementType::Essential => scope_check_essential(&mut _state, sref),
-            StatementType::Floating => scope_check_float(&mut _state, sref),
-            StatementType::Provable => scope_check_provable(&mut _state, sref),
-            StatementType::Variable => scope_check_variable(&mut _state, sref),
+            StatementType::Axiom => scope_check_axiom(&mut state, sref),
+            StatementType::Constant => scope_check_constant(&mut state, sref),
+            StatementType::Disjoint => scope_check_dv(&mut state, sref),
+            StatementType::Essential => scope_check_essential(&mut state, sref),
+            StatementType::Floating => scope_check_float(&mut state, sref),
+            StatementType::Provable => scope_check_provable(&mut state, sref),
+            StatementType::Variable => scope_check_variable(&mut state, sref),
             _ => {}
         }
+    }
+
+    SegmentScopeResult {
+        diagnostics: state.diagnostics,
+        frames_out: state.frames_out,
     }
 }
