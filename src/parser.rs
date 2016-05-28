@@ -25,11 +25,11 @@ impl Span {
         Span { start: start, end: end }
     }
 
-    fn null() -> Span {
+    pub fn null() -> Span {
         Span::new(0, 0)
     }
 
-    fn as_ref(self, buf: &[u8]) -> &[u8] {
+    pub fn as_ref(self, buf: &[u8]) -> &[u8] {
         &buf[self.start as usize .. self.end as usize]
     }
 }
@@ -760,13 +760,14 @@ impl<'a> Scanner<'a> {
         self.out_statement(stype, label, math, proof)
     }
 
-    fn get_segment(&mut self) -> Segment {
+    fn get_segment(&mut self) -> (Segment, bool) {
         let mut seg = Segment {
             statements: Vec::new(), next_file: Span::null(),
             symbols: Vec::new(), global_dvs: Vec::new(), labels: Vec::new(),
             floats: Vec::new(), buffer: self.buffer_ref.clone(),
         };
         let mut top_group = NO_STATEMENT;
+        let is_end;
         let end_diag;
 
         loop {
@@ -801,10 +802,12 @@ impl<'a> Scanner<'a> {
                 FileInclude => {
                     seg.next_file = seg.statements[index as usize].label;
                     end_diag = Diagnostic::UnclosedBeforeInclude(index);
+                    is_end = false;
                     break;
                 }
                 Eof => {
                     end_diag = Diagnostic::UnclosedBeforeEof;
+                    is_end = true;
                     break;
                 }
                 _ => {}
@@ -825,7 +828,7 @@ impl<'a> Scanner<'a> {
         }
 
         collect_definitions(&mut seg);
-        seg
+        (seg, is_end)
     }
 }
 
@@ -906,8 +909,8 @@ pub fn parse_segments(input: &BufferRef) -> Vec<Segment> {
     assert!(input.len() < FilePos::max_value() as usize);
 
     loop {
-        let seg = scanner.get_segment();
-        let last = seg.next_file == Span::null();
+        let (seg, last) = scanner.get_segment();
+        // we can almost use seg.next_file == Span::null here, but for the error case
         closed_spans.push(seg);
         if last {
             return closed_spans;

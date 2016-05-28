@@ -82,7 +82,6 @@ pub struct LookupSymbol {
     pub const_address: Option<TokenAddress>,
 }
 
-// TODO without allocating
 pub struct LookupFloat<'a> {
     pub address: StatementAddress,
     pub label: TokenPtr<'a>,
