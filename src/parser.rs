@@ -941,3 +941,9 @@ pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
         }
     }
 }
+
+pub fn dummy_segment(path: String, diag: Diagnostic) -> Segment {
+    let mut seg = parse_segments(path, &Arc::new(Vec::new())).pop().unwrap();
+    seg.statements[0].diagnostics.push(diag);
+    seg
+}
