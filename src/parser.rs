@@ -130,6 +130,7 @@ pub type Token = Vec<u8>;
 pub type TokenPtr<'a> = &'a [u8];
 
 // TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
+#[derive(Debug)]
 pub struct GlobalDv {
     pub start: StatementIndex,
     pub vars: Vec<Token>,
@@ -141,11 +142,13 @@ pub enum SymbolType {
     Constant,
 }
 
+#[derive(Debug)]
 pub struct LabelDef {
     pub label: Token,
     pub index: StatementIndex,
 }
 
+#[derive(Debug)]
 pub struct SymbolDef {
     pub name: Token,
     pub stype: SymbolType,
@@ -153,6 +156,7 @@ pub struct SymbolDef {
     pub ordinal: TokenIndex,
 }
 
+#[derive(Debug)]
 pub struct FloatDef {
     pub start: StatementIndex,
     pub name: Token,
@@ -163,6 +167,7 @@ pub struct FloatDef {
 /// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
 /// the future have an "unpacked" segment which is used for active editing, as well as a "lazy" or
 /// "mmap" segment type for fast incremental startup.
+#[derive(Debug)]
 pub struct Segment {
     pub buffer: BufferRef,
     // straight outputs
