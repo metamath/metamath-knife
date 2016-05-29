@@ -1,7 +1,7 @@
+use diag::Diagnostic;
 use nameck::NameReader;
 use nameck::Nameset;
 use parser::Comparer;
-use parser::Diagnostic;
 use parser::GlobalRange;
 use parser::SegmentId;
 use parser::SegmentRef;
@@ -571,6 +571,20 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
 pub struct ScopeResult {
     segments: HashMap<SegmentId, Arc<SegmentScopeResult>>,
     frame_index: HashMap<Token, Vec<(SegmentId, usize)>>,
+}
+
+impl ScopeResult {
+    pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
+        let mut out = Vec::new();
+        for (&sid, &ref ssr) in &self.segments {
+            for (&six, &ref diag) in &ssr.diagnostics {
+                for &ref d in diag {
+                    out.push((StatementAddress::new(sid, six), d.clone()));
+                }
+            }
+        }
+        out
+    }
 }
 
 pub fn scope_check(segments: &SegmentSet, names: &Nameset) -> ScopeResult {

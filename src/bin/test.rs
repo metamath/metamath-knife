@@ -2,6 +2,7 @@ extern crate smetamath;
 use smetamath::segment_set::SegmentSet;
 use smetamath::nameck::Nameset;
 use smetamath::scopeck;
+use smetamath::diag::{self, Notation};
 use std::env;
 use std::path::PathBuf;
 
@@ -23,5 +24,21 @@ fn main() {
     let mut ns = Nameset::new();
     ns.update(&set);
     let sr = scopeck::scope_check(&set, &ns);
+
+    let mut diags = Vec::new();
+    diags.extend(set.parse_diagnostics());
+    diags.extend(sr.diagnostics());
+
+    for notation in diag::to_annotations(&set, diags) {
+        print_annotation(notation);
+    }
     // println!("{:#?}", set);
+}
+
+fn print_annotation(ann: Notation) {
+    let mut args = String::new();
+    for (id, val) in ann.args {
+        args.push_str(&format!(" {}={}", id, val));
+    }
+    println!("{}:{}-{}:{:?}:{}{}", ann.source.filepath, ann.span.start, ann.span.end, ann.level, ann.message, args);
 }

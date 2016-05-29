@@ -3,6 +3,7 @@ use std::str;
 use std::sync::Arc;
 use std::slice;
 use std::cmp::Ordering;
+use diag::Diagnostic;
 
 pub type BufferRef = Arc<Vec<u8>>;
 /// change me if you want to parse files > 4GB
@@ -200,13 +201,19 @@ pub struct FloatDef {
     pub typecode: Token,
 }
 
+#[derive(Debug, Default)]
+pub struct SourceInfo {
+    pub buffer: BufferRef,
+    pub filepath: String,
+}
+
 /// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
 /// the future have an "unpacked" segment which is used for active editing, as well as a "lazy" or
 /// "mmap" segment type for fast incremental startup.
 #[derive(Debug)]
 pub struct Segment {
     pub buffer: BufferRef,
-    pub filepath: String,
+    pub source: Arc<SourceInfo>,
     // straight outputs
     pub statements: Vec<Statement>,
     pub next_file: Span,
@@ -225,6 +232,14 @@ impl<'a> SegmentRef<'a> {
             index: 0,
         }
     }
+
+    pub fn statement(self, index: StatementIndex) -> StatementRef<'a> {
+        StatementRef {
+            segment: self,
+            statement: &self.segment.statements[index as usize],
+            index: index,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -236,50 +251,6 @@ impl ParserResult {
     pub fn get_segment(&self, id: SegmentId) -> &Segment {
         self.segments[id.0 as usize].as_ref().unwrap()
     }
-}
-
-#[derive(Debug,Clone,Eq,PartialEq)]
-pub enum Diagnostic {
-    BadCharacter(Span, u8),
-    CommentMarkerNotStart(Span),
-    MidStatementCommentMarker(Span),
-    NestedComment(Span, Span),
-    BadCommentEnd(Span, Span),
-    UnclosedComment(Span),
-    UnknownKeyword(Span),
-    BadLabel(Span),
-    UnclosedMath,
-    UnclosedProof,
-    SpuriousLabel(Span),
-    MissingLabel,
-    RepeatedLabel(Span, Span),
-    MissingProof(Span),
-    SpuriousProof(Span),
-    EmptyMathString,
-    EmptyFilename,
-    FilenameSpaces,
-    FilenameDollar,
-    UnclosedInclude,
-    DisjointSingle,
-    BadFloating,
-    UnmatchedCloseGroup,
-    UnclosedBeforeInclude(StatementIndex),
-    UnclosedBeforeEof,
-    ConstantNotTopLevel,
-    EssentialAtTopLevel,
-    DuplicateLabel(StatementAddress),
-    SymbolDuplicatesLabel(TokenIndex, StatementAddress),
-    SymbolRedeclared(TokenIndex, TokenAddress),
-    VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
-    NotActiveSymbol(TokenIndex),
-    DjNotVariable(TokenIndex),
-    DjRepeatedVariable(TokenIndex, TokenIndex),
-    ExprNotConstantPrefix(TokenIndex),
-    FloatNotConstant(TokenIndex),
-    FloatNotVariable(TokenIndex),
-    FloatRedeclared(StatementAddress),
-    VariableMissingFloat(TokenIndex),
-    IoError(String),
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
@@ -365,6 +336,14 @@ impl<'a> StatementRef<'a> {
         self.statement.math.len() as TokenIndex
     }
 
+    pub fn span(&self) -> Span {
+        self.statement.span
+    }
+
+    pub fn math_span(&self, ix: TokenIndex) -> Span {
+        self.statement.math[ix as usize]
+    }
+
     pub fn math_at(&self, ix: TokenIndex) -> TokenRef<'a> {
         TokenRef {
             slice: self.statement.math[ix as usize].as_ref(&self.segment.segment.buffer),
@@ -438,7 +417,7 @@ impl<'a> Iterator for TokenIter<'a> {
 #[derive(Default)]
 struct Scanner<'a> {
     buffer: &'a [u8],
-    path: String,
+    source: Arc<SourceInfo>,
     buffer_ref: BufferRef,
     position: FilePos,
     diagnostics: Vec<Diagnostic>,
@@ -809,7 +788,7 @@ impl<'a> Scanner<'a> {
             statements: Vec::new(), next_file: Span::null(),
             symbols: Vec::new(), global_dvs: Vec::new(), labels: Vec::new(),
             floats: Vec::new(), buffer: self.buffer_ref.clone(),
-            filepath: self.path.clone(),
+            source: self.source.clone(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -950,7 +929,10 @@ fn is_valid_label(label: &[u8]) -> bool {
 /// statements at the top nesting level (this has been approved by Norman Megill).
 pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
     let mut closed_spans = Vec::new();
-    let mut scanner = Scanner { path: path, buffer_ref: input.clone(), buffer: input, ..Scanner::default() };
+    let mut scanner = Scanner {
+        source: Arc::new(SourceInfo { buffer: input.clone(), filepath: path }),
+        buffer_ref: input.clone(), buffer: input, ..Scanner::default()
+    };
     assert!(input.len() < FilePos::max_value() as usize);
 
     loop {

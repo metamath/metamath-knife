@@ -1,11 +1,13 @@
+use diag::Diagnostic;
 use parser;
 use parser::Comparer;
-use parser::Diagnostic;
 use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
 use parser::SegmentRef;
 use parser::Span;
+use parser::StatementAddress;
+use parser::StatementRef;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io;
@@ -30,6 +32,26 @@ impl SegmentSet {
     pub fn segments(&self) -> Vec<SegmentRef> {
         let mut out: Vec<SegmentRef> = self.segments.iter().map(|(&seg_id, seg)| SegmentRef { id: seg_id, segment: seg }).collect();
         out.sort_by(|x, y| self.order.cmp(&x.id, &y.id));
+        out
+    }
+
+    pub fn segment(&self, seg_id: SegmentId) -> SegmentRef {
+        SegmentRef { id: seg_id, segment: &self.segments[&seg_id] }
+    }
+
+    pub fn statement(&self, addr: StatementAddress) -> StatementRef {
+        self.segment(addr.segment_id).statement(addr.index)
+    }
+
+    pub fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
+        let mut out = Vec::new();
+        for sgref in self.segments() {
+            for stref in sgref.statement_iter() {
+                for &ref d in &stref.statement.diagnostics {
+                    out.push((stref.address(), d.clone()));
+                }
+            }
+        }
         out
     }
 

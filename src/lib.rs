@@ -3,6 +3,7 @@ pub mod parser;
 pub mod nameck;
 pub mod scopeck;
 pub mod segment_set;
+pub mod diag;
 mod util;
 
 #[cfg(test)]
