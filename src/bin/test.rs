@@ -1,6 +1,7 @@
 extern crate smetamath;
 use smetamath::segment_set::SegmentSet;
 use smetamath::nameck::Nameset;
+use smetamath::scopeck;
 use std::env;
 use std::path::PathBuf;
 
@@ -21,5 +22,6 @@ fn main() {
 
     let mut ns = Nameset::new();
     ns.update(&set);
+    let sr = scopeck::scope_check(&set, &ns);
     // println!("{:#?}", set);
 }

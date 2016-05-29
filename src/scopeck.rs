@@ -3,6 +3,7 @@ use nameck::Nameset;
 use parser::Comparer;
 use parser::Diagnostic;
 use parser::GlobalRange;
+use parser::SegmentId;
 use parser::SegmentRef;
 use parser::StatementAddress;
 use parser::StatementRef;
@@ -15,9 +16,11 @@ use parser::TokenAddress;
 use parser::TokenPtr;
 use parser::TokenRef;
 use parser::NO_STATEMENT;
+use segment_set::SegmentSet;
 use std::collections::HashMap;
 use std::cmp::Ordering;
 use std::mem;
+use std::sync::Arc;
 
 // This module calculates 3 things which are related only by the fact that they can be done
 // at the same time:
@@ -95,6 +98,7 @@ pub struct Hyp {
 
 #[derive(Clone,Debug)]
 pub struct Frame {
+    pub label: Token,
     pub stype: StatementType,
     pub valid: GlobalRange,
     pub hypotheses: Vec<Hyp>,
@@ -213,6 +217,7 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef) {
     }).collect();
 
     state.frames_out.push(Frame {
+        label: sref.label().to_owned(),
        stype: sref.statement.stype,
        valid: sref.scope_range(),
        hypotheses: Vec::new(),
@@ -335,6 +340,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>, 
     }
 
     state.frames_out.push(Frame {
+        label: sref.label().to_owned(),
         stype: sref.statement.stype,
         valid: sref.scope_range(),
         hypotheses: hyps,
@@ -355,7 +361,7 @@ fn scope_check_axiom<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 }
 
 fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
-    if sref.statement.group == NO_STATEMENT {
+    if sref.statement.group != NO_STATEMENT {
         assert!(sref.statement.diagnostics.len() > 0);
         return;
     }
@@ -560,4 +566,22 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
         diagnostics: state.diagnostics,
         frames_out: state.frames_out,
     }
+}
+
+pub struct ScopeResult {
+    segments: HashMap<SegmentId, Arc<SegmentScopeResult>>,
+    frame_index: HashMap<Token, Vec<(SegmentId, usize)>>,
+}
+
+pub fn scope_check(segments: &SegmentSet, names: &Nameset) -> ScopeResult {
+    let mut out = ScopeResult { segments: HashMap::new(), frame_index: HashMap::new() };
+    for sref in segments.segments() {
+        let ssr = Arc::new(scope_check_single(names, sref));
+        out.segments.insert(sref.id, ssr.clone());
+
+        for (index, frame) in ssr.frames_out.iter().enumerate() {
+            out.frame_index.entry(frame.label.clone()).or_insert(Vec::new()).push((sref.id, index));
+        }
+    }
+    out
 }

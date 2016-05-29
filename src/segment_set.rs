@@ -1,8 +1,10 @@
 use parser;
+use parser::Comparer;
 use parser::Diagnostic;
 use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
+use parser::SegmentRef;
 use parser::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -23,6 +25,12 @@ pub struct SegmentSet {
 impl SegmentSet {
     pub fn new() -> Self {
         SegmentSet { order: Arc::new(SegmentOrder::new()), segments: HashMap::new() }
+    }
+
+    pub fn segments(&self) -> Vec<SegmentRef> {
+        let mut out: Vec<SegmentRef> = self.segments.iter().map(|(&seg_id, seg)| SegmentRef { id: seg_id, segment: seg }).collect();
+        out.sort_by(|x, y| self.order.cmp(&x.id, &y.id));
+        out
     }
 
     pub fn read(&mut self, path: PathBuf, data: Vec<(PathBuf, Vec<u8>)>) {
