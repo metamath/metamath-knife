@@ -55,6 +55,7 @@ impl SegmentOrder {
             reverse: Vec::new()
         };
         n.alloc_id();
+        n.order.push(SegmentId(1));
         n.reindex();
         n
     }
@@ -83,6 +84,13 @@ impl SegmentOrder {
     pub fn new_after(&mut self, after: SegmentId) -> SegmentId {
         let id = self.alloc_id();
         self.order.insert(self.reverse[after.0 as usize] as usize + 1, id);
+        self.reindex();
+        id
+    }
+
+    pub fn new_before(&mut self, after: SegmentId) -> SegmentId {
+        let id = self.alloc_id();
+        self.order.insert(self.reverse[after.0 as usize] as usize, id);
         self.reindex();
         id
     }
@@ -258,7 +266,7 @@ pub enum Diagnostic {
     UnclosedBeforeInclude(StatementIndex),
     UnclosedBeforeEof,
     ConstantNotTopLevel,
-    EssentialNotTopLevel,
+    EssentialAtTopLevel,
     DuplicateLabel(StatementAddress),
     SymbolDuplicatesLabel(TokenIndex, StatementAddress),
     SymbolRedeclared(TokenIndex, TokenAddress),
@@ -271,6 +279,7 @@ pub enum Diagnostic {
     FloatNotVariable(TokenIndex),
     FloatRedeclared(StatementAddress),
     VariableMissingFloat(TokenIndex),
+    IoError(String),
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
@@ -831,8 +840,8 @@ impl<'a> Scanner<'a> {
                     }
                 }
                 Essential => {
-                    if top_group != NO_STATEMENT {
-                        seg.statements[index as usize].diagnostics.push(Diagnostic::EssentialNotTopLevel);
+                    if top_group == NO_STATEMENT {
+                        seg.statements[index as usize].diagnostics.push(Diagnostic::EssentialAtTopLevel);
                     }
                 }
                 FileInclude => {
