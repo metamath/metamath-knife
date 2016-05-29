@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 use parser::{Comparer, Segment, SegmentId, SegmentOrder, StatementAddress, SymbolType, Token, TokenAddress, TokenPtr};
+use segment_set::SegmentSet;
+use util;
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
@@ -39,17 +41,19 @@ fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F) where F: FnOnce(&
     }
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq, Debug)]
 struct SymbolInfo {
     all: NameSlot<TokenAddress, SymbolType>,
     constant: NameSlot<TokenAddress, ()>,
     float: NameSlot<StatementAddress, (Token, Token)>,
 }
 
+#[derive(Default,Debug)]
 pub struct Nameset {
     // next_atom: u32,
     // unused_atoms: Vec<Atom>,
     pub order: Arc<SegmentOrder>,
+
     segments: HashMap<SegmentId, Arc<Segment>>,
     dv_info: NameSlot<StatementAddress, Vec<Token>>,
     labels: HashMap<Token, NameSlot<StatementAddress, ()>>,
@@ -57,6 +61,34 @@ pub struct Nameset {
 }
 
 impl Nameset {
+    pub fn new() -> Nameset {
+        Nameset::default()
+    }
+
+    pub fn update(&mut self, segs: &SegmentSet) {
+        self.order = segs.order.clone();
+
+        let mut keys_to_remove = Vec::new();
+        for (&seg_id, &ref seg) in &self.segments {
+            let stale = match segs.segments.get(&seg_id) {
+                None => true,
+                Some(seg_new) => !util::ptr_eq::<Segment>(seg_new, seg),
+            };
+
+            if stale {
+                keys_to_remove.push(seg_id);
+            }
+        }
+
+        for seg_id in keys_to_remove {
+            self.remove_segment(seg_id);
+        }
+
+        for (&seg_id, &ref seg) in &segs.segments {
+            self.add_segment(seg_id, seg.clone());
+        }
+    }
+
     pub fn add_segment(&mut self, id: SegmentId, seg: Arc<Segment>) {
         if self.segments.contains_key(&id) {
             return;

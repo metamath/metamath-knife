@@ -40,7 +40,7 @@ pub type TokenIndex = i32;
 
 // This is an example of an "order-maintenance data structure", actually a very simple one.
 // We can plug in the Dietz & Sleator 1987 algorithm if this gets too slow.
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Default)]
 pub struct SegmentOrder {
     high_water: u32,
     order: Vec<SegmentId>,

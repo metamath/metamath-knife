@@ -1,5 +1,6 @@
 extern crate smetamath;
 use smetamath::segment_set::SegmentSet;
+use smetamath::nameck::Nameset;
 use std::env;
 use std::path::PathBuf;
 
@@ -17,5 +18,8 @@ fn main() {
     } else {
         set.read(PathBuf::from(&args[1]).to_path_buf(), Vec::new());
     }
+
+    let mut ns = Nameset::new();
+    ns.update(&set);
     // println!("{:#?}", set);
 }

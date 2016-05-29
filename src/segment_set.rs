@@ -16,8 +16,8 @@ use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct SegmentSet {
-    order: Arc<SegmentOrder>,
-    segments: HashMap<SegmentId, Arc<Segment>>,
+    pub order: Arc<SegmentOrder>,
+    pub segments: HashMap<SegmentId, Arc<Segment>>,
 }
 
 impl SegmentSet {
