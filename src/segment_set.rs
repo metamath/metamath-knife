@@ -26,17 +26,31 @@ pub struct SegmentSet {
 
 impl SegmentSet {
     pub fn new() -> Self {
-        SegmentSet { order: Arc::new(SegmentOrder::new()), segments: HashMap::new() }
+        SegmentSet {
+            order: Arc::new(SegmentOrder::new()),
+            segments: HashMap::new(),
+        }
     }
 
     pub fn segments(&self) -> Vec<SegmentRef> {
-        let mut out: Vec<SegmentRef> = self.segments.iter().map(|(&seg_id, seg)| SegmentRef { id: seg_id, segment: seg }).collect();
+        let mut out: Vec<SegmentRef> = self.segments
+            .iter()
+            .map(|(&seg_id, seg)| {
+                SegmentRef {
+                    id: seg_id,
+                    segment: seg,
+                }
+            })
+            .collect();
         out.sort_by(|x, y| self.order.cmp(&x.id, &y.id));
         out
     }
 
     pub fn segment(&self, seg_id: SegmentId) -> SegmentRef {
-        SegmentRef { id: seg_id, segment: &self.segments[&seg_id] }
+        SegmentRef {
+            id: seg_id,
+            segment: &self.segments[&seg_id],
+        }
     }
 
     pub fn statement(&self, addr: StatementAddress) -> StatementRef {
@@ -69,7 +83,8 @@ impl SegmentSet {
             if state.workdir.is_none() {
                 state.workdir = Some(try!(try!(env::current_dir()).canonicalize()));
             }
-            let relcpath = cpath.strip_prefix(&state.workdir.as_ref().unwrap()).unwrap_or(&cpath).to_owned();
+            let relcpath =
+                cpath.strip_prefix(&state.workdir.as_ref().unwrap()).unwrap_or(&cpath).to_owned();
             if !state.included.insert(relcpath.to_path_buf()) {
                 return Ok(Vec::new());
             }
@@ -77,7 +92,8 @@ impl SegmentSet {
             let mut buf = Vec::new();
             try!(fh.read_to_end(&mut buf));
 
-            return Ok(parser::parse_segments(relcpath.to_string_lossy().into_owned(), &Arc::new(buf)));
+            return Ok(parser::parse_segments(relcpath.to_string_lossy().into_owned(),
+                                             &Arc::new(buf)));
         }
 
         fn read_and_parse(state: &mut RecState, path: PathBuf) -> Vec<Segment> {
@@ -89,22 +105,26 @@ impl SegmentSet {
                 None => {
                     // read from FS
                     match canonicalize_and_read(state, path) {
-                        Err(cerr) => vec![parser::dummy_segment(path_str, Diagnostic::IoError(format!("{}", cerr)))],
+                        Err(cerr) => {
+                            vec![parser::dummy_segment(path_str,
+                                                       Diagnostic::IoError(format!("{}", cerr)))]
+                        }
                         Ok(segments) => segments,
                     }
                 }
-                Some(data) => {
-                    parser::parse_segments(path_str, &Arc::new(data))
-                }
+                Some(data) => parser::parse_segments(path_str, &Arc::new(data)),
             }
         }
 
         fn recurse(state: &mut RecState, path: PathBuf) {
             for seg in read_and_parse(state, path.clone()) {
                 if seg.next_file != Span::null() {
-                    let chain = str::from_utf8(seg.next_file.as_ref(&seg.buffer)).expect("parser verified ASCII").to_owned();
+                    let chain = str::from_utf8(seg.next_file.as_ref(&seg.buffer))
+                        .expect("parser verified ASCII")
+                        .to_owned();
                     state.segments.push(seg);
-                    recurse(state, path.parent().unwrap_or(&path).join(PathBuf::from(chain)));
+                    recurse(state,
+                            path.parent().unwrap_or(&path).join(PathBuf::from(chain)));
                 } else {
                     state.segments.push(seg);
                 }
@@ -112,8 +132,11 @@ impl SegmentSet {
         }
 
         let mut state = RecState {
-            segments: Vec::new(), included: HashSet::new(), pre_included: HashSet::new(),
-            preload: data.into_iter().collect(), workdir: None,
+            segments: Vec::new(),
+            included: HashSet::new(),
+            pre_included: HashSet::new(),
+            preload: data.into_iter().collect(),
+            workdir: None,
         };
 
         recurse(&mut state, path);

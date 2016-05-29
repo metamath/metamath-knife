@@ -40,5 +40,11 @@ fn print_annotation(ann: Notation) {
     for (id, val) in ann.args {
         args.push_str(&format!(" {}={}", id, val));
     }
-    println!("{}:{}-{}:{:?}:{}{}", ann.source.filepath, ann.span.start, ann.span.end, ann.level, ann.message, args);
+    println!("{}:{}-{}:{:?}:{}{}",
+             ann.source.filepath,
+             ann.span.start,
+             ann.span.end,
+             ann.level,
+             ann.message,
+             args);
 }

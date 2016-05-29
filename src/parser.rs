@@ -19,11 +19,17 @@ pub struct Span {
 
 impl Span {
     fn new(start: usize, end: usize) -> Span {
-        Span { start: start as FilePos, end: end as FilePos }
+        Span {
+            start: start as FilePos,
+            end: end as FilePos,
+        }
     }
 
     fn new2(start: FilePos, end: FilePos) -> Span {
-        Span { start: start, end: end }
+        Span {
+            start: start,
+            end: end,
+        }
     }
 
     pub fn null() -> Span {
@@ -31,7 +37,7 @@ impl Span {
     }
 
     pub fn as_ref(self, buf: &[u8]) -> &[u8] {
-        &buf[self.start as usize .. self.end as usize]
+        &buf[self.start as usize..self.end as usize]
     }
 }
 
@@ -53,7 +59,7 @@ impl SegmentOrder {
         let mut n = SegmentOrder {
             high_water: 1,
             order: Vec::new(),
-            reverse: Vec::new()
+            reverse: Vec::new(),
         };
         n.alloc_id();
         n.order.push(SegmentId(1));
@@ -61,7 +67,9 @@ impl SegmentOrder {
         n
     }
 
-    pub fn start(&self) -> SegmentId { SegmentId(1) }
+    pub fn start(&self) -> SegmentId {
+        SegmentId(1)
+    }
 
     fn alloc_id(&mut self) -> SegmentId {
         let index = self.high_water;
@@ -135,13 +143,19 @@ pub struct StatementAddress {
 
 impl StatementAddress {
     pub fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
-        StatementAddress { segment_id: segment_id, index: index }
+        StatementAddress {
+            segment_id: segment_id,
+            index: index,
+        }
     }
 }
 
 impl StatementAddress {
     pub fn unbounded_range(self) -> GlobalRange {
-        GlobalRange { start: self, end: NO_STATEMENT }
+        GlobalRange {
+            start: self,
+            end: NO_STATEMENT,
+        }
     }
 }
 
@@ -153,7 +167,10 @@ pub struct TokenAddress {
 
 impl TokenAddress {
     pub fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
-        TokenAddress { statement: StatementAddress::new(segment_id, index), token_index: token }
+        TokenAddress {
+            statement: StatementAddress::new(segment_id, index),
+            token_index: token,
+        }
     }
 }
 
@@ -244,7 +261,7 @@ impl<'a> SegmentRef<'a> {
 
 #[derive(Clone)]
 pub struct ParserResult {
-    segments: Vec<Option<Arc<Segment>>>
+    segments: Vec<Option<Arc<Segment>>>,
 }
 
 impl ParserResult {
@@ -317,11 +334,17 @@ pub struct StatementRef<'a> {
 
 impl<'a> StatementRef<'a> {
     pub fn address(&self) -> StatementAddress {
-        StatementAddress { segment_id: self.segment.id, index: self.index }
+        StatementAddress {
+            segment_id: self.segment.id,
+            index: self.index,
+        }
     }
 
     pub fn scope_range(&self) -> GlobalRange {
-        GlobalRange { start: self.address(), end: self.statement.group_end }
+        GlobalRange {
+            start: self.address(),
+            end: self.statement.group_end,
+        }
     }
 
     pub fn label(&self) -> &'a [u8] {
@@ -329,7 +352,12 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn math_iter(&self) -> TokenIter<'a> {
-        TokenIter { slice_iter: self.statement.math.iter(), buffer: &self.segment.segment.buffer, stmt_address: self.address(), index: 0 }
+        TokenIter {
+            slice_iter: self.statement.math.iter(),
+            buffer: &self.segment.segment.buffer,
+            stmt_address: self.address(),
+            index: 0,
+        }
     }
 
     pub fn math_len(&self) -> TokenIndex {
@@ -350,7 +378,7 @@ impl<'a> StatementRef<'a> {
             address: TokenAddress {
                 statement: self.address(),
                 token_index: ix,
-            }
+            },
         }
     }
 }
@@ -408,7 +436,7 @@ impl<'a> Iterator for TokenIter<'a> {
                 address: TokenAddress {
                     statement: self.stmt_address,
                     token_index: index,
-                }
+                },
             }
         })
     }
@@ -429,7 +457,7 @@ struct Scanner<'a> {
 }
 
 const MM_VALID_SPACES: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) |
-    (1u64 << 32);
+                             (1u64 << 32);
 
 fn is_mm_space_c0(byte: u8) -> bool {
     (MM_VALID_SPACES & (1u64 << byte)) != 0
@@ -456,8 +484,8 @@ impl<'a> Scanner<'a> {
             // For the purpose of error recovery, we consider C0 control characters to be
             // whitespace (following SMM2)
             if !is_mm_space_c0(self.buffer[ix]) {
-                self.diagnostics.push(Diagnostic::BadCharacter(
-                    Span::new(ix, ix + 1), self.buffer[ix]));
+                self.diagnostics
+                    .push(Diagnostic::BadCharacter(Span::new(ix, ix + 1), self.buffer[ix]));
             }
             ix += 1;
         }
@@ -466,12 +494,16 @@ impl<'a> Scanner<'a> {
         while ix < len && self.buffer[ix] > 32 {
             if self.buffer[ix] > 126 {
                 // DEL or C1 control or non-ASCII bytes (presumably UTF-8)
-                self.diagnostics.push(Diagnostic::BadCharacter(
-                    Span::new(ix, ix + 1), self.buffer[ix]));
+                self.diagnostics
+                    .push(Diagnostic::BadCharacter(Span::new(ix, ix + 1), self.buffer[ix]));
                 // skip this "token"
                 ix += 1;
-                while ix < len && !is_mm_space(self.buffer[ix]) { ix += 1; }
-                while ix < len && is_mm_space(self.buffer[ix]) { ix += 1; }
+                while ix < len && !is_mm_space(self.buffer[ix]) {
+                    ix += 1;
+                }
+                while ix < len && is_mm_space(self.buffer[ix]) {
+                    ix += 1;
+                }
                 start = ix;
                 continue;
             }
@@ -493,7 +525,7 @@ impl<'a> Scanner<'a> {
         while let Some(tok) = self.get_raw() {
             let tok_ref = tok.as_ref(self.buffer);
             if tok_ref == b"$)" {
-                return ctype
+                return ctype;
             } else if tok_ref == b"$j" || tok_ref == b"$t" {
                 if !first {
                     self.diagnostics.push(Diagnostic::CommentMarkerNotStart(tok))
@@ -526,7 +558,7 @@ impl<'a> Scanner<'a> {
 
     fn get(&mut self) -> Option<Span> {
         if self.unget.is_some() {
-            return self.unget.take()
+            return self.unget.take();
         }
 
         while let Some(tok) = self.get_raw() {
@@ -541,12 +573,22 @@ impl<'a> Scanner<'a> {
         None
     }
 
-    fn out_statement(&mut self, stype: StatementType, label: Span, math: Vec<Span>, proof: Vec<Span>) -> Statement {
+    fn out_statement(&mut self,
+                     stype: StatementType,
+                     label: Span,
+                     math: Vec<Span>,
+                     proof: Vec<Span>)
+                     -> Statement {
         Statement {
-            stype: stype, label: label, math: math, proof: proof,
-            group: NO_STATEMENT, group_end: NO_STATEMENT,
+            stype: stype,
+            label: label,
+            math: math,
+            proof: proof,
+            group: NO_STATEMENT,
+            group_end: NO_STATEMENT,
             diagnostics: mem::replace(&mut self.diagnostics, Vec::new()),
-            span: Span::new2(mem::replace(&mut self.statement_start, self.position), self.position),
+            span: Span::new2(mem::replace(&mut self.statement_start, self.position),
+                             self.position),
         }
     }
 
@@ -636,7 +678,11 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        self.diagnostics.push(if is_proof { Diagnostic::UnclosedProof } else { Diagnostic::UnclosedMath });
+        self.diagnostics.push(if is_proof {
+            Diagnostic::UnclosedProof
+        } else {
+            Diagnostic::UnclosedMath
+        });
         return (out, false);
     }
 
@@ -785,9 +831,13 @@ impl<'a> Scanner<'a> {
 
     fn get_segment(&mut self) -> (Segment, bool) {
         let mut seg = Segment {
-            statements: Vec::new(), next_file: Span::null(),
-            symbols: Vec::new(), global_dvs: Vec::new(), labels: Vec::new(),
-            floats: Vec::new(), buffer: self.buffer_ref.clone(),
+            statements: Vec::new(),
+            next_file: Span::null(),
+            symbols: Vec::new(),
+            global_dvs: Vec::new(),
+            labels: Vec::new(),
+            floats: Vec::new(),
+            buffer: self.buffer_ref.clone(),
             source: self.source.clone(),
         };
         let mut top_group = NO_STATEMENT;
@@ -807,7 +857,9 @@ impl<'a> Scanner<'a> {
                 }
                 CloseGroup => {
                     if top_group == NO_STATEMENT {
-                        seg.statements[index as usize].diagnostics.push(Diagnostic::UnmatchedCloseGroup);
+                        seg.statements[index as usize]
+                            .diagnostics
+                            .push(Diagnostic::UnmatchedCloseGroup);
                     } else {
                         seg.statements[top_group as usize].group_end = index;
                         top_group = seg.statements[top_group as usize].group;
@@ -815,12 +867,16 @@ impl<'a> Scanner<'a> {
                 }
                 Constant => {
                     if top_group != NO_STATEMENT {
-                        seg.statements[index as usize].diagnostics.push(Diagnostic::ConstantNotTopLevel);
+                        seg.statements[index as usize]
+                            .diagnostics
+                            .push(Diagnostic::ConstantNotTopLevel);
                     }
                 }
                 Essential => {
                     if top_group == NO_STATEMENT {
-                        seg.statements[index as usize].diagnostics.push(Diagnostic::EssentialAtTopLevel);
+                        seg.statements[index as usize]
+                            .diagnostics
+                            .push(Diagnostic::EssentialAtTopLevel);
                     }
                 }
                 FileInclude => {
@@ -839,15 +895,16 @@ impl<'a> Scanner<'a> {
         }
 
         while top_group != NO_STATEMENT {
-            seg.statements[top_group as usize].group_end =
-                seg.statements.len() as StatementIndex;
+            seg.statements[top_group as usize].group_end = seg.statements.len() as StatementIndex;
             seg.statements[top_group as usize].diagnostics.push(end_diag.clone());
             top_group = seg.statements[top_group as usize].group;
         }
 
-        for index in 0 .. seg.statements.len() {
-            if seg.statements[index].group != NO_STATEMENT && seg.statements[index].stype != OpenGroup {
-                seg.statements[index].group_end = seg.statements[seg.statements[index].group as usize].group_end;
+        for index in 0..seg.statements.len() {
+            if seg.statements[index].group != NO_STATEMENT &&
+               seg.statements[index].stype != OpenGroup {
+                seg.statements[index].group_end =
+                    seg.statements[seg.statements[index].group as usize].group_end;
             }
         }
 
@@ -862,7 +919,8 @@ fn collect_definitions(seg: &mut Segment) {
         let index = index as StatementIndex;
         if stmt.stype.takes_label() {
             seg.labels.push(LabelDef {
-                index: index, label: stmt.label.as_ref(buf).to_owned()
+                index: index,
+                label: stmt.label.as_ref(buf).to_owned(),
             });
         }
 
@@ -875,7 +933,8 @@ fn collect_definitions(seg: &mut Segment) {
                 for (sindex, &span) in stmt.math.iter().enumerate() {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Constant,
-                        start: index, name: span.as_ref(buf).to_owned(),
+                        start: index,
+                        name: span.as_ref(buf).to_owned(),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -884,7 +943,8 @@ fn collect_definitions(seg: &mut Segment) {
                 for (sindex, &span) in stmt.math.iter().enumerate() {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Variable,
-                        start: index, name: span.as_ref(buf).to_owned(),
+                        start: index,
+                        name: span.as_ref(buf).to_owned(),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -910,7 +970,8 @@ fn collect_definitions(seg: &mut Segment) {
 
 fn is_valid_label(label: &[u8]) -> bool {
     for &c in label {
-        if !(c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') || (c >= b'0' && c <= b'9') || (c >= b'A' && c <= b'Z')) {
+        if !(c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') ||
+             (c >= b'0' && c <= b'9') || (c >= b'A' && c <= b'Z')) {
             return false;
         }
     }
@@ -930,8 +991,13 @@ fn is_valid_label(label: &[u8]) -> bool {
 pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner {
-        source: Arc::new(SourceInfo { buffer: input.clone(), filepath: path }),
-        buffer_ref: input.clone(), buffer: input, ..Scanner::default()
+        source: Arc::new(SourceInfo {
+            buffer: input.clone(),
+            filepath: path,
+        }),
+        buffer_ref: input.clone(),
+        buffer: input,
+        ..Scanner::default()
     };
     assert!(input.len() < FilePos::max_value() as usize);
 
