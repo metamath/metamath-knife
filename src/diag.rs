@@ -122,240 +122,121 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
 
     match *diag {
         BadCharacter(span, byte) => {
-            annotate(notes,
-                     stmt,
-                     "Invalid character (byte value {byte}); Metamath source files are limited \
-                      to US-ASCII with controls TAB, CR, LF, FF)",
-                     span,
-                     Error,
-                     vec![("byte", d(byte))]);
+            let s = "Invalid character (byte value {byte}); Metamath source files are limited to \
+                     US-ASCII with controls TAB, CR, LF, FF)";
+            annotate(notes, stmt, s, span, Error, vec![("byte", d(byte))]);
         }
         BadCommentEnd(tok, opener) => {
-            annotate(notes,
-                     stmt,
-                     "$) sequence must be surrounded by whitespace to end a comment",
-                     tok,
-                     Warning,
-                     Vec::new());
-            annotate(notes,
-                     stmt,
-                     "Comment started here",
-                     opener,
-                     Note,
-                     Vec::new());
+            let s = "$) sequence must be surrounded by whitespace to end a comment";
+            annotate(notes, stmt, s, tok, Warning, Vec::new());
+            let s = "Comment started here";
+            annotate(notes, stmt, s, opener, Note, Vec::new());
         }
         BadFloating => {
-            annotate(notes,
-                     stmt,
-                     "A $f statement must have exactly two math tokens",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "A $f statement must have exactly two math tokens";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         BadLabel(lbl) => {
-            annotate(notes,
-                     stmt,
-                     "Statement labels may contain only alphanumeric characters and - _ .",
-                     lbl,
-                     Error,
-                     Vec::new());
+            let s = "Statement labels may contain only alphanumeric characters and - _ .";
+            annotate(notes, stmt, s, lbl, Error, Vec::new());
         }
         CommentMarkerNotStart(marker) => {
-            annotate(notes,
-                     stmt,
-                     "This comment marker must be the first token in the comment to be effective",
-                     marker,
-                     Warning,
-                     Vec::new());
+            let s = "This comment marker must be the first token in the comment to be effective";
+            annotate(notes, stmt, s, marker, Warning, Vec::new());
         }
         ConstantNotTopLevel => {
-            annotate(notes,
-                     stmt,
-                     "$c statements are not allowed in nested groups",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "$c statements are not allowed in nested groups";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         DisjointSingle => {
-            annotate(notes,
-                     stmt,
-                     "A $d statement which lists only one variable is meaningless",
-                     stmt.span(),
-                     Warning,
-                     Vec::new());
+            let s = "A $d statement which lists only one variable is meaningless";
+            annotate(notes, stmt, s, stmt.span(), Warning, Vec::new());
         }
         DjNotVariable(index) => {
-            annotate(notes,
-                     stmt,
-                     "$d constraints are not applicable to constants",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "$d constraints are not applicable to constants";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
         }
         DjRepeatedVariable(index1, index2) => {
-            annotate(notes,
-                     stmt,
-                     "A variable may not be used twice in the same $d constraint",
-                     stmt.math_span(index1),
-                     Error,
-                     Vec::new());
-            annotate(notes,
-                     stmt,
-                     "Previous appearance was here",
-                     stmt.math_span(index2),
-                     Note,
-                     Vec::new());
+            let s = "A variable may not be used twice in the same $d constraint";
+            annotate(notes, stmt, s, stmt.math_span(index1), Error, Vec::new());
+            let s = "Previous appearance was here";
+            annotate(notes, stmt, s, stmt.math_span(index2), Note, Vec::new());
         }
         DuplicateLabel(prevstmt) => {
-            annotate(notes,
-                     stmt,
-                     "Statement labels must be unique",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "Statement labels must be unique";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
             let stmt2 = sset.statement(prevstmt);
-            annotate(notes,
-                     stmt2,
-                     "Label was previously used here",
-                     stmt2.span(),
-                     Note,
-                     Vec::new());
+            let s = "Label was previously used here";
+            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
         }
         EmptyFilename => {
-            annotate(notes,
-                     stmt,
-                     "Filename included by a $[ directive must not be empty",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "Filename included by a $[ directive must not be empty";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         EmptyMathString => {
-            annotate(notes,
-                     stmt,
-                     "A math string must have at least one token",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "A math string must have at least one token";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         EssentialAtTopLevel => {
-            annotate(notes,
-                     stmt,
-                     "$e statements must be inside scope brackets, not at the top level",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "$e statements must be inside scope brackets, not at the top level";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         ExprNotConstantPrefix(index) => {
-            annotate(notes,
-                     stmt,
-                     "The math string of an $a, $e, or $p assertion must start with a constant, \
-                      not a variable",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "The math string of an $a, $e, or $p assertion must start with a constant, \
+                     not a variable";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
         }
         FilenameDollar => {
-            annotate(notes,
-                     stmt,
-                     "Filenames included by $[ are not allowed to contain the $ character",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "Filenames included by $[ are not allowed to contain the $ character";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         FilenameSpaces => {
-            annotate(notes,
-                     stmt,
-                     "Filenames included by $[ are not allowed to contain whitespace",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "Filenames included by $[ are not allowed to contain whitespace";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         FloatNotConstant(index) => {
-            annotate(notes,
-                     stmt,
-                     "The first token of a $f statement must be a declared constant (typecode)",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "The first token of a $f statement must be a declared constant (typecode)";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
         }
         FloatNotVariable(index) => {
-            annotate(notes,
-                     stmt,
-                     "The second token of a $f statement must be a declared variable (to \
-                      associate the type)",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "The second token of a $f statement must be a declared variable (to \
+                     associate the type)";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
         }
         FloatRedeclared(saddr) => {
-            annotate(notes,
-                     stmt,
-                     "There is already an active $f for this variable",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "There is already an active $f for this variable";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
             let stmt2 = sset.statement(saddr);
-            annotate(notes,
-                     stmt2,
-                     "Previous $f was here",
-                     stmt2.span(),
-                     Note,
-                     Vec::new());
+            let s = "Previous $f was here";
+            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
         }
         IoError(ref err) => {
-            annotate(notes,
-                     stmt,
-                     "Source file could not be read (error: {error})",
-                     stmt.span(),
-                     Error,
-                     vec![("error", err.clone())]);
+            let s = "Source file could not be read (error: {error})";
+            let p = vec![("error", err.clone())];
+            annotate(notes, stmt, s, stmt.span(), Error, p);
         }
         MidStatementCommentMarker(marker) => {
-            annotate(notes,
-                     stmt,
-                     "Marked comments are only effective between statements, not inside them",
-                     marker,
-                     Warning,
-                     Vec::new());
+            let s = "Marked comments are only effective between statements, not inside them";
+            annotate(notes, stmt, s, marker, Warning, Vec::new());
         }
         MissingLabel => {
-            annotate(notes,
-                     stmt,
-                     "This statement type requires a label",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "This statement type requires a label";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         MissingProof(math_end) => {
-            annotate(notes,
-                     stmt,
-                     "Provable assertion requires a proof introduced with $= here; use $= ? $. \
-                      if you do not have a proof yet",
-                     math_end,
-                     Error,
-                     Vec::new());
+            let s = "Provable assertion requires a proof introduced with $= here; use $= ? $. \
+                     if you do not have a proof yet";
+            annotate(notes, stmt, s, math_end, Error, Vec::new());
         }
         NestedComment(tok, opener) => {
-            annotate(notes,
-                     stmt,
-                     "Nested comments are not supported - comment will end at the first $)",
-                     tok,
-                     Warning,
-                     Vec::new());
-            annotate(notes,
-                     stmt,
-                     "Comment started here",
-                     opener,
-                     Note,
-                     Vec::new());
+            let s = "Nested comments are not supported - comment will end at the first $)";
+            annotate(notes, stmt, s, tok, Warning, Vec::new());
+            let s = "Comment started here";
+            annotate(notes, stmt, s, opener, Note, Vec::new());
         }
         NotActiveSymbol(index) => {
-            annotate(notes,
-                     stmt,
-                     "Token used here must be active in the current scope",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "Token used here must be active in the current scope";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
         }
         ProofDvViolation => {
             let s = "Disjoint variable constraint violated";
@@ -398,29 +279,17 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             annotate(notes, stmt, s, stmt.span(), Error, vec![]);
         }
         RepeatedLabel(lspan, fspan) => {
-            annotate(notes,
-                     stmt,
-                     "A statement may have only one label",
-                     lspan,
-                     Error,
-                     Vec::new());
+            let s = "A statement may have only one label";
+            annotate(notes, stmt, s, lspan, Error, Vec::new());
             annotate(notes, stmt, "First label was here", fspan, Note, Vec::new());
         }
         SpuriousLabel(lspan) => {
-            annotate(notes,
-                     stmt,
-                     "Labels are only permitted for statements of type $a, $e, $f, or $p",
-                     lspan,
-                     Error,
-                     Vec::new());
+            let s = "Labels are only permitted for statements of type $a, $e, $f, or $p";
+            annotate(notes, stmt, s, lspan, Error, Vec::new());
         }
         SpuriousProof(math_end) => {
-            annotate(notes,
-                     stmt,
-                     "Proofs are only allowed on $p assertions",
-                     math_end,
-                     Error,
-                     Vec::new());
+            let s = "Proofs are only allowed on $p assertions";
+            annotate(notes, stmt, s, math_end, Error, Vec::new());
         }
         StepEssenWrong => {
             let s = "Step used for $e hypothesis does not match statement";
@@ -452,129 +321,67 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
         }
         SymbolDuplicatesLabel(index, saddr) => {
-            annotate(notes,
-                     stmt,
-                     "Metamath spec forbids symbols which are the same as labels in the same \
-                      database",
-                     stmt.math_span(index),
-                     Warning,
-                     Vec::new());
+            let s = "Metamath spec forbids symbols which are the same as labels in the same \
+                     database";
+            annotate(notes, stmt, s, stmt.math_span(index), Warning, Vec::new());
             let stmt2 = sset.statement(saddr);
-            annotate(notes,
-                     stmt2,
-                     "Symbol was used as a label here",
-                     stmt2.span(),
-                     Note,
-                     Vec::new());
+            let s = "Symbol was used as a label here";
+            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
         }
         SymbolRedeclared(index, taddr) => {
-            annotate(notes,
-                     stmt,
-                     "This symbol is already active in this scope",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "This symbol is already active in this scope";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
             let stmt2 = sset.statement(taddr.statement);
-            annotate(notes,
-                     stmt2,
-                     "Symbol was previously declared here",
-                     stmt2.math_span(taddr.token_index),
-                     Note,
-                     Vec::new());
+            let s = "Symbol was previously declared here";
+            let sp = stmt2.math_span(taddr.token_index);
+            annotate(notes, stmt2, s, sp, Note, Vec::new());
         }
         UnclosedBeforeEof => {
-            annotate(notes,
-                     stmt,
-                     "${ group must be closed with a $} before end of file",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "${ group must be closed with a $} before end of file";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         UnclosedBeforeInclude(index) => {
-            annotate(notes,
-                     stmt,
-                     "${ group must be closed with a $} before another file can be included",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "${ group must be closed with a $} before another file can be included";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
             let stmt2 = stmt.segment.statement(index);
-            annotate(notes,
-                     stmt2,
-                     "Include statement is here",
-                     stmt2.span(),
-                     Note,
-                     Vec::new());
+            let s = "Include statement is here";
+            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
         }
         UnclosedComment(comment) => {
-            annotate(notes,
-                     stmt,
-                     "Comment requires closing $) before end of file",
-                     comment,
-                     Error,
-                     Vec::new());
+            let s = "Comment requires closing $) before end of file";
+            annotate(notes, stmt, s, comment, Error, Vec::new());
         }
         UnclosedInclude => {
-            annotate(notes,
-                     stmt,
-                     "$[ requires a matching $]",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "$[ requires a matching $]";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         UnclosedMath => {
-            annotate(notes,
-                     stmt,
-                     "A math string must be closed with $= or $.",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "A math string must be closed with $= or $.";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         UnclosedProof => {
-            annotate(notes,
-                     stmt,
-                     "A proof must be closed with $.",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "A proof must be closed with $.";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         UnknownKeyword(kwspan) => {
-            annotate(notes,
-                     stmt,
-                     "Statement-starting keyword must be one of $a $c $d $e $f $p $v",
-                     kwspan,
-                     Error,
-                     Vec::new());
+            let s = "Statement-starting keyword must be one of $a $c $d $e $f $p $v";
+            annotate(notes, stmt, s, kwspan, Error, Vec::new());
         }
         UnmatchedCloseGroup => {
-            annotate(notes,
-                     stmt,
-                     "This $} does not match any open ${",
-                     stmt.span(),
-                     Error,
-                     Vec::new());
+            let s = "This $} does not match any open ${";
+            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
         }
         VariableMissingFloat(index) => {
-            annotate(notes,
-                     stmt,
-                     "Variable token used in statement must have an active $f",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "Variable token used in statement must have an active $f";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
         }
         VariableRedeclaredAsConstant(index, taddr) => {
-            annotate(notes,
-                     stmt,
-                     "Symbol cannot be used as a variable here and as a constant later",
-                     stmt.math_span(index),
-                     Error,
-                     Vec::new());
+            let s = "Symbol cannot be used as a variable here and as a constant later";
+            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
             let stmt2 = sset.statement(taddr.statement);
-            annotate(notes,
-                     stmt2,
-                     "Symbol will be used as a constant here",
-                     stmt2.math_span(taddr.token_index),
-                     Note,
-                     Vec::new());
+            let s = "Symbol will be used as a constant here";
+            let sp = stmt2.math_span(taddr.token_index);
+            annotate(notes, stmt2, s, sp, Note, Vec::new());
         }
     }
 }
