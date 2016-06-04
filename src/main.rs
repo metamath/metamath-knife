@@ -1,3 +1,5 @@
+extern crate fnv;
+
 mod diag;
 mod nameck;
 mod parser;

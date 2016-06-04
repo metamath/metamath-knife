@@ -1,4 +1,19 @@
+use fnv::FnvHasher;
+use std::collections;
+use std::hash::BuildHasherDefault;
+use std::hash::Hash;
 use std::ptr;
+
+pub type HashMap<K, V> = collections::HashMap<K, V, BuildHasherDefault<FnvHasher>>;
+pub type HashSet<K> = collections::HashSet<K, BuildHasherDefault<FnvHasher>>;
+
+pub fn new_map<K, V>() -> HashMap<K, V> where K: Eq + Hash {
+    HashMap::<K, V>::with_hasher(Default::default())
+}
+
+pub fn new_set<K>() -> HashSet<K> where K: Eq + Hash {
+    HashSet::<K>::with_hasher(Default::default())
+}
 
 pub fn ptr_eq<T>(x: &T, y: &T) -> bool {
     x as *const _ == y as *const _

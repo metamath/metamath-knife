@@ -1,9 +1,12 @@
 [package]
+authors = ["Stefan O'Rear <stefanor@cox.net>"]
 name = "smetamath"
 version = "3.0.0-1"
-authors = ["Stefan O'Rear <stefanor@cox.net>"]
 
 [dependencies]
+fnv = "1.0.2"
+
+[profile]
 
 [profile.release]
 codegen-units = 2

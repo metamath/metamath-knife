@@ -1,12 +1,12 @@
 // TODO experiment with FNV hashers, etc.
 use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 use parser::{Comparer, Segment, SegmentId, SegmentOrder, StatementAddress, SymbolType, Token,
              TokenAddress, TokenPtr};
 use segment_set::SegmentSet;
 use util;
+use util::HashMap;
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 

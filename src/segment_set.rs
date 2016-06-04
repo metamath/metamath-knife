@@ -8,8 +8,6 @@ use parser::SegmentRef;
 use parser::Span;
 use parser::StatementAddress;
 use parser::StatementRef;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::io;
 use std::io::Read;
 use std::fs::File;
@@ -17,6 +15,10 @@ use std::env;
 use std::str;
 use std::sync::Arc;
 use std::path::PathBuf;
+use util::HashMap;
+use util::HashSet;
+use util::new_map;
+use util::new_set;
 
 #[derive(Debug)]
 pub struct SegmentSet {
@@ -28,7 +30,7 @@ impl SegmentSet {
     pub fn new() -> Self {
         SegmentSet {
             order: Arc::new(SegmentOrder::new()),
-            segments: HashMap::new(),
+            segments: new_map(),
         }
     }
 
@@ -133,8 +135,8 @@ impl SegmentSet {
 
         let mut state = RecState {
             segments: Vec::new(),
-            included: HashSet::new(),
-            pre_included: HashSet::new(),
+            included: new_set(),
+            pre_included: new_set(),
             preload: data.into_iter().collect(),
             workdir: None,
         };
@@ -142,7 +144,7 @@ impl SegmentSet {
         recurse(&mut state, path);
 
         let mut order = SegmentOrder::new();
-        self.segments = HashMap::new();
+        self.segments = new_map();
 
         let start = order.start();
         for seg in state.segments {

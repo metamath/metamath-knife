@@ -13,7 +13,6 @@ use scopeck::ScopeReader;
 use scopeck::ScopeResult;
 use segment_set::SegmentSet;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::ops::BitOrAssign;
 use std::ops::Range;
 use std::slice;
@@ -23,6 +22,8 @@ use std::usize;
 use util::fast_clear;
 use util::fast_extend;
 use util::fast_truncate;
+use util::HashMap;
+use util::new_map;
 
 #[derive(Clone)]
 struct Bitset {
@@ -400,7 +401,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
         prepared: Vec::new(),
         prep_buffer: Vec::new(),
         temp_buffer: Vec::new(),
-        var2bit: HashMap::new(),
+        var2bit: new_map(),
         dv_map: Vec::new(),
     };
 
@@ -520,7 +521,7 @@ impl VerifyResult {
 
 fn verify_segment(sset: &SegmentSet, scopes: &ScopeResult, sid: SegmentId) -> VerifySegment {
     let reader = ScopeReader::new(scopes);
-    let mut out = VerifySegment { diagnostics: HashMap::new() };
+    let mut out = VerifySegment { diagnostics: new_map() };
     for stmt in sset.segment(sid).statement_iter() {
         if let Some(diag) = verify_proof(sset, reader, stmt) {
             out.diagnostics.insert(stmt.address(), diag);
@@ -530,7 +531,7 @@ fn verify_segment(sset: &SegmentSet, scopes: &ScopeResult, sid: SegmentId) -> Ve
 }
 
 pub fn verify(segments: &SegmentSet, scope: &ScopeResult) -> VerifyResult {
-    let mut out = VerifyResult { segments: HashMap::new() };
+    let mut out = VerifyResult { segments: new_map() };
     for sref in segments.segments() {
         out.segments.insert(sref.id, Arc::new(verify_segment(segments, scope, sref.id)));
     }

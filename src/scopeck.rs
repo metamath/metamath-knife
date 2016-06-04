@@ -17,10 +17,11 @@ use parser::TokenPtr;
 use parser::TokenRef;
 use parser::NO_STATEMENT;
 use segment_set::SegmentSet;
-use std::collections::HashMap;
 use std::cmp::Ordering;
 use std::mem;
 use std::sync::Arc;
+use util::HashMap;
+use util::new_map;
 
 // This module calculates 3 things which are related only by the fact that they can be done
 // at the same time:
@@ -340,7 +341,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
 
     // collect mandatory variables
     let mut iframe = InchoateFrame {
-        variables: HashMap::new(),
+        variables: new_map(),
         var_list: Vec::new(),
         optional_dv: Vec::new(),
         mandatory_dv: Vec::new(),
@@ -430,7 +431,7 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
 }
 
 fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    let mut used = HashMap::new();
+    let mut used = new_map();
     let mut bad = false;
     let mut vars = Vec::new();
 
@@ -627,11 +628,11 @@ pub struct SegmentScopeResult {
 
 pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResult {
     let mut state = ScopeState {
-        diagnostics: HashMap::new(),
+        diagnostics: new_map(),
         order: &names.order,
         gnames: NameReader::new(names),
-        local_vars: HashMap::new(),
-        local_floats: HashMap::new(),
+        local_vars: new_map(),
+        local_floats: new_map(),
         local_dv: Vec::new(),
         local_essen: Vec::new(),
         frames_out: Vec::new(),
@@ -678,7 +679,7 @@ impl ScopeResult {
 pub fn scope_check(segments: &SegmentSet, names: &Nameset) -> ScopeResult {
     let mut out = ScopeResult {
         segments: Vec::new(),
-        frame_index: HashMap::new(),
+        frame_index: new_map(),
     };
     for sref in segments.segments() {
         let ssr = Arc::new(scope_check_single(names, sref));
