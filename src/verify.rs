@@ -157,6 +157,8 @@ struct VerifyState<'a> {
     stack: Vec<StackSlot<'a>>,
     stack_buffer: Vec<u8>,
     temp_buffer: Vec<u8>,
+    subst_vars: Vec<Bitset>,
+    subst_exprs: Vec<Range<usize>>,
     var2bit: HashMap<TokenPtr<'a>, usize>,
     dv_map: Vec<Bitset>,
 }
@@ -273,10 +275,10 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     }
     let sbase = state.stack.len() - fref.hypotheses.len();
 
-    let mut subst_exprs = Vec::new();
-    let mut subst_vars = Vec::new();
-    subst_exprs.resize(fref.mandatory_vars.len(), 0..0);
-    subst_vars.resize(fref.mandatory_vars.len(), Bitset::new());
+    state.subst_exprs.clear();
+    state.subst_vars.clear();
+    state.subst_exprs.resize(fref.mandatory_vars.len(), 0..0);
+    state.subst_vars.resize(fref.mandatory_vars.len(), Bitset::new());
 
     // check $f, build substitution
     for (ix, hyp) in fref.hypotheses.iter().enumerate() {
@@ -285,8 +287,8 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
             if slot.code != &hyp.expr.typecode[..] {
                 return Some(Diagnostic::StepFloatWrongType);
             }
-            subst_vars[hyp.variable_index] = slot.vars.clone();
-            subst_exprs[hyp.variable_index] = slot.expr.clone();
+            state.subst_vars[hyp.variable_index] = slot.vars.clone();
+            state.subst_exprs[hyp.variable_index] = slot.expr.clone();
         }
     }
 
@@ -300,7 +302,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
             fast_clear(&mut state.temp_buffer);
             do_substitute(&mut state.temp_buffer,
                           &hyp.expr.tail,
-                          &subst_exprs,
+                          &state.subst_exprs,
                           &state.stack_buffer);
             if state.stack_buffer[slot.expr.clone()] != state.temp_buffer[..] {
                 return Some(Diagnostic::StepEssenWrong);
@@ -311,7 +313,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     fast_clear(&mut state.temp_buffer);
     do_substitute(&mut state.temp_buffer,
                   &fref.target.tail,
-                  &subst_exprs,
+                  &state.subst_exprs,
                   &state.stack_buffer);
 
     state.stack.truncate(sbase);
@@ -327,14 +329,14 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
 
     state.stack.push(StackSlot {
         code: &fref.target.typecode,
-        vars: do_substitute_vars(&fref.target.tail, &subst_vars),
+        vars: do_substitute_vars(&fref.target.tail, &state.subst_vars),
         expr: tos..ntos,
     });
 
     // check $d
     for &(ix1, ix2) in &fref.mandatory_dv {
-        for var1 in &subst_vars[ix1] {
-            for var2 in &subst_vars[ix2] {
+        for var1 in &state.subst_vars[ix1] {
+            for var2 in &state.subst_vars[ix2] {
                 if !state.dv_map[var1].has_bit(var2) {
                     return Some(Diagnostic::ProofDvViolation);
                 }
@@ -401,6 +403,8 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
         prepared: Vec::new(),
         prep_buffer: Vec::new(),
         temp_buffer: Vec::new(),
+        subst_vars: Vec::new(),
+        subst_exprs: Vec::new(),
         var2bit: new_map(),
         dv_map: Vec::new(),
     };
