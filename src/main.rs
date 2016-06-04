@@ -6,15 +6,18 @@ mod segment_set;
 mod util;
 mod verify;
 
-use segment_set::SegmentSet;
-use nameck::Nameset;
 use diag::Notation;
+use nameck::Nameset;
+use segment_set::SegmentSet;
 use std::env;
+use std::mem;
 use std::path::PathBuf;
+use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut set = SegmentSet::new();
+    let now = Instant::now();
     if args.len() > 2 {
         let mut data = Vec::new();
         let mut i = 1;
@@ -27,10 +30,24 @@ fn main() {
         set.read(PathBuf::from(&args[1]).to_path_buf(), Vec::new());
     }
 
+    println!("parse {}ms", (now.elapsed() * 1000).as_secs());
+    let now = Instant::now();
+
     let mut ns = Nameset::new();
     ns.update(&set);
+
+    println!("nameck {}ms", (now.elapsed() * 1000).as_secs());
+    let now = Instant::now();
+
     let sr = scopeck::scope_check(&set, &ns);
+
+    println!("scopeck {}ms", (now.elapsed() * 1000).as_secs());
+    let now = Instant::now();
+
     let vr = verify::verify(&set, &sr);
+
+    println!("verify {}ms", (now.elapsed() * 1000).as_secs());
+    let now = Instant::now();
 
     let mut diags = Vec::new();
     diags.extend(set.parse_diagnostics());
@@ -41,6 +58,16 @@ fn main() {
         print_annotation(notation);
     }
     // println!("{:#?}", set);
+
+    println!("diag {}ms", (now.elapsed() * 1000).as_secs());
+    let now = Instant::now();
+
+    mem::drop(vr);
+    mem::drop(sr);
+    mem::drop(ns);
+    mem::drop(set);
+
+    println!("free {}ms", (now.elapsed() * 1000).as_secs());
 }
 
 fn print_annotation(ann: Notation) {
