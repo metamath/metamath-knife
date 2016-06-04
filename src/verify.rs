@@ -23,7 +23,7 @@ use std::usize;
 #[derive(Clone)]
 struct Bitset {
     head: usize,
-    tail: Vec<usize>,
+    tail: Option<Box<Vec<usize>>>,
 }
 
 fn bits_per_word() -> usize {
@@ -34,8 +34,22 @@ impl Bitset {
     fn new() -> Bitset {
         Bitset {
             head: 0,
-            tail: vec![],
+            tail: None,
         }
+    }
+
+    fn tail(&self) -> &[usize] {
+        match self.tail {
+            None => Default::default(),
+            Some(ref bx) => &bx
+        }
+    }
+
+    fn tail_mut(&mut self) -> &mut Vec<usize> {
+        if self.tail.is_none() {
+            self.tail = Some(Box::new(Vec::new()));
+        }
+        self.tail.as_mut().unwrap()
     }
 
     fn set_bit(&mut self, bit: usize) {
@@ -43,10 +57,11 @@ impl Bitset {
             self.head |= 1 << bit;
         } else {
             let word = bit / bits_per_word() - 1;
-            if word >= self.tail.len() {
-                self.tail.resize(word + 1, 0);
+            let tail = self.tail_mut();
+            if word >= tail.len() {
+                tail.resize(word + 1, 0);
             }
-            self.tail[word] |= 1 << (bit & (bits_per_word() - 1));
+            tail[word] |= 1 << (bit & (bits_per_word() - 1));
         }
     }
 
@@ -55,10 +70,11 @@ impl Bitset {
             (self.head & (1 << bit)) != 0
         } else {
             let word = bit / bits_per_word() - 1;
-            if word >= self.tail.len() {
+            let tail = self.tail();
+            if word >= tail.len() {
                 false
             } else {
-                (self.tail[word] & (1 << (bit & (bits_per_word() - 1)))) != 0
+                (tail[word] & (1 << (bit & (bits_per_word() - 1)))) != 0
             }
         }
     }
@@ -66,12 +82,16 @@ impl Bitset {
 
 impl<'a> BitOrAssign<&'a Bitset> for Bitset {
     fn bitor_assign(&mut self, rhs: &'a Bitset) {
-        if rhs.tail.len() > self.tail.len() {
-            self.tail.resize(rhs.tail.len(), 0);
-        }
         self.head |= rhs.head;
-        for i in 0..rhs.tail.len() {
-            self.tail[i] |= rhs.tail[i];
+        if !rhs.tail().is_empty() {
+            let rtail = rhs.tail();
+            let stail = self.tail_mut();
+            if rtail.len() > stail.len() {
+                stail.resize(rtail.len(), 0);
+            }
+            for i in 0..rtail.len() {
+                stail[i] |= rtail[i];
+            }
         }
     }
 }
@@ -84,7 +104,7 @@ impl<'a> IntoIterator for &'a Bitset {
         BitsetIter {
             bits: self.head,
             offset: 0,
-            buffer: self.tail.iter(),
+            buffer: self.tail().iter(),
         }
     }
 }
