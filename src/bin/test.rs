@@ -3,6 +3,7 @@ use smetamath::segment_set::SegmentSet;
 use smetamath::nameck::Nameset;
 use smetamath::scopeck;
 use smetamath::diag::{self, Notation};
+use smetamath::verify;
 use std::env;
 use std::path::PathBuf;
 
@@ -24,10 +25,12 @@ fn main() {
     let mut ns = Nameset::new();
     ns.update(&set);
     let sr = scopeck::scope_check(&set, &ns);
+    let vr = verify::verify(&set, &sr);
 
     let mut diags = Vec::new();
     diags.extend(set.parse_diagnostics());
     diags.extend(sr.diagnostics());
+    diags.extend(vr.diagnostics());
 
     for notation in diag::to_annotations(&set, diags) {
         print_annotation(notation);

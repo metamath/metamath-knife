@@ -47,7 +47,7 @@ struct LocalVarInfo {
     end: StatementIndex,
 }
 
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy,Clone,Debug,Default)]
 struct LocalFloatInfo<'a> {
     valid: GlobalRange,
     typecode: TokenPtr<'a>,
@@ -103,6 +103,7 @@ pub struct Frame {
     pub valid: GlobalRange,
     pub hypotheses: Vec<Hyp>,
     pub target: VerifyExpr,
+    pub stub_expr: Vec<u8>,
     pub mandatory_vars: Vec<Token>,
     pub mandatory_dv: Vec<(MandVarIndex, MandVarIndex)>,
     pub optional_dv: Vec<(Token, Token)>,
@@ -224,14 +225,30 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
     }
 }
 
-fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef) {
+fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[CheckedToken]) {
     // gets data for $e and $f statements; these are not frames but they
     // are referenced by proofs using a frame-like structure
-    let mut mathi = sref.math_iter();
-    let typecode_tr = mathi.next().expect("parser checks $e token count");
-    let typecode = typecode_tr.slice.to_owned();
-    let expr: Vec<_> = mathi.map(|tref| ExprFragment::Constant(tref.slice.to_owned()))
-        .collect();
+    let mut iter = expr.iter();
+    let typecode = match iter.next().expect("parser checks $eap token count") {
+        &CheckedToken::Const(tptr) => tptr,
+        _ => unreachable!(),
+    };
+    let mut mvars = Vec::new();
+    let mut conststr = Vec::new();
+
+    while let Some(ctok) = iter.next() {
+        match *ctok {
+            CheckedToken::Const(tref) => {
+                conststr.extend_from_slice(tref);
+                conststr.push(b' ');
+            }
+            CheckedToken::Var(tref, _) => {
+                conststr.extend_from_slice(tref);
+                conststr.push(b' ');
+                mvars.push(tref.to_owned());
+            }
+        }
+    }
 
     state.frames_out.push(Frame {
         label: sref.label().to_owned(),
@@ -239,10 +256,11 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef) {
         valid: sref.scope_range(),
         hypotheses: Vec::new(),
         target: VerifyExpr {
-            typecode: typecode,
-            tail: expr,
+            typecode: typecode.to_owned(),
+            tail: Vec::new(),
         },
-        mandatory_vars: Vec::new(),
+        stub_expr: conststr,
+        mandatory_vars: mvars,
         mandatory_dv: Vec::new(),
         optional_dv: Vec::new(),
     });
@@ -369,9 +387,10 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     state.frames_out.push(Frame {
         label: sref.label().to_owned(),
         stype: sref.statement.stype,
-        valid: sref.scope_range(),
+        valid: sref.address().unbounded_range(),
         hypotheses: hyps,
         target: scan_res,
+        stub_expr: Vec::new(),
         mandatory_vars: iframe.var_list,
         mandatory_dv: iframe.mandatory_dv,
         optional_dv: iframe.optional_dv,
@@ -454,7 +473,7 @@ fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>)
         return;
     }
     if let Some(expr) = check_eap(state, sref) {
-        construct_stub_frame(state, sref);
+        construct_stub_frame(state, sref, &expr);
         state.local_essen.push(LocalEssentialInfo {
             valid: sref.scope_range(),
             label: sref.label(),
@@ -468,6 +487,10 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     assert!(sref.math_len() == 2);
     let const_tok = sref.math_at(0);
     let var_tok = sref.math_at(1);
+
+    if !check_label_dup(state, sref) {
+        return;
+    }
 
     match check_math_symbol(state, sref, const_tok) {
         None => {
@@ -514,7 +537,10 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             });
     }
 
-    construct_stub_frame(state, sref);
+    construct_stub_frame(state,
+                         sref,
+                         &[CheckedToken::Const(const_tok.slice),
+                           CheckedToken::Var(var_tok.slice, LocalFloatInfo::default())]);
 }
 
 fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
@@ -631,14 +657,14 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
 }
 
 pub struct ScopeResult {
-    segments: HashMap<SegmentId, Arc<SegmentScopeResult>>,
-    frame_index: HashMap<Token, Vec<(SegmentId, usize)>>,
+    segments: Vec<(SegmentId, Arc<SegmentScopeResult>)>,
+    frame_index: HashMap<Token, (usize, usize)>,
 }
 
 impl ScopeResult {
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
-        for (&sid, &ref ssr) in &self.segments {
+        for &(sid, ref ssr) in &self.segments {
             for (&six, &ref diag) in &ssr.diagnostics {
                 for &ref d in diag {
                     out.push((StatementAddress::new(sid, six), d.clone()));
@@ -651,16 +677,36 @@ impl ScopeResult {
 
 pub fn scope_check(segments: &SegmentSet, names: &Nameset) -> ScopeResult {
     let mut out = ScopeResult {
-        segments: HashMap::new(),
+        segments: Vec::new(),
         frame_index: HashMap::new(),
     };
     for sref in segments.segments() {
         let ssr = Arc::new(scope_check_single(names, sref));
-        out.segments.insert(sref.id, ssr.clone());
+        let six = out.segments.len();
+        out.segments.push((sref.id, ssr.clone()));
 
         for (index, frame) in ssr.frames_out.iter().enumerate() {
-            out.frame_index.entry(frame.label.clone()).or_insert(Vec::new()).push((sref.id, index));
+            let old = out.frame_index.insert(frame.label.clone(), (six, index));
+            assert!(old.is_none(), "check_label_dup should prevent this");
         }
     }
     out
+}
+
+#[derive(Clone,Copy)]
+pub struct ScopeReader<'a> {
+    result: &'a ScopeResult,
+}
+
+impl<'a> ScopeReader<'a> {
+    pub fn new(res: &'a ScopeResult) -> ScopeReader<'a> {
+        ScopeReader { result: res }
+    }
+
+    pub fn get(&self, name: TokenPtr) -> Option<&'a Frame> {
+        match self.result.frame_index.get(name) {
+            None => None,
+            Some(&(six, frix)) => Some(&self.result.segments[six].1.frames_out[frix]),
+        }
+    }
 }

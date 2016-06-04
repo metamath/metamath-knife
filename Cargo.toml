@@ -7,3 +7,4 @@ authors = ["Stefan O'Rear <stefanor@cox.net>"]
 
 [profile.release]
 codegen-units = 2
+debug = true

@@ -41,7 +41,7 @@ impl Span {
     }
 }
 
-#[derive(Copy,Clone,Debug,Eq,PartialEq,Hash)]
+#[derive(Copy,Clone,Debug,Eq,PartialEq,Hash,Default)]
 pub struct SegmentId(pub u32);
 pub type TokenIndex = i32;
 
@@ -135,7 +135,7 @@ impl<'a, T, C: Comparer<T>> Comparer<T> for &'a C {
     }
 }
 
-#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+#[derive(Copy,Clone,Eq,PartialEq,Hash,Debug,Default)]
 pub struct StatementAddress {
     pub segment_id: SegmentId,
     pub index: StatementIndex,
@@ -174,7 +174,7 @@ impl TokenAddress {
     }
 }
 
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy,Clone,Debug,Default)]
 pub struct GlobalRange {
     pub start: StatementAddress,
     pub end: StatementIndex, // or NO_STATEMENT
@@ -360,12 +360,16 @@ impl<'a> StatementRef<'a> {
         }
     }
 
+    pub fn span(&self) -> Span {
+        self.statement.span
+    }
+
     pub fn math_len(&self) -> TokenIndex {
         self.statement.math.len() as TokenIndex
     }
 
-    pub fn span(&self) -> Span {
-        self.statement.span
+    pub fn proof_len(&self) -> TokenIndex {
+        self.statement.proof.len() as TokenIndex
     }
 
     pub fn math_span(&self, ix: TokenIndex) -> Span {
@@ -380,6 +384,10 @@ impl<'a> StatementRef<'a> {
                 token_index: ix,
             },
         }
+    }
+
+    pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
+        self.statement.proof[ix as usize].as_ref(&self.segment.segment.buffer)
     }
 }
 

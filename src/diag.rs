@@ -1,4 +1,4 @@
-use parser::{Comparer, Span, StatementIndex, StatementAddress, StatementRef, SourceInfo,
+use parser::{Comparer, Span, StatementIndex, StatementAddress, StatementRef, SourceInfo, Token,
              TokenIndex, TokenAddress};
 use segment_set::SegmentSet;
 use std::fmt::Display;
@@ -31,9 +31,26 @@ pub enum Diagnostic {
     MissingProof(Span),
     NestedComment(Span, Span),
     NotActiveSymbol(TokenIndex),
+    ProofDvViolation,
+    ProofExcessEnd,
+    ProofIncomplete,
+    ProofInvalidSave,
+    ProofMalformedVarint,
+    ProofNoSteps,
+    ProofUnderflow,
+    ProofUnterminatedRoster,
+    ProofWrongExprEnd,
+    ProofWrongTypeEnd,
     RepeatedLabel(Span, Span),
     SpuriousLabel(Span),
     SpuriousProof(Span),
+    StepEssenWrong,
+    StepEssenWrongType,
+    StepFloatWrongType,
+    StepMissing(Token),
+    StepOutOfRange,
+    StepUsedAfterScope(Token),
+    StepUsedBeforeDefinition(Token),
     SymbolDuplicatesLabel(TokenIndex, StatementAddress),
     SymbolRedeclared(TokenIndex, TokenAddress),
     UnclosedBeforeEof,
@@ -97,6 +114,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
     use self::Diagnostic::*;
     fn d<V: Display>(v: V) -> String {
         format!("{}", v)
+    }
+
+    fn t(v: &Token) -> String {
+        String::from_utf8(v.to_owned()).expect("utf-8 is checked before making Token")
     }
 
     match *diag {
@@ -336,6 +357,46 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
                      Error,
                      Vec::new());
         }
+        ProofDvViolation => {
+            let s = "Disjoint variable constraint violated";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofExcessEnd => {
+            let s = "Must be exactly one statement on stack at end of proof";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofIncomplete => {
+            let s = "Proof is incomplete";
+            annotate(notes, stmt, s, stmt.span(), Warning, vec![]);
+        }
+        ProofInvalidSave => {
+            let s = "Z must appear immediately after a complete step integer";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofMalformedVarint => {
+            let s = "Proof step number too long or missing terminator";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofNoSteps => {
+            let s = "Proof must have at least one step (use ? if deliberately incomplete)";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofUnderflow => {
+            let s = "Too few statements on stack to satisfy step's mandatory hypotheses";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofUnterminatedRoster => {
+            let s = "List of referenced assertions in a compressed proof must be terminated by )";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofWrongExprEnd => {
+            let s = "Final step statement does not match assertion";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        ProofWrongTypeEnd => {
+            let s = "Final step typecode does not match assertion";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
         RepeatedLabel(lspan, fspan) => {
             annotate(notes,
                      stmt,
@@ -360,6 +421,35 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
                      math_end,
                      Error,
                      Vec::new());
+        }
+        StepEssenWrong => {
+            let s = "Step used for $e hypothesis does not match statement";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        StepEssenWrongType => {
+            let s = "Step used for $e hypothesis does not match typecode";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        StepFloatWrongType => {
+            let s = "Step used for $f hypothesis does not match typecode";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        StepMissing(ref tok) => {
+            let s = "Step {step} referenced by proof does not correspond to a $p statement (or is \
+                     malformed)";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
+        }
+        StepOutOfRange => {
+            let s = "Step in compressed proof is out of range of defined steps";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+        }
+        StepUsedAfterScope(ref tok) => {
+            let s = "Step {step} referenced by proof is a hypothesis not active in this scope";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
+        }
+        StepUsedBeforeDefinition(ref tok) => {
+            let s = "Step {step} referenced by proof has not yet been proved";
+            annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
         }
         SymbolDuplicatesLabel(index, saddr) => {
             annotate(notes,

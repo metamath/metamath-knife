@@ -4,6 +4,7 @@ pub mod nameck;
 pub mod scopeck;
 pub mod segment_set;
 pub mod diag;
+pub mod verify;
 mod util;
 
 #[cfg(test)]
