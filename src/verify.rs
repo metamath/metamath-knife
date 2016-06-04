@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::u32;
 use std::usize;
 use util::fast_clear;
+use util::fast_extend;
 use util::fast_truncate;
 
 #[derive(Clone)]
@@ -196,7 +197,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
         }
 
         let tos = state.prep_buffer.len();
-        state.prep_buffer.extend_from_slice(&frame.stub_expr);
+        fast_extend(&mut state.prep_buffer, &frame.stub_expr);
         let ntos = state.prep_buffer.len();
         state.prepared
             .push(PreparedStep::Hyp(vars, &frame.target.typecode, tos..ntos));
@@ -212,10 +213,10 @@ fn do_substitute(target: &mut Vec<u8>,
     for part in expr {
         match *part {
             ExprFragment::Var(ix) => {
-                target.extend_from_slice(&var_buffer[vars[ix].clone()]);
+                fast_extend(target, &var_buffer[vars[ix].clone()]);
             }
             ExprFragment::Constant(ref string) => {
-                target.extend_from_slice(&string);
+                fast_extend(target, &string);
             }
         }
     }
@@ -225,11 +226,11 @@ fn do_substitute_raw(target: &mut Vec<u8>, expr: &[ExprFragment], vars: &[Vec<u8
     for part in expr {
         match *part {
             ExprFragment::Var(ix) => {
-                target.extend_from_slice(&vars[ix]);
+                fast_extend(target, &vars[ix]);
                 target.push(b' ');
             }
             ExprFragment::Constant(ref string) => {
-                target.extend_from_slice(&string);
+                fast_extend(target, &string);
             }
         }
     }
@@ -254,7 +255,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     let fref = match state.prepared[index] {
         PreparedStep::Hyp(ref vars, code, ref expr) => {
             let tos = state.stack_buffer.len();
-            state.stack_buffer.extend_from_slice(&state.prep_buffer[expr.clone()]);
+            fast_extend(&mut state.stack_buffer, &state.prep_buffer[expr.clone()]);
             let ntos = state.stack_buffer.len();
             state.stack.push(StackSlot {
                 vars: vars.clone(),
@@ -320,7 +321,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
                       state.stack[sbase - 1].expr.end
                   });
     let tos = state.stack_buffer.len();
-    state.stack_buffer.extend_from_slice(&state.temp_buffer);
+    fast_extend(&mut state.stack_buffer, &state.temp_buffer);
     let ntos = state.stack_buffer.len();
 
     state.stack.push(StackSlot {
@@ -371,7 +372,8 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
 fn save_step(state: &mut VerifyState) {
     let top = state.stack.last().expect("can_save should prevent getting here");
     let tos = state.prep_buffer.len();
-    state.prep_buffer.extend_from_slice(&state.stack_buffer[top.expr.clone()]);
+    fast_extend(&mut state.prep_buffer,
+                &state.stack_buffer[top.expr.clone()]);
     let ntos = state.prep_buffer.len();
     state.prepared.push(PreparedStep::Hyp(top.vars.clone(), top.code, tos..ntos));
 }
