@@ -85,17 +85,17 @@ impl SegmentOrder {
         }
     }
 
-    pub fn free_id(&mut self, id: SegmentId) {
-        self.order.remove(self.reverse[id.0 as usize] as usize);
-        self.reindex();
-    }
+    // pub fn free_id(&mut self, id: SegmentId) {
+    //     self.order.remove(self.reverse[id.0 as usize] as usize);
+    //     self.reindex();
+    // }
 
-    pub fn new_after(&mut self, after: SegmentId) -> SegmentId {
-        let id = self.alloc_id();
-        self.order.insert(self.reverse[after.0 as usize] as usize + 1, id);
-        self.reindex();
-        id
-    }
+    // pub fn new_after(&mut self, after: SegmentId) -> SegmentId {
+    //     let id = self.alloc_id();
+    //     self.order.insert(self.reverse[after.0 as usize] as usize + 1, id);
+    //     self.reindex();
+    //     id
+    // }
 
     pub fn new_before(&mut self, after: SegmentId) -> SegmentId {
         let id = self.alloc_id();
@@ -256,17 +256,6 @@ impl<'a> SegmentRef<'a> {
             statement: &self.segment.statements[index as usize],
             index: index,
         }
-    }
-}
-
-#[derive(Clone)]
-pub struct ParserResult {
-    segments: Vec<Option<Arc<Segment>>>,
-}
-
-impl ParserResult {
-    pub fn get_segment(&self, id: SegmentId) -> &Segment {
-        self.segments[id.0 as usize].as_ref().unwrap()
     }
 }
 

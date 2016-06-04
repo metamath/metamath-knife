@@ -1,9 +1,14 @@
-extern crate smetamath;
-use smetamath::segment_set::SegmentSet;
-use smetamath::nameck::Nameset;
-use smetamath::scopeck;
-use smetamath::diag::{self, Notation};
-use smetamath::verify;
+mod diag;
+mod nameck;
+mod parser;
+mod scopeck;
+mod segment_set;
+mod util;
+mod verify;
+
+use segment_set::SegmentSet;
+use nameck::Nameset;
+use diag::Notation;
 use std::env;
 use std::path::PathBuf;
 
