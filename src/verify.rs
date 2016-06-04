@@ -15,10 +15,13 @@ use segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::BitOrAssign;
+use std::ops::Range;
 use std::slice;
 use std::sync::Arc;
 use std::u32;
 use std::usize;
+use util::fast_clear;
+use util::fast_truncate;
 
 #[derive(Clone)]
 struct Bitset {
@@ -41,7 +44,7 @@ impl Bitset {
     fn tail(&self) -> &[usize] {
         match self.tail {
             None => Default::default(),
-            Some(ref bx) => &bx
+            Some(ref bx) => &bx,
         }
     }
 
@@ -133,14 +136,14 @@ impl<'a> Iterator for BitsetIter<'a> {
 }
 
 enum PreparedStep<'a> {
-    Hyp(Bitset, TokenPtr<'a>, Vec<u8>),
+    Hyp(Bitset, TokenPtr<'a>, Range<usize>),
     Assert(&'a Frame),
 }
 
 struct StackSlot<'a> {
     vars: Bitset,
     code: TokenPtr<'a>,
-    expr: Vec<u8>,
+    expr: Range<usize>,
 }
 
 struct VerifyState<'a> {
@@ -148,7 +151,10 @@ struct VerifyState<'a> {
     scoper: ScopeReader<'a>,
     cur_frame: &'a Frame,
     prepared: Vec<PreparedStep<'a>>,
+    prep_buffer: Vec<u8>,
     stack: Vec<StackSlot<'a>>,
+    stack_buffer: Vec<u8>,
+    temp_buffer: Vec<u8>,
     var2bit: HashMap<TokenPtr<'a>, usize>,
     dv_map: Vec<Bitset>,
 }
@@ -189,29 +195,44 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
             vars.set_bit(map_var(state, var));
         }
 
+        let tos = state.prep_buffer.len();
+        state.prep_buffer.extend_from_slice(&frame.stub_expr);
+        let ntos = state.prep_buffer.len();
         state.prepared
-            .push(PreparedStep::Hyp(vars, &frame.target.typecode, frame.stub_expr.clone()));
+            .push(PreparedStep::Hyp(vars, &frame.target.typecode, tos..ntos));
     }
 
     return None;
 }
 
-fn do_substitute(expr: &[ExprFragment], vars: &[Vec<u8>], raw_vars: bool) -> Vec<u8> {
-    let mut out = Vec::new();
+fn do_substitute(target: &mut Vec<u8>,
+                 expr: &[ExprFragment],
+                 vars: &[Range<usize>],
+                 var_buffer: &[u8]) {
     for part in expr {
         match *part {
             ExprFragment::Var(ix) => {
-                out.extend_from_slice(&vars[ix]);
-                if raw_vars {
-                    out.push(b' ');
-                }
+                target.extend_from_slice(&var_buffer[vars[ix].clone()]);
             }
             ExprFragment::Constant(ref string) => {
-                out.extend_from_slice(&string);
+                target.extend_from_slice(&string);
             }
         }
     }
-    out
+}
+
+fn do_substitute_raw(target: &mut Vec<u8>, expr: &[ExprFragment], vars: &[Vec<u8>]) {
+    for part in expr {
+        match *part {
+            ExprFragment::Var(ix) => {
+                target.extend_from_slice(&vars[ix]);
+                target.push(b' ');
+            }
+            ExprFragment::Constant(ref string) => {
+                target.extend_from_slice(&string);
+            }
+        }
+    }
 }
 
 fn do_substitute_vars(expr: &[ExprFragment], vars: &[Bitset]) -> Bitset {
@@ -231,11 +252,14 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     }
 
     let fref = match state.prepared[index] {
-        PreparedStep::Hyp(ref vars, ref code, ref expr) => {
+        PreparedStep::Hyp(ref vars, code, ref expr) => {
+            let tos = state.stack_buffer.len();
+            state.stack_buffer.extend_from_slice(&state.prep_buffer[expr.clone()]);
+            let ntos = state.stack_buffer.len();
             state.stack.push(StackSlot {
                 vars: vars.clone(),
-                code: code.clone(),
-                expr: expr.clone(),
+                code: code,
+                expr: tos..ntos,
             });
             return None;
         }
@@ -249,7 +273,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
 
     let mut subst_exprs = Vec::new();
     let mut subst_vars = Vec::new();
-    subst_exprs.resize(fref.mandatory_vars.len(), Vec::new());
+    subst_exprs.resize(fref.mandatory_vars.len(), 0..0);
     subst_vars.resize(fref.mandatory_vars.len(), Bitset::new());
 
     // check $f, build substitution
@@ -271,17 +295,38 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
             if slot.code != &hyp.expr.typecode[..] {
                 return Some(Diagnostic::StepEssenWrongType);
             }
-            if slot.expr != do_substitute(&hyp.expr.tail, &subst_exprs, false) {
+            fast_clear(&mut state.temp_buffer);
+            do_substitute(&mut state.temp_buffer,
+                          &hyp.expr.tail,
+                          &subst_exprs,
+                          &state.stack_buffer);
+            if state.stack_buffer[slot.expr.clone()] != state.temp_buffer[..] {
                 return Some(Diagnostic::StepEssenWrong);
             }
         }
     }
 
+    fast_clear(&mut state.temp_buffer);
+    do_substitute(&mut state.temp_buffer,
+                  &fref.target.tail,
+                  &subst_exprs,
+                  &state.stack_buffer);
+
     state.stack.truncate(sbase);
+    fast_truncate(&mut state.stack_buffer,
+                  if sbase == 0 {
+                      0
+                  } else {
+                      state.stack[sbase - 1].expr.end
+                  });
+    let tos = state.stack_buffer.len();
+    state.stack_buffer.extend_from_slice(&state.temp_buffer);
+    let ntos = state.stack_buffer.len();
+
     state.stack.push(StackSlot {
         code: &fref.target.typecode,
         vars: do_substitute_vars(&fref.target.tail, &subst_vars),
-        expr: do_substitute(&fref.target.tail, &subst_exprs, false),
+        expr: tos..ntos,
     });
 
     // check $d
@@ -311,10 +356,12 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
         return Some(Diagnostic::ProofWrongTypeEnd);
     }
 
-    if tos.expr !=
-       do_substitute(&state.cur_frame.target.tail,
-                     &state.cur_frame.mandatory_vars,
-                     true) {
+    fast_clear(&mut state.temp_buffer);
+    do_substitute_raw(&mut state.temp_buffer,
+                      &state.cur_frame.target.tail,
+                      &state.cur_frame.mandatory_vars);
+
+    if state.stack_buffer[tos.expr.clone()] != state.temp_buffer[..] {
         return Some(Diagnostic::ProofWrongExprEnd);
     }
 
@@ -323,7 +370,10 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
 
 fn save_step(state: &mut VerifyState) {
     let top = state.stack.last().expect("can_save should prevent getting here");
-    state.prepared.push(PreparedStep::Hyp(top.vars.clone(), top.code.clone(), top.expr.clone()));
+    let tos = state.prep_buffer.len();
+    state.prep_buffer.extend_from_slice(&state.stack_buffer[top.expr.clone()]);
+    let ntos = state.prep_buffer.len();
+    state.prepared.push(PreparedStep::Hyp(top.vars.clone(), top.code, tos..ntos));
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
@@ -344,7 +394,10 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
         order: &sset.order,
         cur_frame: cur_frame,
         stack: Vec::new(),
+        stack_buffer: Vec::new(),
         prepared: Vec::new(),
+        prep_buffer: Vec::new(),
+        temp_buffer: Vec::new(),
         var2bit: HashMap::new(),
         dv_map: Vec::new(),
     };
