@@ -1,5 +1,6 @@
 extern crate fnv;
 
+mod bit_set;
 mod diag;
 mod nameck;
 mod parser;

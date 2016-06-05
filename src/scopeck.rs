@@ -1,3 +1,4 @@
+use bit_set::Bitset;
 use diag::Diagnostic;
 use nameck::NameReader;
 use nameck::Nameset;
@@ -74,11 +75,11 @@ struct LocalEssentialInfo<'a> {
     string: Vec<CheckedToken<'a>>,
 }
 
-pub type MandVarIndex = usize;
+pub type VarIndex = usize;
 
 #[derive(Clone,Debug)]
 pub enum ExprFragment {
-    Var(MandVarIndex),
+    Var(VarIndex),
     Constant(Vec<u8>),
 }
 
@@ -93,7 +94,7 @@ pub struct Hyp {
     pub address: StatementAddress,
     pub label: Token,
     pub is_float: bool,
-    pub variable_index: MandVarIndex,
+    pub variable_index: VarIndex,
     pub expr: VerifyExpr,
 }
 
@@ -105,9 +106,10 @@ pub struct Frame {
     pub hypotheses: Vec<Hyp>,
     pub target: VerifyExpr,
     pub stub_expr: Vec<u8>,
-    pub mandatory_vars: Vec<Token>,
-    pub mandatory_dv: Vec<(MandVarIndex, MandVarIndex)>,
-    pub optional_dv: Vec<(Token, Token)>,
+    pub var_list: Vec<Token>,
+    pub mandatory_count: usize,
+    pub mandatory_dv: Vec<(VarIndex, VarIndex)>,
+    pub optional_dv: Vec<Bitset>,
 }
 
 struct ScopeState<'a> {
@@ -261,17 +263,19 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
             tail: Vec::new(),
         },
         stub_expr: conststr,
-        mandatory_vars: mvars,
+        mandatory_count: mvars.len(),
+        var_list: mvars,
         mandatory_dv: Vec::new(),
         optional_dv: Vec::new(),
     });
 }
 
 struct InchoateFrame<'a> {
-    variables: HashMap<TokenPtr<'a>, (MandVarIndex, LocalFloatInfo<'a>)>,
+    variables: HashMap<TokenPtr<'a>, (VarIndex, LocalFloatInfo<'a>)>,
     var_list: Vec<Token>,
-    mandatory_dv: Vec<(MandVarIndex, MandVarIndex)>,
-    optional_dv: Vec<(Token, Token)>,
+    mandatory_count: usize,
+    mandatory_dv: Vec<(VarIndex, VarIndex)>,
+    optional_dv: Vec<Bitset>,
 }
 
 fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]) -> VerifyExpr {
@@ -299,6 +303,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
                     None => {
                         let index = iframe.variables.len();
                         iframe.var_list.push(tref.to_owned());
+                        iframe.optional_dv.push(Bitset::new());
                         iframe.variables.insert(tref, (index, lfi));
                         index
                     }
@@ -319,15 +324,33 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
 }
 
 fn scan_dv<'a>(iframe: &mut InchoateFrame<'a>, var_set: &[TokenPtr<'a>]) {
-    for (lefti, &lefttok) in var_set.iter().enumerate() {
-        let leftmvi = iframe.variables.get(&lefttok).map(|&(ix, _)| ix);
-        for &righttok in &var_set[lefti + 1..] {
-            if let Some(leftix) = leftmvi {
-                if let Some(rightix) = iframe.variables.get(&righttok).map(|&(ix, _)| ix) {
-                    iframe.mandatory_dv.push((leftix, rightix));
+    // any variable encountered for the first time in a dv is an optional
+    // variable, but we already checked validity in scope_check_dv
+    let mut var_ids = Vec::with_capacity(var_set.len());
+
+    for &vartok in var_set {
+        let index = match iframe.variables.get(vartok).map(|&(x, _)| x) {
+            Some(mvarindex) => mvarindex,
+            None => {
+                let index = iframe.variables.len();
+                iframe.var_list.push(vartok.to_owned());
+                iframe.optional_dv.push(Bitset::new());
+                iframe.variables.insert(vartok, (index, Default::default()));
+                index
+            }
+        };
+        var_ids.push(index);
+    }
+
+    for (leftpos, &leftid) in var_ids.iter().enumerate() {
+        for &rightid in &var_ids[leftpos + 1..] {
+            if !iframe.optional_dv[leftid].has_bit(rightid) {
+                iframe.optional_dv[leftid].set_bit(rightid);
+                iframe.optional_dv[rightid].set_bit(leftid);
+                if leftid < iframe.mandatory_count && rightid < iframe.mandatory_count {
+                    iframe.mandatory_dv.push((leftid, rightid));
                 }
             }
-            iframe.optional_dv.push((lefttok.to_owned(), righttok.to_owned()));
         }
     }
 }
@@ -345,6 +368,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         var_list: Vec::new(),
         optional_dv: Vec::new(),
         mandatory_dv: Vec::new(),
+        mandatory_count: 0,
     };
     let mut hyps = Vec::new();
 
@@ -376,6 +400,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     }
 
     hyps.sort_by(|h1, h2| state.order.cmp(&h1.address, &h2.address));
+    iframe.mandatory_count = iframe.var_list.len();
 
     for &ref dv in &state.gnames.lookup_global_dv() {
         scan_dv(&mut iframe, &dv.vars)
@@ -392,7 +417,8 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         hypotheses: hyps,
         target: scan_res,
         stub_expr: Vec::new(),
-        mandatory_vars: iframe.var_list,
+        var_list: iframe.var_list,
+        mandatory_count: iframe.mandatory_count,
         mandatory_dv: iframe.mandatory_dv,
         optional_dv: iframe.optional_dv,
     });
