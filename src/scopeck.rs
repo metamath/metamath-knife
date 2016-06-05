@@ -92,7 +92,6 @@ pub struct VerifyExpr {
 #[derive(Clone,Debug)]
 pub struct Hyp {
     pub address: StatementAddress,
-    pub label: Token,
     pub is_float: bool,
     pub variable_index: VarIndex,
     pub expr: VerifyExpr,
@@ -376,7 +375,6 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         let scanned = scan_expression(&mut iframe, &ess.string);
         hyps.push(Hyp {
             address: ess.valid.start,
-            label: ess.label.to_owned(),
             is_float: false,
             variable_index: 0,
             expr: scanned,
@@ -389,7 +387,6 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     for &(index, ref lfi) in iframe.variables.values() {
         hyps.push(Hyp {
             address: lfi.valid.start,
-            label: lfi.label.to_owned(),
             is_float: true,
             variable_index: index,
             expr: VerifyExpr {

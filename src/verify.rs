@@ -56,6 +56,30 @@ fn map_var<'a>(state: &mut VerifyState<'a>, token: TokenPtr<'a>) -> usize {
     })
 }
 
+// the initial hypotheses are accessed directly to avoid having to look up their names
+fn prepare_hypotheses(state: &mut VerifyState) {
+    for hyp in &state.cur_frame.hypotheses {
+        let mut vars = Bitset::new();
+        let tos = state.prep_buffer.len();
+
+        for part in &hyp.expr.tail {
+            match *part {
+                ExprFragment::Var(ix) => {
+                    fast_extend(&mut state.prep_buffer, &state.cur_frame.var_list[ix]);
+                    vars.set_bit(ix); // and we have prior knowledge it's identity mapped
+                    state.prep_buffer.push(b' ');
+                }
+                ExprFragment::Constant(ref string) => {
+                    fast_extend(&mut state.prep_buffer, &string);
+                }
+            }
+        }
+
+        let ntos = state.prep_buffer.len();
+        state.prepared.push(PreparedStep::Hyp(vars, &hyp.expr.typecode, tos..ntos));
+    }
+}
+
 fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
     let frame = match state.scoper.get(label) {
         Some(fp) => fp,
@@ -296,11 +320,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
     if stmt.proof_slice_at(0) == b"(" {
         let mut i = 1;
 
-        for h in &cur_frame.hypotheses {
-            if let Some(err) = prepare_step(&mut state, &h.label) {
-                return Some(err);
-            }
-        }
+        prepare_hypotheses(&mut state);
 
         loop {
             if i >= stmt.proof_len() {
