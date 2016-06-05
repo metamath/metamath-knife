@@ -1,7 +1,7 @@
 use std::ops::BitOrAssign;
 use std::slice;
 
-#[derive(Clone,Default,Debug)]
+#[derive(Default,Debug)]
 pub struct Bitset {
     head: usize,
     tail: Option<Box<Vec<usize>>>,
@@ -9,6 +9,24 @@ pub struct Bitset {
 
 fn bits_per_word() -> usize {
     usize::max_value().count_ones() as usize
+}
+
+#[inline(never)]
+fn clone_slow(arg: &Box<Vec<usize>>) -> Box<Vec<usize>> {
+    arg.clone()
+}
+
+impl Clone for Bitset {
+    #[inline]
+    fn clone(&self) -> Bitset {
+        Bitset {
+            head: self.head,
+            tail: match self.tail {
+                None => None,
+                Some(ref tail) => Some(clone_slow(&tail)),
+            }
+        }
+    }
 }
 
 impl Bitset {
