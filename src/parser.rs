@@ -1,9 +1,9 @@
+use diag::Diagnostic;
+use std::cmp::Ordering;
 use std::mem;
+use std::slice;
 use std::str;
 use std::sync::Arc;
-use std::slice;
-use std::cmp::Ordering;
-use diag::Diagnostic;
 
 pub type BufferRef = Arc<Vec<u8>>;
 /// change me if you want to parse files > 4GB
@@ -233,6 +233,7 @@ pub struct Segment {
     pub source: Arc<SourceInfo>,
     // straight outputs
     pub statements: Vec<Statement>,
+    span_pool: Vec<Span>,
     pub diagnostics: Vec<(StatementIndex, Diagnostic)>,
     pub next_file: Span,
     // crossed outputs
@@ -297,15 +298,17 @@ impl StatementType {
     }
 }
 
-#[derive(Clone,Debug)]
+#[derive(Copy,Clone,Debug)]
 pub struct Statement {
     pub stype: StatementType,
     span: Span,
     label: Span,
     pub group: StatementIndex,
     pub group_end: StatementIndex,
-    math: Vec<Span>,
-    proof: Vec<Span>,
+    // indices into span_pool
+    math_start: usize,
+    proof_start: usize,
+    proof_end: usize,
 }
 
 #[derive(Copy,Clone)]
@@ -341,8 +344,9 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn math_iter(&self) -> TokenIter<'a> {
+        let range = self.statement.math_start .. self.statement.proof_start;
         TokenIter {
-            slice_iter: self.statement.math.iter(),
+            slice_iter: self.segment.segment.span_pool[range].iter(),
             buffer: &self.segment.segment.buffer,
             stmt_address: self.address(),
             index: 0,
@@ -354,20 +358,24 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn math_len(&self) -> TokenIndex {
-        self.statement.math.len() as TokenIndex
+        (self.statement.proof_start - self.statement.math_start) as TokenIndex
     }
 
     pub fn proof_len(&self) -> TokenIndex {
-        self.statement.proof.len() as TokenIndex
+        (self.statement.proof_end - self.statement.proof_start) as TokenIndex
     }
 
     pub fn math_span(&self, ix: TokenIndex) -> Span {
-        self.statement.math[ix as usize]
+        self.segment.segment.span_pool[self.statement.math_start + ix as usize]
+    }
+
+    pub fn proof_span(&self, ix: TokenIndex) -> Span {
+        self.segment.segment.span_pool[self.statement.proof_start + ix as usize]
     }
 
     pub fn math_at(&self, ix: TokenIndex) -> TokenRef<'a> {
         TokenRef {
-            slice: self.statement.math[ix as usize].as_ref(&self.segment.segment.buffer),
+            slice: self.math_span(ix).as_ref(&self.segment.segment.buffer),
             address: TokenAddress {
                 statement: self.address(),
                 token_index: ix,
@@ -376,7 +384,7 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
-        self.statement.proof[ix as usize].as_ref(&self.segment.segment.buffer)
+        self.proof_span(ix).as_ref(&self.segment.segment.buffer)
     }
 }
 
@@ -446,10 +454,13 @@ struct Scanner<'a> {
     buffer_ref: BufferRef,
     position: FilePos,
     diagnostics: Vec<(StatementIndex, Diagnostic)>,
+    span_pool: Vec<Span>,
     unget: Option<Span>,
     labels: Vec<Span>,
     statement_start: FilePos,
     statement_index: StatementIndex,
+    statement_math_start: usize,
+    statement_proof_start: usize,
     has_bad_labels: bool,
     invalidated: bool,
 }
@@ -577,15 +588,14 @@ impl<'a> Scanner<'a> {
 
     fn out_statement(&mut self,
                      stype: StatementType,
-                     label: Span,
-                     math: Vec<Span>,
-                     proof: Vec<Span>)
+                     label: Span)
                      -> Statement {
         Statement {
             stype: stype,
             label: label,
-            math: math,
-            proof: proof,
+            math_start: self.statement_math_start,
+            proof_start: self.statement_proof_start,
+            proof_end: self.span_pool.len(),
             group: NO_STATEMENT,
             group_end: NO_STATEMENT,
             span: Span::new2(mem::replace(&mut self.statement_start, self.position),
@@ -603,7 +613,7 @@ impl<'a> Scanner<'a> {
                 } else {
                     Comment
                 };
-                return Some(self.out_statement(stype, Span::null(), Vec::new(), Vec::new()));
+                return Some(self.out_statement(stype, Span::null()));
             } else {
                 self.unget = Some(ftok);
             }
@@ -653,8 +663,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn get_string(&mut self, expect_proof: bool, is_proof: bool) -> (Vec<Span>, bool) {
-        let mut out = Vec::new();
+    fn get_string(&mut self, expect_proof: bool, is_proof: bool) -> bool {
         while let Some(tokn) = self.get() {
             let toknref = tokn.as_ref(self.buffer);
             if toknref.contains(&b'$') {
@@ -663,20 +672,20 @@ impl<'a> Scanner<'a> {
                     if expect_proof {
                         self.diag(Diagnostic::MissingProof(tokn));
                     }
-                    return (out, false);
+                    return false;
                 } else if toknref == b"$=" && !is_proof {
                     // string is closed with a proof
                     if !expect_proof {
                         self.diag(Diagnostic::SpuriousProof(tokn));
                     }
-                    return (out, true);
+                    return true;
                 } else {
                     // string is closed with no proof and with an error, whoops
                     self.unget = Some(tokn);
                     break;
                 }
             } else {
-                out.push(tokn);
+                self.span_pool.push(tokn);
             }
         }
 
@@ -685,27 +694,26 @@ impl<'a> Scanner<'a> {
         } else {
             Diagnostic::UnclosedMath
         });
-        return (out, false);
+        return false;
     }
 
-    fn get_strings(&mut self, want_proof: bool) -> (Vec<Span>, Vec<Span>) {
-        let (math_str, has_proof) = self.get_string(want_proof, false);
+    fn get_strings(&mut self, want_proof: bool) {
+        let has_proof = self.get_string(want_proof, false);
+        self.statement_proof_start = self.span_pool.len();
 
-        if math_str.len() == 0 {
+        if self.statement_proof_start == self.statement_math_start {
             self.invalidated = true;
             // this is invalid for all types of math string
             self.diag(Diagnostic::EmptyMathString);
         }
 
-        let (proof_str, _) = if has_proof {
+        if has_proof {
             // diagnostic already generated if unwanted, but we still need to eat the proof
-            self.get_string(false, true)
+            self.get_string(false, true);
         } else {
             // diagnostic already generated if unwanted.  this is NOT an invalidation as $p
             // statements don't need proofs (I mean you should have a ? but we know what you mean)
-            (Vec::new(), false)
-        };
-        (math_str, proof_str)
+        }
     }
 
     fn eat_invalid(&mut self) {
@@ -754,6 +762,8 @@ impl<'a> Scanner<'a> {
 
     fn get_statement(&mut self) -> Statement {
         self.statement_start = self.position;
+        self.statement_math_start = self.span_pool.len();
+        self.statement_proof_start = self.span_pool.len();
 
         if let Some(stmt) = self.get_comment_statement() {
             return stmt;
@@ -794,25 +804,24 @@ impl<'a> Scanner<'a> {
             Span::null()
         };
 
-        let (math, proof) = if stype.takes_math() {
-            self.get_strings(stype == Provable)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        if stype.takes_math() {
+            self.get_strings(stype == Provable);
+        }
 
+        let math_len = self.statement_proof_start - self.statement_math_start;
         match stype {
             FileInclude => {
                 label = self.get_file_include();
             }
             Disjoint => {
                 // math.len = 1 was caught above
-                if math.len() == 1 {
+                if math_len == 1 {
                     self.diag(Diagnostic::DisjointSingle);
                     self.invalidated = true;
                 }
             }
             Floating => {
-                if math.len() != 0 && math.len() != 2 {
+                if math_len != 0 && math_len != 2 {
                     self.diag(Diagnostic::BadFloating);
                     self.invalidated = true;
                 }
@@ -828,7 +837,7 @@ impl<'a> Scanner<'a> {
             stype = Invalid;
         }
 
-        self.out_statement(stype, label, math, proof)
+        self.out_statement(stype, label)
     }
 
     fn get_segment(&mut self) -> (Segment, bool) {
@@ -842,6 +851,7 @@ impl<'a> Scanner<'a> {
             buffer: self.buffer_ref.clone(),
             source: self.source.clone(),
             diagnostics: Vec::new(),
+            span_pool: Vec::new(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -907,6 +917,7 @@ impl<'a> Scanner<'a> {
         }
 
         seg.diagnostics = mem::replace(&mut self.diagnostics, Vec::new());
+        seg.span_pool = mem::replace(&mut self.span_pool, Vec::new());
         collect_definitions(&mut seg);
         (seg, is_end)
     }
@@ -927,9 +938,11 @@ fn collect_definitions(seg: &mut Segment) {
             continue;
         }
 
+        let math = &seg.span_pool[stmt.math_start .. stmt.proof_start];
+
         match stmt.stype {
             Constant => {
-                for (sindex, &span) in stmt.math.iter().enumerate() {
+                for (sindex, &span) in math.iter().enumerate() {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Constant,
                         start: index,
@@ -939,7 +952,7 @@ fn collect_definitions(seg: &mut Segment) {
                 }
             }
             Variable => {
-                for (sindex, &span) in stmt.math.iter().enumerate() {
+                for (sindex, &span) in math.iter().enumerate() {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Variable,
                         start: index,
@@ -951,15 +964,15 @@ fn collect_definitions(seg: &mut Segment) {
             Disjoint => {
                 seg.global_dvs.push(GlobalDv {
                     start: index,
-                    vars: stmt.math.iter().map(|sp| sp.as_ref(buf).to_owned()).collect(),
+                    vars: math.iter().map(|sp| sp.as_ref(buf).to_owned()).collect(),
                 });
             }
             Floating => {
                 seg.floats.push(FloatDef {
                     start: index,
-                    typecode: stmt.math[0].as_ref(buf).to_owned(),
+                    typecode: math[0].as_ref(buf).to_owned(),
                     label: stmt.label.as_ref(buf).to_owned(),
-                    name: stmt.math[1].as_ref(buf).to_owned(),
+                    name: math[1].as_ref(buf).to_owned(),
                 });
             }
             _ => {}
