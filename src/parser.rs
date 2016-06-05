@@ -11,7 +11,7 @@ pub type FilePos = u32;
 pub type StatementIndex = i32;
 pub const NO_STATEMENT: StatementIndex = -1; // TODO: evaluate just using Option
 
-#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+#[derive(Copy,Clone,Eq,PartialEq,Debug,Default)]
 pub struct Span {
     pub start: FilePos,
     pub end: FilePos,
@@ -34,6 +34,10 @@ impl Span {
 
     pub fn null() -> Span {
         Span::new(0, 0)
+    }
+
+    pub fn is_null(self) -> bool {
+        self.end == 0
     }
 
     pub fn as_ref(self, buf: &[u8]) -> &[u8] {
@@ -455,7 +459,7 @@ struct Scanner<'a> {
     position: FilePos,
     diagnostics: Vec<(StatementIndex, Diagnostic)>,
     span_pool: Vec<Span>,
-    unget: Option<Span>,
+    unget: Span,
     labels: Vec<Span>,
     statement_start: FilePos,
     statement_index: StatementIndex,
@@ -489,7 +493,7 @@ impl<'a> Scanner<'a> {
         self.diagnostics.push((self.statement_index, diag));
     }
 
-    fn get_raw(&mut self) -> Option<Span> {
+    fn get_raw(&mut self) -> Span {
         let len = self.buffer.len();
         let mut ix = self.position as usize;
 
@@ -526,16 +530,20 @@ impl<'a> Scanner<'a> {
 
         self.position = ix as FilePos;
         if start == ix {
-            None
+            Span::null()
         } else {
-            Some(Span::new(start, ix))
+            Span::new(start, ix)
         }
     }
 
     fn get_comment(&mut self, opener: Span, mid_statement: bool) -> CommentType {
         let mut ctype = CommentType::Normal;
         let mut first = true;
-        while let Some(tok) = self.get_raw() {
+        loop {
+            let tok = self.get_raw();
+            if tok.is_null() {
+                break;
+            }
             let tok_ref = tok.as_ref(self.buffer);
             if tok_ref == b"$)" {
                 return ctype;
@@ -569,21 +577,23 @@ impl<'a> Scanner<'a> {
         ctype
     }
 
-    fn get(&mut self) -> Option<Span> {
-        if self.unget.is_some() {
-            return self.unget.take();
+    fn get(&mut self) -> Span {
+        if !self.unget.is_null() {
+            return mem::replace(&mut self.unget, Span::null());
         }
 
-        while let Some(tok) = self.get_raw() {
+        loop {
+            let tok = self.get_raw();
+            if tok.is_null() {
+                return Span::null();
+            }
             let tok_ref = tok.as_ref(self.buffer);
             if tok_ref == b"$(" {
                 self.get_comment(tok, true);
             } else {
-                return Some(tok);
+                return tok;
             }
         }
-
-        None
     }
 
     fn out_statement(&mut self,
@@ -604,7 +614,8 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_comment_statement(&mut self) -> Option<Statement> {
-        if let Some(ftok) = self.get_raw() {
+        let ftok = self.get_raw();
+        if ftok != Span::null() {
             let ftok_ref = ftok.as_ref(self.buffer);
             if ftok_ref == b"$(" {
                 let ctype = self.get_comment(ftok, false);
@@ -615,7 +626,7 @@ impl<'a> Scanner<'a> {
                 };
                 return Some(self.out_statement(stype, Span::null()));
             } else {
-                self.unget = Some(ftok);
+                self.unget = ftok;
             }
         }
         None
@@ -624,10 +635,14 @@ impl<'a> Scanner<'a> {
     fn read_labels(&mut self) {
         self.has_bad_labels = false;
         self.labels.clear();
-        while let Some(ltok) = self.get() {
+        loop {
+            let ltok = self.get();
+            if ltok.is_null() {
+                break;
+            }
             let lref = ltok.as_ref(self.buffer);
             if lref.contains(&b'$') {
-                self.unget = Some(ltok);
+                self.unget = ltok;
                 break;
             } else if !is_valid_label(lref) {
                 self.diag(Diagnostic::BadLabel(ltok));
@@ -664,7 +679,11 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_string(&mut self, expect_proof: bool, is_proof: bool) -> bool {
-        while let Some(tokn) = self.get() {
+        loop {
+            let tokn = self.get();
+            if tokn.is_null() {
+                break;
+            }
             let toknref = tokn.as_ref(self.buffer);
             if toknref.contains(&b'$') {
                 if toknref == b"$." {
@@ -681,7 +700,7 @@ impl<'a> Scanner<'a> {
                     return true;
                 } else {
                     // string is closed with no proof and with an error, whoops
-                    self.unget = Some(tokn);
+                    self.unget = tokn;
                     break;
                 }
             } else {
@@ -717,7 +736,11 @@ impl<'a> Scanner<'a> {
     }
 
     fn eat_invalid(&mut self) {
-        while let Some(tok) = self.get() {
+        loop {
+            let tok = self.get();
+            if tok.is_null() {
+                break;
+            }
             let tref = tok.as_ref(self.buffer);
             if tref == b"$." {
                 // we're probably synchronized
@@ -726,7 +749,7 @@ impl<'a> Scanner<'a> {
                 // this is definitely not it
             } else if tref.contains(&b'$') {
                 // might be the start of the next statement
-                self.unget = Some(tok);
+                self.unget = tok;
                 break;
             }
         }
@@ -735,7 +758,11 @@ impl<'a> Scanner<'a> {
     fn get_file_include(&mut self) -> Span {
         let mut res = Span::null();
         let mut count = 0;
-        while let Some(tok) = self.get() {
+        loop {
+            let tok = self.get();
+            if tok.is_null() {
+                break;
+            }
             let tref = tok.as_ref(self.buffer);
             if tref == b"$]" {
                 if count == 0 {
@@ -772,7 +799,8 @@ impl<'a> Scanner<'a> {
         self.read_labels();
 
         let mut stype = Eof;
-        if let Some(kwtok) = self.get() {
+        let kwtok = self.get();
+        if !kwtok.is_null() {
             let kwtok_ref = kwtok.as_ref(self.buffer);
             stype = if kwtok_ref.len() == 2 && kwtok_ref[0] == b'$' {
                 match kwtok_ref[1] {
