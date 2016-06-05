@@ -1,5 +1,6 @@
 use bit_set::Bitset;
 use diag::Diagnostic;
+use nameck::Atom;
 use parser::Comparer;
 use parser::NO_STATEMENT;
 use parser::SegmentId;
@@ -25,13 +26,13 @@ use util::HashMap;
 use util::new_map;
 
 enum PreparedStep<'a> {
-    Hyp(Bitset, TokenPtr<'a>, Range<usize>),
+    Hyp(Bitset, Atom, Range<usize>),
     Assert(&'a Frame),
 }
 
-struct StackSlot<'a> {
+struct StackSlot {
     vars: Bitset,
-    code: TokenPtr<'a>,
+    code: Atom,
     expr: Range<usize>,
 }
 
@@ -41,7 +42,7 @@ struct VerifyState<'a> {
     cur_frame: &'a Frame,
     prepared: Vec<PreparedStep<'a>>,
     prep_buffer: Vec<u8>,
-    stack: Vec<StackSlot<'a>>,
+    stack: Vec<StackSlot>,
     stack_buffer: Vec<u8>,
     temp_buffer: Vec<u8>,
     subst_info: Vec<(Range<usize>, Bitset)>,
@@ -51,9 +52,7 @@ struct VerifyState<'a> {
 
 fn map_var<'a>(state: &mut VerifyState<'a>, token: TokenPtr<'a>) -> usize {
     let nbit = state.var2bit.len();
-    *state.var2bit.entry(token).or_insert_with(|| {
-        nbit
-    })
+    *state.var2bit.entry(token).or_insert(nbit)
 }
 
 // the initial hypotheses are accessed directly to avoid having to look up their names
@@ -76,7 +75,7 @@ fn prepare_hypotheses(state: &mut VerifyState) {
         }
 
         let ntos = state.prep_buffer.len();
-        state.prepared.push(PreparedStep::Hyp(vars, &hyp.expr.typecode, tos..ntos));
+        state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
     }
 }
 
@@ -111,7 +110,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
         fast_extend(&mut state.prep_buffer, &frame.stub_expr);
         let ntos = state.prep_buffer.len();
         state.prepared
-            .push(PreparedStep::Hyp(vars, &frame.target.typecode, tos..ntos));
+            .push(PreparedStep::Hyp(vars, frame.target.typecode, tos..ntos));
     }
 
     return None;
@@ -191,7 +190,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     for (ix, hyp) in fref.hypotheses.iter().enumerate() {
         if hyp.is_float {
             let slot = &state.stack[sbase + ix];
-            if slot.code != &hyp.expr.typecode[..] {
+            if slot.code != hyp.expr.typecode {
                 return Some(Diagnostic::StepFloatWrongType);
             }
             state.subst_info[hyp.variable_index] = (slot.expr.clone(), slot.vars.clone());
@@ -202,7 +201,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     for (ix, hyp) in fref.hypotheses.iter().enumerate() {
         if !hyp.is_float {
             let slot = &state.stack[sbase + ix];
-            if slot.code != &hyp.expr.typecode[..] {
+            if slot.code != hyp.expr.typecode {
                 return Some(Diagnostic::StepEssenWrongType);
             }
             fast_clear(&mut state.temp_buffer);
@@ -236,7 +235,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     let ntos = state.stack_buffer.len();
 
     state.stack.push(StackSlot {
-        code: &fref.target.typecode,
+        code: fref.target.typecode,
         vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
         expr: tos..ntos,
     });
@@ -264,7 +263,7 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
     }
     let tos = state.stack.last().unwrap();
 
-    if tos.code != &state.cur_frame.target.typecode[..] {
+    if tos.code != state.cur_frame.target.typecode {
         return Some(Diagnostic::ProofWrongTypeEnd);
     }
 

@@ -159,7 +159,7 @@ impl StatementAddress {
     }
 }
 
-#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+#[derive(Copy,Clone,Eq,PartialEq,Debug,Default)]
 pub struct TokenAddress {
     pub statement: StatementAddress,
     pub token_index: TokenIndex,

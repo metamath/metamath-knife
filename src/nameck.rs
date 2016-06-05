@@ -2,6 +2,7 @@
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
+use std::u32;
 use parser::{Comparer, Segment, SegmentId, SegmentOrder, StatementAddress, SymbolType, Token,
              TokenAddress, TokenPtr};
 use segment_set::SegmentSet;
@@ -10,7 +11,8 @@ use util::HashMap;
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
-// pub struct Atom(u32);
+#[derive(Copy,Clone,Debug,PartialEq,Eq,Default)]
+pub struct Atom(u32);
 
 type NameSlot<A, V> = Vec<(A, V)>;
 
@@ -52,15 +54,30 @@ fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
 
 #[derive(Default, PartialEq, Eq, Debug)]
 struct SymbolInfo {
+    atom: Atom,
     all: NameSlot<TokenAddress, SymbolType>,
     constant: NameSlot<TokenAddress, ()>,
-    float: NameSlot<StatementAddress, (Token, Token)>,
+    float: NameSlot<StatementAddress, (Token, Token, Atom)>,
+}
+
+#[derive(Default,Debug)]
+struct AtomTable {
+    table: HashMap<Token, Atom>,
+}
+
+fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
+    let next = Atom(table.table.len() as u32 + 1);
+    match table.table.get(tok) {
+        None => {}
+        Some(atom) => return *atom,
+    };
+    table.table.insert(tok.to_owned(), next);
+    next
 }
 
 #[derive(Default,Debug)]
 pub struct Nameset {
-    // next_atom: u32,
-    // unused_atoms: Vec<Atom>,
+    atom_table: AtomTable,
     pub order: Arc<SegmentOrder>,
 
     segments: HashMap<SegmentId, Arc<Segment>>,
@@ -107,6 +124,9 @@ impl Nameset {
 
         for &ref symdef in &seg.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
+            if slot.atom == Atom::default() {
+                slot.atom = intern(&mut self.atom_table, &symdef.name);
+            }
             let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
             slot_insert(&mut slot.all, &*self.order, address, symdef.stype);
             if symdef.stype == SymbolType::Constant {
@@ -124,11 +144,15 @@ impl Nameset {
 
         for &ref floatdef in &seg.floats {
             let slot = autoviv(&mut self.symbols, floatdef.name.clone());
+            if slot.atom == Atom::default() {
+                slot.atom = intern(&mut self.atom_table, &floatdef.name);
+            }
             let address = StatementAddress::new(id, floatdef.start);
+            let tcatom = intern(&mut self.atom_table, &floatdef.typecode);
             slot_insert(&mut slot.float,
                         &*self.order,
                         address,
-                        (floatdef.label.clone(), floatdef.typecode.clone()));
+                        (floatdef.label.clone(), floatdef.typecode.clone(), tcatom));
         }
 
         for &ref dvdef in &seg.global_dvs {
@@ -180,6 +204,7 @@ pub struct LookupLabel {
 
 pub struct LookupSymbol {
     pub stype: SymbolType,
+    pub atom: Atom,
     /// Address of topmost global $c/$v with this token
     pub address: TokenAddress,
     /// Address of topmost global $c, if any
@@ -191,6 +216,7 @@ pub struct LookupFloat<'a> {
     pub address: StatementAddress,
     pub label: TokenPtr<'a>,
     pub typecode: TokenPtr<'a>,
+    pub typecode_atom: Atom,
 }
 
 pub struct LookupGlobalDv<'a> {
@@ -217,6 +243,7 @@ impl<'a> NameReader<'a> {
             syminfo.all.first().map(|&(addr, stype)| {
                 LookupSymbol {
                     stype: stype,
+                    atom: syminfo.atom,
                     address: addr,
                     const_address: syminfo.constant.first().map(|&(addr, _)| addr),
                 }
@@ -227,11 +254,12 @@ impl<'a> NameReader<'a> {
     // TODO: consider merging this with lookup_symbol
     pub fn lookup_float(&mut self, symbol: TokenPtr) -> Option<LookupFloat<'a>> {
         self.nameset.symbols.get(symbol).and_then(|&ref syminfo| {
-            syminfo.float.first().map(|&(addr, (ref label, ref typecode))| {
+            syminfo.float.first().map(|&(addr, (ref label, ref typecode, tcatom))| {
                 LookupFloat {
                     address: addr,
                     label: &label,
                     typecode: &typecode,
+                    typecode_atom: tcatom,
                 }
             })
         })
