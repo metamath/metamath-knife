@@ -70,7 +70,7 @@ fn prepare_hypotheses(state: &mut VerifyState) {
                     state.prep_buffer.push(b' ');
                 }
                 ExprFragment::Constant(ref string) => {
-                    fast_extend(&mut state.prep_buffer, &string);
+                    fast_extend(&mut state.prep_buffer, &state.cur_frame.const_pool[string.clone()]);
                 }
             }
         }
@@ -118,6 +118,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
 }
 
 fn do_substitute(target: &mut Vec<u8>,
+                 frame: &Frame,
                  expr: &[ExprFragment],
                  vars: &[(Range<usize>, Bitset)],
                  var_buffer: &[u8]) {
@@ -127,21 +128,21 @@ fn do_substitute(target: &mut Vec<u8>,
                 fast_extend(target, &var_buffer[vars[ix].0.clone()]);
             }
             ExprFragment::Constant(ref string) => {
-                fast_extend(target, &string);
+                fast_extend(target, &frame.const_pool[string.clone()]);
             }
         }
     }
 }
 
-fn do_substitute_raw(target: &mut Vec<u8>, expr: &[ExprFragment], vars: &[Vec<u8>]) {
-    for part in expr {
+fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame) {
+    for part in &frame.target.tail {
         match *part {
             ExprFragment::Var(ix) => {
-                fast_extend(target, &vars[ix]);
+                fast_extend(target, &frame.var_list[ix]);
                 target.push(b' ');
             }
             ExprFragment::Constant(ref string) => {
-                fast_extend(target, &string);
+                fast_extend(target, &frame.const_pool[string.clone()]);
             }
         }
     }
@@ -206,6 +207,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
             }
             fast_clear(&mut state.temp_buffer);
             do_substitute(&mut state.temp_buffer,
+                          fref,
                           &hyp.expr.tail,
                           &state.subst_info,
                           &state.stack_buffer);
@@ -217,6 +219,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
 
     fast_clear(&mut state.temp_buffer);
     do_substitute(&mut state.temp_buffer,
+                  fref,
                   &fref.target.tail,
                   &state.subst_info,
                   &state.stack_buffer);
@@ -267,8 +270,7 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
 
     fast_clear(&mut state.temp_buffer);
     do_substitute_raw(&mut state.temp_buffer,
-                      &state.cur_frame.target.tail,
-                      &state.cur_frame.var_list);
+                      &state.cur_frame);
 
     if state.stack_buffer[tos.expr.clone()] != state.temp_buffer[..] {
         return Some(Diagnostic::ProofWrongExprEnd);

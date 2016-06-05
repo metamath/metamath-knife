@@ -4,23 +4,24 @@ use nameck::NameReader;
 use nameck::Nameset;
 use parser::Comparer;
 use parser::GlobalRange;
+use parser::NO_STATEMENT;
 use parser::SegmentId;
+use parser::SegmentOrder;
 use parser::SegmentRef;
 use parser::StatementAddress;
-use parser::StatementRef;
 use parser::StatementIndex;
+use parser::StatementRef;
 use parser::StatementType;
 use parser::SymbolType;
-use parser::SegmentOrder;
 use parser::Token;
 use parser::TokenAddress;
 use parser::TokenPtr;
 use parser::TokenRef;
-use parser::NO_STATEMENT;
 use segment_set::SegmentSet;
 use std::cmp::Ordering;
-use std::mem;
+use std::ops::Range;
 use std::sync::Arc;
+use util::fast_extend;
 use util::HashMap;
 use util::new_map;
 
@@ -80,7 +81,7 @@ pub type VarIndex = usize;
 #[derive(Clone,Debug)]
 pub enum ExprFragment {
     Var(VarIndex),
-    Constant(Vec<u8>),
+    Constant(Range<usize>),
 }
 
 #[derive(Clone,Debug)]
@@ -102,6 +103,7 @@ pub struct Frame {
     pub label: Token,
     pub stype: StatementType,
     pub valid: GlobalRange,
+    pub const_pool: Vec<u8>,
     pub hypotheses: Vec<Hyp>,
     pub target: VerifyExpr,
     pub stub_expr: Vec<u8>,
@@ -261,6 +263,7 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
             typecode: typecode.to_owned(),
             tail: Vec::new(),
         },
+        const_pool: Vec::new(),
         stub_expr: conststr,
         mandatory_count: mvars.len(),
         var_list: mvars,
@@ -275,6 +278,7 @@ struct InchoateFrame<'a> {
     mandatory_count: usize,
     mandatory_dv: Vec<(VarIndex, VarIndex)>,
     optional_dv: Vec<Bitset>,
+    const_pool: Vec<u8>,
 }
 
 fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]) -> VerifyExpr {
@@ -283,18 +287,19 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
         &CheckedToken::Const(tptr) => tptr,
         _ => unreachable!(),
     };
-    let mut open_const = Vec::new();
+    let mut open_const = iframe.const_pool.len();
     let mut tail = Vec::new();
 
     while let Some(ctok) = iter.next() {
         match *ctok {
             CheckedToken::Const(tref) => {
-                open_const.extend_from_slice(tref);
-                open_const.push(b' ');
+                fast_extend(&mut iframe.const_pool, tref);
+                iframe.const_pool.push(b' ');
             }
             CheckedToken::Var(tref, lfi) => {
-                if !open_const.is_empty() {
-                    tail.push(ExprFragment::Constant(mem::replace(&mut open_const, Vec::new())));
+                if open_const != iframe.const_pool.len() {
+                    tail.push(ExprFragment::Constant(open_const .. iframe.const_pool.len()));
+                    open_const = iframe.const_pool.len();
                 }
 
                 let index = match iframe.variables.get(&tref).map(|&(x, _)| x) {
@@ -312,8 +317,8 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
         }
     }
 
-    if !open_const.is_empty() {
-        tail.push(ExprFragment::Constant(mem::replace(&mut open_const, Vec::new())));
+    if open_const != iframe.const_pool.len() {
+        tail.push(ExprFragment::Constant(open_const .. iframe.const_pool.len()));
     }
 
     VerifyExpr {
@@ -368,6 +373,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         optional_dv: Vec::new(),
         mandatory_dv: Vec::new(),
         mandatory_count: 0,
+        const_pool: Vec::new(),
     };
     let mut hyps = Vec::new();
 
@@ -414,6 +420,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         hypotheses: hyps,
         target: scan_res,
         stub_expr: Vec::new(),
+        const_pool: iframe.const_pool,
         var_list: iframe.var_list,
         mandatory_count: iframe.mandatory_count,
         mandatory_dv: iframe.mandatory_dv,
