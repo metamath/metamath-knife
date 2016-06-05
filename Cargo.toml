@@ -9,5 +9,5 @@ fnv = "1.0.2"
 [profile]
 
 [profile.release]
-codegen-units = 2
+codegen-units = 1
 debug = true
