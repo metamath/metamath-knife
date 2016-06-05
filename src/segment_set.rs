@@ -62,10 +62,8 @@ impl SegmentSet {
     pub fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
         for sgref in self.segments() {
-            for stref in sgref.statement_iter() {
-                for &ref d in &stref.statement.diagnostics {
-                    out.push((stref.address(), d.clone()));
-                }
+            for &(ix, ref d) in &sgref.segment.diagnostics {
+                out.push((StatementAddress::new(sgref.id, ix), d.clone()));
             }
         }
         out

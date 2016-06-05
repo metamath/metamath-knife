@@ -69,7 +69,8 @@ fn prepare_hypotheses(state: &mut VerifyState) {
                     state.prep_buffer.push(b' ');
                 }
                 ExprFragment::Constant(ref string) => {
-                    fast_extend(&mut state.prep_buffer, &state.cur_frame.const_pool[string.clone()]);
+                    fast_extend(&mut state.prep_buffer,
+                                &state.cur_frame.const_pool[string.clone()]);
                 }
             }
         }
@@ -268,8 +269,7 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
     }
 
     fast_clear(&mut state.temp_buffer);
-    do_substitute_raw(&mut state.temp_buffer,
-                      &state.cur_frame);
+    do_substitute_raw(&mut state.temp_buffer, &state.cur_frame);
 
     if state.stack_buffer[tos.expr.clone()] != state.temp_buffer[..] {
         return Some(Diagnostic::ProofWrongExprEnd);
@@ -288,7 +288,11 @@ fn save_step(state: &mut VerifyState) {
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
-fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>, sset: &'a SegmentSet, scopes: ScopeReader<'a>, stmt: StatementRef<'a>) -> Option<Diagnostic> {
+fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
+                    sset: &'a SegmentSet,
+                    scopes: ScopeReader<'a>,
+                    stmt: StatementRef<'a>)
+                    -> Option<Diagnostic> {
     // only intend to check $p statements
     if stmt.statement.stype != StatementType::Provable {
         return None;

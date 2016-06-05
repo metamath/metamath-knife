@@ -233,6 +233,7 @@ pub struct Segment {
     pub source: Arc<SourceInfo>,
     // straight outputs
     pub statements: Vec<Statement>,
+    pub diagnostics: Vec<(StatementIndex, Diagnostic)>,
     pub next_file: Span,
     // crossed outputs
     pub global_dvs: Vec<GlobalDv>,
@@ -305,7 +306,6 @@ pub struct Statement {
     pub group_end: StatementIndex,
     math: Vec<Span>,
     proof: Vec<Span>,
-    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Copy,Clone)]
@@ -445,10 +445,11 @@ struct Scanner<'a> {
     source: Arc<SourceInfo>,
     buffer_ref: BufferRef,
     position: FilePos,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<(StatementIndex, Diagnostic)>,
     unget: Option<Span>,
     labels: Vec<Span>,
     statement_start: FilePos,
+    statement_index: StatementIndex,
     has_bad_labels: bool,
     invalidated: bool,
 }
@@ -473,6 +474,10 @@ enum CommentType {
 }
 
 impl<'a> Scanner<'a> {
+    fn diag(&mut self, diag: Diagnostic) {
+        self.diagnostics.push((self.statement_index, diag));
+    }
+
     fn get_raw(&mut self) -> Option<Span> {
         let len = self.buffer.len();
         let mut ix = self.position as usize;
@@ -481,8 +486,8 @@ impl<'a> Scanner<'a> {
             // For the purpose of error recovery, we consider C0 control characters to be
             // whitespace (following SMM2)
             if !is_mm_space_c0(self.buffer[ix]) {
-                self.diagnostics
-                    .push(Diagnostic::BadCharacter(Span::new(ix, ix + 1), self.buffer[ix]));
+                let ch = self.buffer[ix];
+                self.diag(Diagnostic::BadCharacter(Span::new(ix, ix + 1), ch));
             }
             ix += 1;
         }
@@ -491,8 +496,8 @@ impl<'a> Scanner<'a> {
         while ix < len && self.buffer[ix] > 32 {
             if self.buffer[ix] > 126 {
                 // DEL or C1 control or non-ASCII bytes (presumably UTF-8)
-                self.diagnostics
-                    .push(Diagnostic::BadCharacter(Span::new(ix, ix + 1), self.buffer[ix]));
+                let ch = self.buffer[ix];
+                self.diag(Diagnostic::BadCharacter(Span::new(ix, ix + 1), ch));
                 // skip this "token"
                 ix += 1;
                 while ix < len && !is_mm_space(self.buffer[ix]) {
@@ -525,9 +530,9 @@ impl<'a> Scanner<'a> {
                 return ctype;
             } else if tok_ref == b"$j" || tok_ref == b"$t" {
                 if !first {
-                    self.diagnostics.push(Diagnostic::CommentMarkerNotStart(tok))
+                    self.diag(Diagnostic::CommentMarkerNotStart(tok))
                 } else if mid_statement {
-                    self.diagnostics.push(Diagnostic::MidStatementCommentMarker(tok))
+                    self.diag(Diagnostic::MidStatementCommentMarker(tok))
                 } else {
                     if tok_ref == b"$j" {
                         ctype = CommentType::Extra;
@@ -538,10 +543,10 @@ impl<'a> Scanner<'a> {
             } else if tok_ref.contains(&b'$') {
                 let tok_str = str::from_utf8(tok_ref).unwrap();
                 if tok_str.contains("$)") {
-                    self.diagnostics.push(Diagnostic::BadCommentEnd(tok, opener));
+                    self.diag(Diagnostic::BadCommentEnd(tok, opener));
                 }
                 if tok_str.contains("$()") {
-                    self.diagnostics.push(Diagnostic::NestedComment(tok, opener));
+                    self.diag(Diagnostic::NestedComment(tok, opener));
                 }
             }
 
@@ -549,7 +554,7 @@ impl<'a> Scanner<'a> {
         }
 
         let cspan = Span::new2(opener.start, self.buffer.len() as FilePos);
-        self.diagnostics.push(Diagnostic::UnclosedComment(cspan));
+        self.diag(Diagnostic::UnclosedComment(cspan));
         ctype
     }
 
@@ -583,7 +588,6 @@ impl<'a> Scanner<'a> {
             proof: proof,
             group: NO_STATEMENT,
             group_end: NO_STATEMENT,
-            diagnostics: mem::replace(&mut self.diagnostics, Vec::new()),
             span: Span::new2(mem::replace(&mut self.statement_start, self.position),
                              self.position),
         }
@@ -616,7 +620,7 @@ impl<'a> Scanner<'a> {
                 self.unget = Some(ltok);
                 break;
             } else if !is_valid_label(lref) {
-                self.diagnostics.push(Diagnostic::BadLabel(ltok));
+                self.diag(Diagnostic::BadLabel(ltok));
                 self.has_bad_labels = true;
             } else {
                 self.labels.push(ltok);
@@ -627,7 +631,7 @@ impl<'a> Scanner<'a> {
     fn get_no_label(&mut self) {
         // none of these are invalidations...
         for &lspan in &self.labels {
-            self.diagnostics.push(Diagnostic::SpuriousLabel(lspan));
+            self.diagnostics.push((self.statement_index, Diagnostic::SpuriousLabel(lspan)));
         }
     }
 
@@ -635,12 +639,13 @@ impl<'a> Scanner<'a> {
         if self.labels.len() == 1 {
             self.labels[0]
         } else if self.labels.len() == 0 {
-            self.diagnostics.push(Diagnostic::MissingLabel);
+            self.diag(Diagnostic::MissingLabel);
             self.invalidated = true;
             Span::null()
         } else {
             for &addl in self.labels.iter().skip(1) {
-                self.diagnostics.push(Diagnostic::RepeatedLabel(addl, self.labels[0]));
+                self.diagnostics
+                    .push((self.statement_index, Diagnostic::RepeatedLabel(addl, self.labels[0])));
             }
             // have to invalidate because we don't know which to use
             self.invalidated = true;
@@ -656,13 +661,13 @@ impl<'a> Scanner<'a> {
                 if toknref == b"$." {
                     // string is closed with no proof
                     if expect_proof {
-                        self.diagnostics.push(Diagnostic::MissingProof(tokn));
+                        self.diag(Diagnostic::MissingProof(tokn));
                     }
                     return (out, false);
                 } else if toknref == b"$=" && !is_proof {
                     // string is closed with a proof
                     if !expect_proof {
-                        self.diagnostics.push(Diagnostic::SpuriousProof(tokn));
+                        self.diag(Diagnostic::SpuriousProof(tokn));
                     }
                     return (out, true);
                 } else {
@@ -675,7 +680,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        self.diagnostics.push(if is_proof {
+        self.diag(if is_proof {
             Diagnostic::UnclosedProof
         } else {
             Diagnostic::UnclosedMath
@@ -689,7 +694,7 @@ impl<'a> Scanner<'a> {
         if math_str.len() == 0 {
             self.invalidated = true;
             // this is invalid for all types of math string
-            self.diagnostics.push(Diagnostic::EmptyMathString);
+            self.diag(Diagnostic::EmptyMathString);
         }
 
         let (proof_str, _) = if has_proof {
@@ -726,13 +731,13 @@ impl<'a> Scanner<'a> {
             let tref = tok.as_ref(self.buffer);
             if tref == b"$]" {
                 if count == 0 {
-                    self.diagnostics.push(Diagnostic::EmptyFilename);
+                    self.diag(Diagnostic::EmptyFilename);
                     self.invalidated = true;
                 } else if count > 1 {
-                    self.diagnostics.push(Diagnostic::FilenameSpaces);
+                    self.diag(Diagnostic::FilenameSpaces);
                     self.invalidated = true;
                 } else if res.as_ref(self.buffer).contains(&b'$') {
-                    self.diagnostics.push(Diagnostic::FilenameDollar);
+                    self.diag(Diagnostic::FilenameDollar);
                 }
                 return res;
             } else if tref.len() > 0 && tref[0] == b'$' {
@@ -742,7 +747,7 @@ impl<'a> Scanner<'a> {
                 res = tok;
             }
         }
-        self.diagnostics.push(Diagnostic::UnclosedInclude);
+        self.diag(Diagnostic::UnclosedInclude);
         self.invalidated = true;
         return res;
     }
@@ -777,7 +782,7 @@ impl<'a> Scanner<'a> {
                 Invalid
             };
             if stype == Invalid {
-                self.diagnostics.push(Diagnostic::UnknownKeyword(kwtok));
+                self.diag(Diagnostic::UnknownKeyword(kwtok));
             }
         }
         self.invalidated = false;
@@ -802,13 +807,13 @@ impl<'a> Scanner<'a> {
             Disjoint => {
                 // math.len = 1 was caught above
                 if math.len() == 1 {
-                    self.diagnostics.push(Diagnostic::DisjointSingle);
+                    self.diag(Diagnostic::DisjointSingle);
                     self.invalidated = true;
                 }
             }
             Floating => {
                 if math.len() != 0 && math.len() != 2 {
-                    self.diagnostics.push(Diagnostic::BadFloating);
+                    self.diag(Diagnostic::BadFloating);
                     self.invalidated = true;
                 }
             }
@@ -836,6 +841,7 @@ impl<'a> Scanner<'a> {
             floats: Vec::new(),
             buffer: self.buffer_ref.clone(),
             source: self.source.clone(),
+            diagnostics: Vec::new(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -843,6 +849,7 @@ impl<'a> Scanner<'a> {
 
         loop {
             let index = seg.statements.len() as StatementIndex;
+            self.statement_index = index;
             let mut stmt = self.get_statement();
             stmt.group = top_group;
             seg.statements.push(stmt);
@@ -854,9 +861,7 @@ impl<'a> Scanner<'a> {
                 }
                 CloseGroup => {
                     if top_group == NO_STATEMENT {
-                        seg.statements[index as usize]
-                            .diagnostics
-                            .push(Diagnostic::UnmatchedCloseGroup);
+                        self.diagnostics.push((index, Diagnostic::UnmatchedCloseGroup));
                     } else {
                         seg.statements[top_group as usize].group_end = index;
                         top_group = seg.statements[top_group as usize].group;
@@ -864,16 +869,12 @@ impl<'a> Scanner<'a> {
                 }
                 Constant => {
                     if top_group != NO_STATEMENT {
-                        seg.statements[index as usize]
-                            .diagnostics
-                            .push(Diagnostic::ConstantNotTopLevel);
+                        self.diagnostics.push((index, Diagnostic::ConstantNotTopLevel));
                     }
                 }
                 Essential => {
                     if top_group == NO_STATEMENT {
-                        seg.statements[index as usize]
-                            .diagnostics
-                            .push(Diagnostic::EssentialAtTopLevel);
+                        self.diagnostics.push((index, Diagnostic::EssentialAtTopLevel));
                     }
                 }
                 FileInclude => {
@@ -893,7 +894,7 @@ impl<'a> Scanner<'a> {
 
         while top_group != NO_STATEMENT {
             seg.statements[top_group as usize].group_end = seg.statements.len() as StatementIndex;
-            seg.statements[top_group as usize].diagnostics.push(end_diag.clone());
+            self.diagnostics.push((top_group, end_diag.clone()));
             top_group = seg.statements[top_group as usize].group;
         }
 
@@ -905,6 +906,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
+        seg.diagnostics = mem::replace(&mut self.diagnostics, Vec::new());
         collect_definitions(&mut seg);
         (seg, is_end)
     }
@@ -1010,6 +1012,6 @@ pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
 
 pub fn dummy_segment(path: String, diag: Diagnostic) -> Segment {
     let mut seg = parse_segments(path, &Arc::new(Vec::new())).pop().unwrap();
-    seg.statements[0].diagnostics.push(diag);
+    seg.diagnostics.push((0, diag));
     seg
 }

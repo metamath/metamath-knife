@@ -301,7 +301,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
             }
             CheckedToken::Var(tref, lfi) => {
                 if open_const != iframe.const_pool.len() {
-                    tail.push(ExprFragment::Constant(open_const .. iframe.const_pool.len()));
+                    tail.push(ExprFragment::Constant(open_const..iframe.const_pool.len()));
                     open_const = iframe.const_pool.len();
                 }
 
@@ -321,7 +321,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
     }
 
     if open_const != iframe.const_pool.len() {
-        tail.push(ExprFragment::Constant(open_const .. iframe.const_pool.len()));
+        tail.push(ExprFragment::Constant(open_const..iframe.const_pool.len()));
     }
 
     VerifyExpr {
@@ -442,7 +442,7 @@ fn scope_check_axiom<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 
 fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
     if sref.statement.group != NO_STATEMENT {
-        assert!(sref.statement.diagnostics.len() > 0);
+        // assert!(sref.statement.diagnostics.len() > 0);
         return;
     }
 
