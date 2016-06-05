@@ -288,7 +288,7 @@ fn save_step(state: &mut VerifyState) {
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
-fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> Option<Diagnostic> {
+fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>, sset: &'a SegmentSet, scopes: ScopeReader<'a>, stmt: StatementRef<'a>) -> Option<Diagnostic> {
     // only intend to check $p statements
     if stmt.statement.stype != StatementType::Provable {
         return None;
@@ -300,19 +300,31 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
         None => return None,
         Some(x) => x,
     };
-    let mut state = VerifyState {
-        scoper: scopes,
-        order: &sset.order,
-        cur_frame: cur_frame,
-        stack: Vec::new(),
-        stack_buffer: Vec::new(),
-        prepared: Vec::new(),
-        prep_buffer: Vec::new(),
-        temp_buffer: Vec::new(),
-        subst_info: Vec::new(),
-        var2bit: new_map(),
-        dv_map: &cur_frame.optional_dv,
-    };
+
+    if statepp.is_none() {
+        *statepp = Some(VerifyState {
+            scoper: scopes,
+            order: &sset.order,
+            cur_frame: cur_frame,
+            stack: Vec::new(),
+            stack_buffer: Vec::new(),
+            prepared: Vec::new(),
+            prep_buffer: Vec::new(),
+            temp_buffer: Vec::new(),
+            subst_info: Vec::new(),
+            var2bit: new_map(),
+            dv_map: &cur_frame.optional_dv,
+        });
+    }
+    let state = statepp.as_mut().unwrap();
+    state.cur_frame = cur_frame;
+    state.stack.clear();
+    fast_clear(&mut state.stack_buffer);
+    state.prepared.clear();
+    fast_clear(&mut state.prep_buffer);
+    state.var2bit.clear();
+    state.dv_map = &cur_frame.optional_dv;
+    // temp_buffer and subst_info are cleared before use
 
     for (index, tokr) in cur_frame.var_list.iter().enumerate() {
         state.var2bit.insert(tokr, index);
@@ -321,7 +333,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
     if stmt.proof_slice_at(0) == b"(" {
         let mut i = 1;
 
-        prepare_hypotheses(&mut state);
+        prepare_hypotheses(state);
 
         loop {
             if i >= stmt.proof_len() {
@@ -334,7 +346,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
                 break;
             }
 
-            if let Some(err) = prepare_step(&mut state, chunk) {
+            if let Some(err) = prepare_step(state, chunk) {
                 return Some(err);
             }
         }
@@ -346,7 +358,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
             for &ch in chunk {
                 if ch >= b'A' && ch <= b'T' {
                     k = k * 20 + (ch - b'A') as usize;
-                    if let Some(err) = execute_step(&mut state, k) {
+                    if let Some(err) = execute_step(state, k) {
                         return Some(err);
                     }
                     k = 0;
@@ -361,7 +373,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
                     if !can_save {
                         return Some(Diagnostic::ProofInvalidSave);
                     }
-                    save_step(&mut state);
+                    save_step(state);
                     can_save = false;
                 } else if ch == b'?' {
                     if k > 0 {
@@ -383,10 +395,10 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
             if chunk == b"?" {
                 return Some(Diagnostic::ProofIncomplete);
             } else {
-                if let Some(err) = prepare_step(&mut state, chunk) {
+                if let Some(err) = prepare_step(state, chunk) {
                     return Some(err);
                 }
-                if let Some(err) = execute_step(&mut state, count) {
+                if let Some(err) = execute_step(state, count) {
                     return Some(err);
                 }
                 count += 1;
@@ -394,7 +406,7 @@ fn verify_proof(sset: &SegmentSet, scopes: ScopeReader, stmt: StatementRef) -> O
         }
     }
 
-    if let Some(err) = finalize_step(&mut state) {
+    if let Some(err) = finalize_step(state) {
         return Some(err);
     }
 
@@ -424,8 +436,9 @@ impl VerifyResult {
 fn verify_segment(sset: &SegmentSet, scopes: &ScopeResult, sid: SegmentId) -> VerifySegment {
     let reader = ScopeReader::new(scopes);
     let mut out = VerifySegment { diagnostics: new_map() };
+    let mut state = None;
     for stmt in sset.segment(sid).statement_iter() {
-        if let Some(diag) = verify_proof(sset, reader, stmt) {
+        if let Some(diag) = verify_proof(&mut state, sset, reader, stmt) {
             out.diagnostics.insert(stmt.address(), diag);
         }
     }
