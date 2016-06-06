@@ -53,16 +53,15 @@ struct LocalVarInfo {
 }
 
 #[derive(Copy,Clone,Debug,Default)]
-struct LocalFloatInfo<'a> {
+struct LocalFloatInfo {
     valid: GlobalRange,
     typecode: Atom,
-    label: TokenPtr<'a>,
 }
 
 #[derive(Copy,Clone,Debug)]
 enum CheckedToken<'a> {
     Const(TokenPtr<'a>, Atom),
-    Var(TokenPtr<'a>, Atom, LocalFloatInfo<'a>),
+    Var(TokenPtr<'a>, Atom, LocalFloatInfo),
 }
 
 #[derive(Clone,Debug)]
@@ -121,7 +120,7 @@ struct ScopeState<'a> {
     nameset: &'a Nameset,
     gnames: NameReader<'a>,
     local_vars: HashMap<Token, Vec<LocalVarInfo>>,
-    local_floats: HashMap<Token, Vec<LocalFloatInfo<'a>>>,
+    local_floats: HashMap<Token, Vec<LocalFloatInfo>>,
     local_dv: Vec<LocalDvInfo>,
     local_essen: Vec<LocalEssentialInfo<'a>>,
     frames_out: Vec<Frame>,
@@ -167,14 +166,13 @@ fn check_math_symbol(state: &mut ScopeState,
 fn lookup_float<'a>(state: &mut ScopeState<'a>,
                     sref: StatementRef<'a>,
                     tref: TokenRef<'a>)
-                    -> Option<LocalFloatInfo<'a>> {
+                    -> Option<LocalFloatInfo> {
     // active global definition?
     if let Some(fdef) = state.gnames.lookup_float(tref.slice) {
         if state.order.cmp(&fdef.address, &sref.address()) == Ordering::Less {
             return Some(LocalFloatInfo {
                 valid: fdef.address.unbounded_range(),
                 typecode: fdef.typecode_atom,
-                label: &fdef.label,
             });
         }
     }
@@ -273,8 +271,8 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
     });
 }
 
-struct InchoateFrame<'a> {
-    variables: HashMap<Atom, (VarIndex, LocalFloatInfo<'a>)>,
+struct InchoateFrame {
+    variables: HashMap<Atom, (VarIndex, LocalFloatInfo)>,
     var_list: Vec<Atom>,
     mandatory_count: usize,
     mandatory_dv: Vec<(VarIndex, VarIndex)>,
@@ -282,7 +280,7 @@ struct InchoateFrame<'a> {
     const_pool: Vec<u8>,
 }
 
-fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]) -> VerifyExpr {
+fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) -> VerifyExpr {
     let mut iter = expr.iter();
     let head = match iter.next().expect("parser checks $eap token count") {
         &CheckedToken::Const(_, head) => head,
@@ -328,7 +326,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
     }
 }
 
-fn scan_dv<'a>(iframe: &mut InchoateFrame<'a>, var_set: &[Atom]) {
+fn scan_dv<'a>(iframe: &mut InchoateFrame, var_set: &[Atom]) {
     // any variable encountered for the first time in a dv is an optional
     // variable, but we already checked validity in scope_check_dv
     let mut var_ids = Vec::with_capacity(var_set.len());
@@ -569,7 +567,6 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             .or_insert(Vec::new())
             .push(LocalFloatInfo {
                 typecode: const_at,
-                label: sref.label(),
                 valid: sref.scope_range(),
             });
     }
