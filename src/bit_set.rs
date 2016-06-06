@@ -24,7 +24,7 @@ impl Clone for Bitset {
             tail: match self.tail {
                 None => None,
                 Some(ref tail) => Some(clone_slow(&tail)),
-            }
+            },
         }
     }
 }

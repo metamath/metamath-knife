@@ -354,7 +354,7 @@ impl<'a> StatementRef<'a> {
     }
 
     pub fn math_iter(&self) -> TokenIter<'a> {
-        let range = self.statement.math_start .. self.statement.proof_start;
+        let range = self.statement.math_start..self.statement.proof_start;
         TokenIter {
             slice_iter: self.segment.segment.span_pool[range].iter(),
             buffer: &self.segment.segment.buffer,
@@ -602,10 +602,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn out_statement(&mut self,
-                     stype: StatementType,
-                     label: Span)
-                     -> Statement {
+    fn out_statement(&mut self, stype: StatementType, label: Span) -> Statement {
         Statement {
             stype: stype,
             label: label,
@@ -963,15 +960,13 @@ fn collect_definitions(seg: &mut Segment) {
     for (index, &ref stmt) in seg.statements.iter().enumerate() {
         let index = index as StatementIndex;
         if stmt.stype.takes_label() {
-            seg.labels.push(LabelDef {
-                index: index,
-            });
+            seg.labels.push(LabelDef { index: index });
         }
 
         if stmt.group_end != NO_STATEMENT {
             if stmt.stype == Variable {
-                let math = &seg.span_pool[stmt.math_start .. stmt.proof_start];
-                for sindex in 0 .. math.len() {
+                let math = &seg.span_pool[stmt.math_start..stmt.proof_start];
+                for sindex in 0..math.len() {
                     seg.local_vars.push(LocalVarDef {
                         index: index,
                         ordinal: sindex as TokenIndex,
@@ -981,7 +976,7 @@ fn collect_definitions(seg: &mut Segment) {
             continue;
         }
 
-        let math = &seg.span_pool[stmt.math_start .. stmt.proof_start];
+        let math = &seg.span_pool[stmt.math_start..stmt.proof_start];
 
         match stmt.stype {
             Constant => {

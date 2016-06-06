@@ -66,7 +66,8 @@ fn prepare_hypotheses(state: &mut VerifyState) {
         for part in &hyp.expr.tail {
             match *part {
                 ExprFragment::Var(ix) => {
-                    fast_extend(&mut state.prep_buffer, state.nameset.atom_name(state.cur_frame.var_list[ix]));
+                    fast_extend(&mut state.prep_buffer,
+                                state.nameset.atom_name(state.cur_frame.var_list[ix]));
                     vars.set_bit(ix); // and we have prior knowledge it's identity mapped
                     state.prep_buffer.push(b' ');
                 }
@@ -441,7 +442,11 @@ impl VerifyResult {
     }
 }
 
-fn verify_segment(sset: &SegmentSet, nset: &Nameset, scopes: &ScopeResult, sid: SegmentId) -> VerifySegment {
+fn verify_segment(sset: &SegmentSet,
+                  nset: &Nameset,
+                  scopes: &ScopeResult,
+                  sid: SegmentId)
+                  -> VerifySegment {
     let reader = ScopeReader::new(scopes);
     let mut out = VerifySegment { diagnostics: new_map() };
     let mut state = None;
@@ -456,7 +461,8 @@ fn verify_segment(sset: &SegmentSet, nset: &Nameset, scopes: &ScopeResult, sid: 
 pub fn verify(segments: &SegmentSet, nset: &Nameset, scope: &ScopeResult) -> VerifyResult {
     let mut out = VerifyResult { segments: new_map() };
     for sref in segments.segments() {
-        out.segments.insert(sref.id, Arc::new(verify_segment(segments, nset, scope, sref.id)));
+        out.segments.insert(sref.id,
+                            Arc::new(verify_segment(segments, nset, scope, sref.id)));
     }
     out
 }

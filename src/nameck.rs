@@ -3,8 +3,8 @@ use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::u32;
-use parser::{Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress, SymbolType, Token,
-             TokenAddress, TokenPtr};
+use parser::{Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress, SymbolType,
+             Token, TokenAddress, TokenPtr};
 use segment_set::SegmentSet;
 use util;
 use util::HashMap;
@@ -126,7 +126,10 @@ impl Nameset {
         }
 
         self.segments.insert(id, seg.clone());
-        let sref = SegmentRef { segment: &seg, id: id };
+        let sref = SegmentRef {
+            segment: &seg,
+            id: id,
+        };
 
         for &ref symdef in &seg.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
@@ -178,7 +181,10 @@ impl Nameset {
 
     pub fn remove_segment(&mut self, id: SegmentId) {
         if let Some(seg) = self.segments.remove(&id) {
-            let sref = SegmentRef { segment: &seg, id: id };
+            let sref = SegmentRef {
+                segment: &seg,
+                id: id,
+            };
             for &ref symdef in &seg.symbols {
                 deviv(&mut self.symbols, &symdef.name, |slot| {
                     let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
