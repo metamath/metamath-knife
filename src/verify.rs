@@ -1,6 +1,7 @@
 use bit_set::Bitset;
 use diag::Diagnostic;
 use nameck::Atom;
+use nameck::Nameset;
 use parser::Comparer;
 use parser::NO_STATEMENT;
 use parser::SegmentId;
@@ -38,6 +39,7 @@ struct StackSlot {
 
 struct VerifyState<'a> {
     order: &'a SegmentOrder,
+    nameset: &'a Nameset,
     scoper: ScopeReader<'a>,
     cur_frame: &'a Frame,
     prepared: Vec<PreparedStep<'a>>,
@@ -46,11 +48,11 @@ struct VerifyState<'a> {
     stack_buffer: Vec<u8>,
     temp_buffer: Vec<u8>,
     subst_info: Vec<(Range<usize>, Bitset)>,
-    var2bit: HashMap<TokenPtr<'a>, usize>,
+    var2bit: HashMap<Atom, usize>,
     dv_map: &'a [Bitset],
 }
 
-fn map_var<'a>(state: &mut VerifyState<'a>, token: TokenPtr<'a>) -> usize {
+fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
     let nbit = state.var2bit.len();
     *state.var2bit.entry(token).or_insert(nbit)
 }
@@ -64,7 +66,7 @@ fn prepare_hypotheses(state: &mut VerifyState) {
         for part in &hyp.expr.tail {
             match *part {
                 ExprFragment::Var(ix) => {
-                    fast_extend(&mut state.prep_buffer, &state.cur_frame.var_list[ix]);
+                    fast_extend(&mut state.prep_buffer, state.nameset.atom_name(state.cur_frame.var_list[ix]));
                     vars.set_bit(ix); // and we have prior knowledge it's identity mapped
                     state.prep_buffer.push(b' ');
                 }
@@ -103,7 +105,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
     } else {
         let mut vars = Bitset::new();
 
-        for var in &frame.var_list {
+        for &var in &frame.var_list {
             vars.set_bit(map_var(state, var));
         }
 
@@ -134,11 +136,11 @@ fn do_substitute(target: &mut Vec<u8>,
     }
 }
 
-fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame) {
+fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
     for part in &frame.target.tail {
         match *part {
             ExprFragment::Var(ix) => {
-                fast_extend(target, &frame.var_list[ix]);
+                fast_extend(target, nameset.atom_name(frame.var_list[ix]));
                 target.push(b' ');
             }
             ExprFragment::Constant(ref string) => {
@@ -269,7 +271,7 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
     }
 
     fast_clear(&mut state.temp_buffer);
-    do_substitute_raw(&mut state.temp_buffer, &state.cur_frame);
+    do_substitute_raw(&mut state.temp_buffer, &state.cur_frame, state.nameset);
 
     if state.stack_buffer[tos.expr.clone()] != state.temp_buffer[..] {
         return Some(Diagnostic::ProofWrongExprEnd);
@@ -290,6 +292,7 @@ fn save_step(state: &mut VerifyState) {
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
 fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
                     sset: &'a SegmentSet,
+                    nset: &'a Nameset,
                     scopes: ScopeReader<'a>,
                     stmt: StatementRef<'a>)
                     -> Option<Diagnostic> {
@@ -308,6 +311,7 @@ fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
     if statepp.is_none() {
         *statepp = Some(VerifyState {
             scoper: scopes,
+            nameset: nset,
             order: &sset.order,
             cur_frame: cur_frame,
             stack: Vec::new(),
@@ -330,7 +334,7 @@ fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
     state.dv_map = &cur_frame.optional_dv;
     // temp_buffer and subst_info are cleared before use
 
-    for (index, tokr) in cur_frame.var_list.iter().enumerate() {
+    for (index, &tokr) in cur_frame.var_list.iter().enumerate() {
         state.var2bit.insert(tokr, index);
     }
 
@@ -437,22 +441,22 @@ impl VerifyResult {
     }
 }
 
-fn verify_segment(sset: &SegmentSet, scopes: &ScopeResult, sid: SegmentId) -> VerifySegment {
+fn verify_segment(sset: &SegmentSet, nset: &Nameset, scopes: &ScopeResult, sid: SegmentId) -> VerifySegment {
     let reader = ScopeReader::new(scopes);
     let mut out = VerifySegment { diagnostics: new_map() };
     let mut state = None;
     for stmt in sset.segment(sid).statement_iter() {
-        if let Some(diag) = verify_proof(&mut state, sset, reader, stmt) {
+        if let Some(diag) = verify_proof(&mut state, sset, nset, reader, stmt) {
             out.diagnostics.insert(stmt.address(), diag);
         }
     }
     out
 }
 
-pub fn verify(segments: &SegmentSet, scope: &ScopeResult) -> VerifyResult {
+pub fn verify(segments: &SegmentSet, nset: &Nameset, scope: &ScopeResult) -> VerifyResult {
     let mut out = VerifyResult { segments: new_map() };
     for sref in segments.segments() {
-        out.segments.insert(sref.id, Arc::new(verify_segment(segments, scope, sref.id)));
+        out.segments.insert(sref.id, Arc::new(verify_segment(segments, nset, scope, sref.id)));
     }
     out
 }

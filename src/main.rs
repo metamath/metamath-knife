@@ -47,7 +47,7 @@ fn main() {
     println!("scopeck {}ms", (now.elapsed() * 1000).as_secs());
     let now = Instant::now();
 
-    let vr = verify::verify(&set, &sr);
+    let vr = verify::verify(&set, &ns, &sr);
 
     println!("verify {}ms", (now.elapsed() * 1000).as_secs());
     let now = Instant::now();

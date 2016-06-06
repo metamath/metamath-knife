@@ -49,12 +49,12 @@ use util::new_map;
 struct LocalVarInfo {
     start: TokenAddress,
     end: StatementIndex,
+    atom: Atom,
 }
 
 #[derive(Copy,Clone,Debug,Default)]
 struct LocalFloatInfo<'a> {
     valid: GlobalRange,
-    // typecode: TokenPtr<'a>,
     typecode: Atom,
     label: TokenPtr<'a>,
 }
@@ -62,13 +62,13 @@ struct LocalFloatInfo<'a> {
 #[derive(Copy,Clone,Debug)]
 enum CheckedToken<'a> {
     Const(TokenPtr<'a>, Atom),
-    Var(TokenPtr<'a>, LocalFloatInfo<'a>),
+    Var(TokenPtr<'a>, Atom, LocalFloatInfo<'a>),
 }
 
 #[derive(Clone,Debug)]
-struct LocalDvInfo<'a> {
+struct LocalDvInfo {
     valid: GlobalRange,
-    vars: Vec<TokenPtr<'a>>,
+    vars: Vec<Atom>,
 }
 
 #[derive(Clone,Debug)]
@@ -109,7 +109,7 @@ pub struct Frame {
     pub hypotheses: Vec<Hyp>,
     pub target: VerifyExpr,
     pub stub_expr: Vec<u8>,
-    pub var_list: Vec<Token>,
+    pub var_list: Vec<Atom>,
     pub mandatory_count: usize,
     pub mandatory_dv: Vec<(VarIndex, VarIndex)>,
     pub optional_dv: Vec<Bitset>,
@@ -119,10 +119,11 @@ struct ScopeState<'a> {
     diagnostics: HashMap<StatementIndex, Vec<Diagnostic>>,
     // segment: &'a Segment,
     order: &'a SegmentOrder,
+    nameset: &'a Nameset,
     gnames: NameReader<'a>,
     local_vars: HashMap<Token, Vec<LocalVarInfo>>,
     local_floats: HashMap<Token, Vec<LocalFloatInfo<'a>>>,
-    local_dv: Vec<LocalDvInfo<'a>>,
+    local_dv: Vec<LocalDvInfo>,
     local_essen: Vec<LocalEssentialInfo<'a>>,
     frames_out: Vec<Frame>,
 }
@@ -142,7 +143,6 @@ fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> bool {
     true
 }
 
-// atom only valid for constants!
 fn check_math_symbol(state: &mut ScopeState,
                      sref: StatementRef,
                      tref: TokenRef)
@@ -157,7 +157,7 @@ fn check_math_symbol(state: &mut ScopeState,
     // active local definition?
     if let Some(local_slot) = state.local_vars.get(tref.slice).and_then(|slot| slot.last()) {
         if check_endpoint(sref.index, local_slot.end) {
-            return Some((SymbolType::Variable, Atom::default()));
+            return Some((SymbolType::Variable, local_slot.atom));
         }
     }
 
@@ -203,10 +203,10 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
             None => {
                 bad = true;
             }
-            Some((SymbolType::Constant, addr)) => {
-                out.push(CheckedToken::Const(tref.slice, addr));
+            Some((SymbolType::Constant, atom)) => {
+                out.push(CheckedToken::Const(tref.slice, atom));
             }
-            Some((SymbolType::Variable, _)) => {
+            Some((SymbolType::Variable, atom)) => {
                 if tref.index() == 0 {
                     push_diagnostic(state, sref.index, Diagnostic::ExprNotConstantPrefix(0));
                     bad = true;
@@ -218,7 +218,7 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
                                             Diagnostic::VariableMissingFloat(tref.index()));
                             bad = true;
                         }
-                        Some(lfi) => out.push(CheckedToken::Var(tref.slice, lfi)),
+                        Some(lfi) => out.push(CheckedToken::Var(tref.slice, atom, lfi)),
                     }
                 }
             }
@@ -249,10 +249,10 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
                 conststr.extend_from_slice(tref);
                 conststr.push(b' ');
             }
-            CheckedToken::Var(tref, _) => {
+            CheckedToken::Var(tref, atom, _) => {
                 conststr.extend_from_slice(tref);
                 conststr.push(b' ');
-                mvars.push(tref.to_owned());
+                mvars.push(atom);
             }
         }
     }
@@ -276,8 +276,8 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
 }
 
 struct InchoateFrame<'a> {
-    variables: HashMap<TokenPtr<'a>, (VarIndex, LocalFloatInfo<'a>)>,
-    var_list: Vec<Token>,
+    variables: HashMap<Atom, (VarIndex, LocalFloatInfo<'a>)>,
+    var_list: Vec<Atom>,
     mandatory_count: usize,
     mandatory_dv: Vec<(VarIndex, VarIndex)>,
     optional_dv: Vec<Bitset>,
@@ -299,19 +299,19 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
                 fast_extend(&mut iframe.const_pool, tref);
                 iframe.const_pool.push(b' ');
             }
-            CheckedToken::Var(tref, lfi) => {
+            CheckedToken::Var(_, atom, lfi) => {
                 if open_const != iframe.const_pool.len() {
                     tail.push(ExprFragment::Constant(open_const..iframe.const_pool.len()));
                     open_const = iframe.const_pool.len();
                 }
 
-                let index = match iframe.variables.get(&tref).map(|&(x, _)| x) {
+                let index = match iframe.variables.get(&atom).map(|&(x, _)| x) {
                     Some(mvarindex) => mvarindex,
                     None => {
                         let index = iframe.variables.len();
-                        iframe.var_list.push(tref.to_owned());
+                        iframe.var_list.push(atom);
                         iframe.optional_dv.push(Bitset::new());
-                        iframe.variables.insert(tref, (index, lfi));
+                        iframe.variables.insert(atom, (index, lfi));
                         index
                     }
                 };
@@ -330,19 +330,19 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame<'a>, expr: &[CheckedToken<'a>]
     }
 }
 
-fn scan_dv<'a>(iframe: &mut InchoateFrame<'a>, var_set: &[TokenPtr<'a>]) {
+fn scan_dv<'a>(iframe: &mut InchoateFrame<'a>, var_set: &[Atom]) {
     // any variable encountered for the first time in a dv is an optional
     // variable, but we already checked validity in scope_check_dv
     let mut var_ids = Vec::with_capacity(var_set.len());
 
-    for &vartok in var_set {
-        let index = match iframe.variables.get(vartok).map(|&(x, _)| x) {
+    for &varatom in var_set {
+        let index = match iframe.variables.get(&varatom).map(|&(x, _)| x) {
             Some(mvarindex) => mvarindex,
             None => {
                 let index = iframe.variables.len();
-                iframe.var_list.push(vartok.to_owned());
+                iframe.var_list.push(varatom);
                 iframe.optional_dv.push(Bitset::new());
-                iframe.variables.insert(vartok, (index, Default::default()));
+                iframe.variables.insert(varatom, (index, Default::default()));
                 index
             }
         };
@@ -477,8 +477,8 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
                 push_diagnostic(state, sref.index, Diagnostic::DjNotVariable(tref.index()));
                 bad = true;
             }
-            _ => {
-                if let Some(&previx) = used.get(tref.slice) {
+            Some((SymbolType::Variable, varat)) => {
+                if let Some(&previx) = used.get(&varat) {
                     push_diagnostic(state,
                                     sref.index,
                                     Diagnostic::DjRepeatedVariable(tref.index(), previx));
@@ -486,13 +486,17 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
                     continue;
                 }
 
-                used.insert(tref.slice, tref.index());
-                vars.push(tref.slice);
+                used.insert(varat, tref.index());
+                vars.push(varat);
             }
         }
     }
 
     if bad {
+        return;
+    }
+
+    if sref.statement.group == NO_STATEMENT {
         return;
     }
 
@@ -526,23 +530,24 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         return;
     }
 
-    let mut const_pos = Atom::default();
+    let mut const_at = Atom::default();
     match check_math_symbol(state, sref, const_tok) {
         None => {
             bad = true;
         }
-        Some((SymbolType::Constant, pos)) => const_pos = pos,
+        Some((SymbolType::Constant, atom)) => const_at = atom,
         Some((SymbolType::Variable, _)) => {
             push_diagnostic(state, sref.index, Diagnostic::FloatNotConstant(0));
             bad = true;
         }
     }
 
+    let mut var_at = Atom::default();
     match check_math_symbol(state, sref, var_tok) {
         None => {
             bad = true;
         }
-        Some((SymbolType::Variable, _)) => {}
+        Some((SymbolType::Variable, atom)) => var_at = atom,
         _ => {
             push_diagnostic(state, sref.index, Diagnostic::FloatNotVariable(1));
             bad = true;
@@ -566,7 +571,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             .entry(var_tok.slice.to_owned())
             .or_insert(Vec::new())
             .push(LocalFloatInfo {
-                typecode: const_pos,
+                typecode: const_at,
                 label: sref.label(),
                 valid: sref.scope_range(),
             });
@@ -574,8 +579,8 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 
     construct_stub_frame(state,
                          sref,
-                         &[CheckedToken::Const(const_tok.slice, const_pos),
-                           CheckedToken::Var(var_tok.slice, LocalFloatInfo::default())]);
+                         &[CheckedToken::Const(const_tok.slice, const_at),
+                           CheckedToken::Var(var_tok.slice, var_at, LocalFloatInfo::default())]);
 }
 
 fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
@@ -598,6 +603,7 @@ fn maybe_add_local_var(state: &mut ScopeState,
     lv_slot.push(LocalVarInfo {
         start: tokref.address,
         end: sref.statement.group_end,
+        atom: state.nameset.get_atom(tokref.slice),
     });
     None
 }
@@ -664,6 +670,7 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
     let mut state = ScopeState {
         diagnostics: new_map(),
         order: &names.order,
+        nameset: names,
         gnames: NameReader::new(names),
         local_vars: new_map(),
         local_floats: new_map(),

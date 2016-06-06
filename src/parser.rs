@@ -222,6 +222,12 @@ pub struct FloatDef {
     pub typecode: Token,
 }
 
+#[derive(Debug)]
+pub struct LocalVarDef {
+    pub index: StatementIndex,
+    pub ordinal: TokenIndex,
+}
+
 #[derive(Debug, Default)]
 pub struct SourceInfo {
     pub buffer: BufferRef,
@@ -243,6 +249,7 @@ pub struct Segment {
     // crossed outputs
     pub global_dvs: Vec<GlobalDv>,
     pub symbols: Vec<SymbolDef>,
+    pub local_vars: Vec<LocalVarDef>,
     pub labels: Vec<LabelDef>,
     pub floats: Vec<FloatDef>,
 }
@@ -873,6 +880,7 @@ impl<'a> Scanner<'a> {
             statements: Vec::new(),
             next_file: Span::null(),
             symbols: Vec::new(),
+            local_vars: Vec::new(),
             global_dvs: Vec::new(),
             labels: Vec::new(),
             floats: Vec::new(),
@@ -963,6 +971,15 @@ fn collect_definitions(seg: &mut Segment) {
         }
 
         if stmt.group_end != NO_STATEMENT {
+            if stmt.stype == Variable {
+                let math = &seg.span_pool[stmt.math_start .. stmt.proof_start];
+                for sindex in 0 .. math.len() {
+                    seg.local_vars.push(LocalVarDef {
+                        index: index,
+                        ordinal: sindex as TokenIndex,
+                    });
+                }
+            }
             continue;
         }
 

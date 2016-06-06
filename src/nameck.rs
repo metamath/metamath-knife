@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::u32;
-use parser::{Comparer, Segment, SegmentId, SegmentOrder, StatementAddress, SymbolType, Token,
+use parser::{Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress, SymbolType, Token,
              TokenAddress, TokenPtr};
 use segment_set::SegmentSet;
 use util;
@@ -11,7 +11,7 @@ use util::HashMap;
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
-#[derive(Copy,Clone,Debug,PartialEq,Eq,Default)]
+#[derive(Copy,Clone,Debug,PartialEq,Eq,Default,Hash)]
 pub struct Atom(u32);
 
 type NameSlot<A, V> = Vec<(A, V)>;
@@ -63,6 +63,7 @@ struct SymbolInfo {
 #[derive(Default,Debug)]
 struct AtomTable {
     table: HashMap<Token, Atom>,
+    reverse: Vec<Token>,
 }
 
 fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
@@ -72,6 +73,10 @@ fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
         Some(atom) => return *atom,
     };
     table.table.insert(tok.to_owned(), next);
+    if table.reverse.len() == 0 {
+        table.reverse.push(Token::new());
+    }
+    table.reverse.push(tok.to_owned());
     next
 }
 
@@ -81,7 +86,7 @@ pub struct Nameset {
     pub order: Arc<SegmentOrder>,
 
     segments: HashMap<SegmentId, Arc<Segment>>,
-    dv_info: NameSlot<StatementAddress, Vec<Token>>,
+    dv_info: NameSlot<StatementAddress, Vec<Atom>>,
     labels: HashMap<Token, NameSlot<StatementAddress, ()>>,
     symbols: HashMap<Token, SymbolInfo>,
 }
@@ -121,6 +126,7 @@ impl Nameset {
         }
 
         self.segments.insert(id, seg.clone());
+        let sref = SegmentRef { segment: &seg, id: id };
 
         for &ref symdef in &seg.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
@@ -132,6 +138,11 @@ impl Nameset {
             if symdef.stype == SymbolType::Constant {
                 slot_insert(&mut slot.constant, &*self.order, address, ());
             }
+        }
+
+        for &ref lsymdef in &seg.local_vars {
+            let name = sref.statement(lsymdef.index).math_at(lsymdef.ordinal).slice;
+            intern(&mut self.atom_table, name);
         }
 
         for &ref labdef in &seg.labels {
@@ -156,10 +167,11 @@ impl Nameset {
         }
 
         for &ref dvdef in &seg.global_dvs {
+            let vars = dvdef.vars.iter().map(|v| intern(&mut self.atom_table, &v)).collect();
             slot_insert(&mut self.dv_info,
                         &*self.order,
                         StatementAddress::new(id, dvdef.start),
-                        dvdef.vars.clone());
+                        vars);
         }
     }
 
@@ -191,6 +203,14 @@ impl Nameset {
             }
         }
     }
+
+    pub fn get_atom(&self, name: TokenPtr) -> Atom {
+        self.atom_table.table.get(name).cloned().expect("please only use get_atom for local $v")
+    }
+
+    pub fn atom_name(&self, atom: Atom) -> TokenPtr {
+        &self.atom_table.reverse[atom.0 as usize]
+    }
 }
 
 pub struct NameReader<'a> {
@@ -221,8 +241,7 @@ pub struct LookupFloat<'a> {
 
 pub struct LookupGlobalDv<'a> {
     pub address: StatementAddress,
-    // TODO allocate less
-    pub vars: Vec<TokenPtr<'a>>,
+    pub vars: &'a [Atom],
 }
 
 impl<'a> NameReader<'a> {
@@ -272,7 +291,7 @@ impl<'a> NameReader<'a> {
             .map(|&(addr, ref vars)| {
                 LookupGlobalDv {
                     address: addr,
-                    vars: vars.iter().map(|x| x as TokenPtr).collect(),
+                    vars: &vars,
                 }
             })
             .collect()
