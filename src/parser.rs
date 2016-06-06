@@ -202,7 +202,6 @@ pub enum SymbolType {
 
 #[derive(Debug)]
 pub struct LabelDef {
-    pub label: Token,
     pub index: StatementIndex,
 }
 
@@ -966,7 +965,6 @@ fn collect_definitions(seg: &mut Segment) {
         if stmt.stype.takes_label() {
             seg.labels.push(LabelDef {
                 index: index,
-                label: stmt.label.as_ref(buf).to_owned(),
             });
         }
 

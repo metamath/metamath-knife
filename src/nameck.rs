@@ -33,7 +33,7 @@ fn autoviv<K, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V
     map.entry(key).or_insert_with(Default::default)
 }
 
-fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
+fn deviv<K, Q: ?Sized, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
     where F: FnOnce(&mut V),
           K: Borrow<Q>,
           Q: Hash + Eq,
@@ -146,7 +146,8 @@ impl Nameset {
         }
 
         for &ref labdef in &seg.labels {
-            let slot = autoviv(&mut self.labels, labdef.label.clone());
+            let label = sref.statement(labdef.index).label().to_owned();
+            let slot = autoviv(&mut self.labels, label);
             slot_insert(slot,
                         &*self.order,
                         StatementAddress::new(id, labdef.index),
@@ -177,6 +178,7 @@ impl Nameset {
 
     pub fn remove_segment(&mut self, id: SegmentId) {
         if let Some(seg) = self.segments.remove(&id) {
+            let sref = SegmentRef { segment: &seg, id: id };
             for &ref symdef in &seg.symbols {
                 deviv(&mut self.symbols, &symdef.name, |slot| {
                     let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
@@ -186,7 +188,8 @@ impl Nameset {
             }
 
             for &ref labdef in &seg.labels {
-                deviv(&mut self.labels, &labdef.label, |slot| {
+                let label = sref.statement(labdef.index).label();
+                deviv(&mut self.labels, label, |slot| {
                     slot_remove(slot, StatementAddress::new(id, labdef.index));
                 });
             }

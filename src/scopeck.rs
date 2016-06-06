@@ -102,7 +102,6 @@ pub struct Hyp {
 
 #[derive(Clone,Debug)]
 pub struct Frame {
-    pub label: Token,
     pub stype: StatementType,
     pub valid: GlobalRange,
     pub const_pool: Vec<u8>,
@@ -258,7 +257,6 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
     }
 
     state.frames_out.push(Frame {
-        label: sref.label().to_owned(),
         stype: sref.statement.stype,
         valid: sref.scope_range(),
         hypotheses: Vec::new(),
@@ -417,7 +415,6 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     }
 
     state.frames_out.push(Frame {
-        label: sref.label().to_owned(),
         stype: sref.statement.stype,
         valid: sref.address().unbounded_range(),
         hypotheses: hyps,
@@ -728,7 +725,8 @@ pub fn scope_check(segments: &SegmentSet, names: &Nameset) -> ScopeResult {
         out.segments.push((sref.id, ssr.clone()));
 
         for (index, frame) in ssr.frames_out.iter().enumerate() {
-            let old = out.frame_index.insert(frame.label.clone(), (six, index));
+            let label = sref.statement(frame.valid.start.index).label().to_owned();
+            let old = out.frame_index.insert(label, (six, index));
             assert!(old.is_none(), "check_label_dup should prevent this");
         }
     }
