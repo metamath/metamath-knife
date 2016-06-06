@@ -617,7 +617,11 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_comment_statement(&mut self) -> Option<Statement> {
-        let ftok = self.get_raw();
+        let ftok = if !self.unget.is_null() {
+            mem::replace(&mut self.unget, Span::null())
+        } else {
+            self.get_raw()
+        };
         if ftok != Span::null() {
             let ftok_ref = ftok.as_ref(self.buffer);
             if ftok_ref == b"$(" {
