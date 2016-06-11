@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate clap;
 extern crate fnv;
 
 mod bit_set;
@@ -9,29 +11,39 @@ mod segment_set;
 mod util;
 mod verify;
 
+use clap::Arg;
+use clap::App;
 use diag::Notation;
 use nameck::Nameset;
 use segment_set::SegmentSet;
-use std::env;
 use std::mem;
 use std::path::PathBuf;
 use std::time::Instant;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let matches = App::new("smetamath-rs")
+        .version(crate_version!())
+        .about("About text")
+        .arg(Arg::with_name("DATABASE").help("Database file to load").required_unless("TEXT"))
+        .arg(Arg::with_name("TEXT")
+            .long("text")
+            .help("Provide raw database content on the command line")
+            .value_names(&["NAME", "TEXT"])
+            .multiple(true))
+        .get_matches();
+
     let mut set = SegmentSet::new();
     let now = Instant::now();
-    if args.len() > 2 {
-        let mut data = Vec::new();
-        let mut i = 1;
-        while i + 1 < args.len() {
-            data.push((PathBuf::from(&args[i]), args[i + 1].clone().into_bytes()));
-            i += 2;
+    let mut data = Vec::new();
+    if let Some(tvals) = matches.values_of_lossy("TEXT") {
+        for kv in tvals.chunks(2) {
+            data.push((PathBuf::from(&kv[0]), kv[1].clone().into_bytes()));
         }
-        set.read(data[0].0.clone(), data);
-    } else {
-        set.read(PathBuf::from(&args[1]).to_path_buf(), Vec::new());
     }
+    let start = matches.value_of("DATABASE")
+        .map(|st| PathBuf::from(st))
+        .unwrap_or_else(|| data[0].0.clone());
+    set.read(start, data);
 
     println!("parse {}ms", (now.elapsed() * 1000).as_secs());
     let now = Instant::now();
