@@ -105,7 +105,8 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
             midp -= 1;
         }
         // make sure we reached [CRLF] $(
-        if midp >= 2 && buffer[midp] == b'(' && buffer[midp - 1] == b'$' && (buffer[midp - 2] == b'\r' || buffer[midp - 2] == b'\n') {
+        if midp >= 2 && buffer[midp] == b'(' && buffer[midp - 1] == b'$' &&
+           (buffer[midp - 2] == b'\r' || buffer[midp - 2] == b'\n') {
             Some(midp - 1)
         } else {
             None
@@ -116,11 +117,13 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
     loop {
         match hunt(buffer) {
             None => return None,
-            Some(mix) => match is_real(buffer, mix) {
-                Some(chap) => return Some(chap + offset),
-                None => {
-                    buffer = &buffer[mix + 1 ..];
-                    offset += mix + 1;
+            Some(mix) => {
+                match is_real(buffer, mix) {
+                    Some(chap) => return Some(chap + offset),
+                    None => {
+                        buffer = &buffer[mix + 1..];
+                        offset += mix + 1;
+                    }
                 }
             }
         }

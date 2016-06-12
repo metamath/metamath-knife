@@ -190,13 +190,11 @@ impl Database {
     pub fn scope_result(&mut self) -> &Arc<ScopeResult> {
         if self.scopes.is_none() {
             self.name_result();
-            self.scopes = time(&self.options.clone(),
-                  "scopeck",
-                  || {
+            self.scopes = time(&self.options.clone(), "scopeck", || {
                 let parse = self.parse_result().clone();
                 let name = self.name_result().clone();
-                      Some(Arc::new(scopeck::scope_check(&parse, &name)))
-                      });
+                Some(Arc::new(scopeck::scope_check(&parse, &name)))
+            });
         }
 
         self.scopes.as_ref().unwrap()
@@ -227,8 +225,8 @@ impl Database {
         if types.contains(&DiagnosticClass::Verify) {
             diags.extend(self.verify_result().diagnostics());
         }
-        time(&self.options.clone(), "diag", || {
-            diag::to_annotations(self.parse_result(), diags)
-        })
+        time(&self.options.clone(),
+             "diag",
+             || diag::to_annotations(self.parse_result(), diags))
     }
 }

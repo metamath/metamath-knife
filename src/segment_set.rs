@@ -99,13 +99,15 @@ impl SegmentSet {
                 loop {
                     if let Some(chap) = find_chapter_header(&buf[sstart..]) {
                         let diagpath = diagpath.clone();
-                        let subbuf = buf[sstart .. sstart + chap].to_owned();
+                        let subbuf = buf[sstart..sstart + chap].to_owned();
 
-                        promises.push(state.exec.exec(move || parser::parse_segments(diagpath, &Arc::new(subbuf))));
+                        promises.push(state.exec
+                            .exec(move || parser::parse_segments(diagpath, &Arc::new(subbuf))));
                         sstart += chap;
                     } else {
-                        let subbuf = buf[sstart ..].to_owned();
-                        promises.push(state.exec.exec(move || parser::parse_segments(diagpath, &Arc::new(subbuf))));
+                        let subbuf = buf[sstart..].to_owned();
+                        promises.push(state.exec
+                            .exec(move || parser::parse_segments(diagpath, &Arc::new(subbuf))));
                         return promises;
                     }
                 }
