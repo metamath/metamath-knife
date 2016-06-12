@@ -1,4 +1,5 @@
 use database::Executor;
+use database::Promise;
 use diag::Diagnostic;
 use parser;
 use parser::Comparer;
@@ -9,6 +10,7 @@ use parser::SegmentRef;
 use parser::Span;
 use parser::StatementAddress;
 use parser::StatementRef;
+use std::collections::VecDeque;
 use std::io;
 use std::io::Read;
 use std::fs::File;
@@ -79,9 +81,10 @@ impl SegmentSet {
             included: HashSet<PathBuf>,
             preload: HashMap<PathBuf, Vec<u8>>,
             workdir: Option<PathBuf>,
+            exec: Executor,
         }
 
-        fn canonicalize_and_read(state: &mut RecState, path: PathBuf) -> io::Result<Vec<Segment>> {
+        fn canonicalize_and_read(state: &mut RecState, path: PathBuf) -> io::Result<Vec<Promise<Vec<Segment>>>> {
             let cpath = try!(path.canonicalize());
             if state.workdir.is_none() {
                 state.workdir = Some(try!(try!(env::current_dir()).canonicalize()));
@@ -95,11 +98,12 @@ impl SegmentSet {
             let mut buf = Vec::new();
             try!(fh.read_to_end(&mut buf));
 
-            return Ok(parser::parse_segments(relcpath.to_string_lossy().into_owned(),
-                                             &Arc::new(buf)));
+            let diagpath = relcpath.to_string_lossy().into_owned();
+            let bufp = Arc::new(buf);
+            Ok(vec![state.exec.exec(move || parser::parse_segments(diagpath, &bufp))])
         }
 
-        fn read_and_parse(state: &mut RecState, path: PathBuf) -> Vec<Segment> {
+        fn read_and_parse(state: &mut RecState, path: PathBuf) -> Vec<Promise<Vec<Segment>>> {
             if !state.pre_included.insert(path.clone()) {
                 return Vec::new();
             }
@@ -109,25 +113,37 @@ impl SegmentSet {
                     // read from FS
                     match canonicalize_and_read(state, path) {
                         Err(cerr) => {
-                            vec![parser::dummy_segment(path_str,
-                                                       Diagnostic::IoError(format!("{}", cerr)))]
+                            let svec = vec![parser::dummy_segment(path_str,
+                                                       Diagnostic::IoError(format!("{}", cerr)))];
+                            vec![state.exec.exec(move || svec)]
                         }
                         Ok(segments) => segments,
                     }
                 }
-                Some(data) => parser::parse_segments(path_str, &Arc::new(data)),
+                Some(data) => vec![state.exec.exec(move || parser::parse_segments(path_str, &Arc::new(data)))],
             }
         }
 
-        fn recurse(state: &mut RecState, path: PathBuf) {
-            for seg in read_and_parse(state, path.clone()) {
+        fn flat(inp: Vec<Promise<Vec<Segment>>>) -> Vec<Segment> {
+            inp.into_iter().flat_map(|x| x.wait()).collect()
+        }
+
+        fn recurse(state: &mut RecState, path: PathBuf, segments: Vec<Segment>) {
+            let mut promises = VecDeque::new();
+            for seg in &segments {
                 if seg.next_file != Span::null() {
                     let chain = str::from_utf8(seg.next_file.as_ref(&seg.buffer))
                         .expect("parser verified ASCII")
                         .to_owned();
+                    let newpath = path.parent().unwrap_or(&path).join(PathBuf::from(chain));
+                    promises.push_back((newpath.clone(), read_and_parse(state, newpath)));
+                }
+            }
+            for seg in segments {
+                if seg.next_file != Span::null() {
                     state.segments.push(seg);
-                    recurse(state,
-                            path.parent().unwrap_or(&path).join(PathBuf::from(chain)));
+                    let (newpath, pp) = promises.pop_front().unwrap();
+                    recurse(state, newpath, flat(pp));
                 } else {
                     state.segments.push(seg);
                 }
@@ -140,9 +156,11 @@ impl SegmentSet {
             pre_included: new_set(),
             preload: data.into_iter().collect(),
             workdir: None,
+            exec: self.exec.clone(),
         };
 
-        recurse(&mut state, path);
+        let isegs = flat(read_and_parse(&mut state, path.clone()));
+        recurse(&mut state, path, isegs);
 
         let mut order = SegmentOrder::new();
         self.segments = new_map();
