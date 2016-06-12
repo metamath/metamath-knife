@@ -14,28 +14,15 @@ mod verify;
 
 use clap::Arg;
 use clap::App;
+use database::Database;
 use database::DbOptions;
-use database::Executor;
+use database::DiagnosticClass;
 use diag::Notation;
-use nameck::Nameset;
-use segment_set::SegmentSet;
-use std::mem;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Instant;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{}", e))
-}
-
-fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
-    let now = Instant::now();
-    let ret = f();
-    if opts.timing {
-        println!("{} {}ms", name, (now.elapsed() * 1000).as_secs());
-    }
-    ret
 }
 
 fn main() {
@@ -68,53 +55,32 @@ fn main() {
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
 
-    let options = Arc::new(options);
+    let mut db = Database::new(options);
 
-    let exec = Executor::new(options.jobs);
-
-    let set = time(&options, "parse", || {
-        let mut set = SegmentSet::new(options.clone(), &exec);
-        let mut data = Vec::new();
-        if let Some(tvals) = matches.values_of_lossy("TEXT") {
-            for kv in tvals.chunks(2) {
-                data.push((PathBuf::from(&kv[0]), kv[1].clone().into_bytes()));
-            }
+    let mut data = Vec::new();
+    if let Some(tvals) = matches.values_of_lossy("TEXT") {
+        for kv in tvals.chunks(2) {
+            data.push((PathBuf::from(&kv[0]), kv[1].clone().into_bytes()));
         }
-        let start = matches.value_of("DATABASE")
-            .map(|st| PathBuf::from(st))
-            .unwrap_or_else(|| data[0].0.clone());
-        set.read(start, data);
-        Arc::new(set)
-    });
+    }
+    let start = matches.value_of("DATABASE")
+        .map(|st| PathBuf::from(st))
+        .unwrap_or_else(|| data[0].0.clone());
 
-    let ns = time(&options, "nameck", || {
-        let mut ns = Nameset::new();
-        ns.update(&set);
-        Arc::new(ns)
-    });
+    db.parse(start, data);
 
-    let sr = time(&options,
-                  "scopeck",
-                  || Arc::new(scopeck::scope_check(&set, &ns)));
-    let vr = time(&options, "verify", || verify::verify(&set, &ns, &sr));
+    let mut types = vec![
+        DiagnosticClass::Parse,
+        DiagnosticClass::Scope,
+    ];
 
-    time(&options, "diag", || {
-        let mut diags = Vec::new();
-        diags.extend(set.parse_diagnostics());
-        diags.extend(sr.diagnostics());
-        diags.extend(vr.diagnostics());
+    if matches.is_present("verify") {
+        types.push(DiagnosticClass::Verify);
+    }
 
-        for notation in diag::to_annotations(&set, diags) {
-            print_annotation(notation);
-        }
-    });
-
-    time(&options, "free", move || {
-        mem::drop(vr);
-        mem::drop(sr);
-        mem::drop(ns);
-        mem::drop(set);
-    });
+    for notation in db.diag_notations(types) {
+        print_annotation(notation);
+    }
 }
 
 fn print_annotation(ann: Notation) {

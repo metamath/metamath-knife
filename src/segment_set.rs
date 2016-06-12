@@ -25,7 +25,7 @@ use util::HashSet;
 use util::new_map;
 use util::new_set;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct SegmentSet {
     pub options: Arc<DbOptions>,
     pub exec: Executor,
