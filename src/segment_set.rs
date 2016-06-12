@@ -1,3 +1,4 @@
+use database::DbOptions;
 use database::Executor;
 use database::Promise;
 use diag::Diagnostic;
@@ -18,6 +19,7 @@ use std::env;
 use std::str;
 use std::sync::Arc;
 use std::path::PathBuf;
+use util::find_chapter_header;
 use util::HashMap;
 use util::HashSet;
 use util::new_map;
@@ -25,14 +27,16 @@ use util::new_set;
 
 #[derive(Debug)]
 pub struct SegmentSet {
+    pub options: Arc<DbOptions>,
     pub exec: Executor,
     pub order: Arc<SegmentOrder>,
     pub segments: HashMap<SegmentId, Arc<Segment>>,
 }
 
 impl SegmentSet {
-    pub fn new(exec: &Executor) -> Self {
+    pub fn new(opts: Arc<DbOptions>, exec: &Executor) -> Self {
         SegmentSet {
+            options: opts,
             exec: exec.clone(),
             order: Arc::new(SegmentOrder::new()),
             segments: new_map(),
@@ -76,6 +80,7 @@ impl SegmentSet {
 
     pub fn read(&mut self, path: PathBuf, data: Vec<(PathBuf, Vec<u8>)>) {
         struct RecState {
+            options: Arc<DbOptions>,
             segments: Vec<Segment>,
             pre_included: HashSet<PathBuf>,
             included: HashSet<PathBuf>,
@@ -84,7 +89,34 @@ impl SegmentSet {
             exec: Executor,
         }
 
-        fn canonicalize_and_read(state: &mut RecState, path: PathBuf) -> io::Result<Vec<Promise<Vec<Segment>>>> {
+        fn split_and_parse(state: &RecState,
+                           diagpath: String,
+                           buf: Vec<u8>)
+                           -> Vec<Promise<Vec<Segment>>> {
+            if state.options.autosplit && buf.len() > 1_048_576 {
+                let mut promises = Vec::new();
+                let mut sstart = 0;
+                loop {
+                    if let Some(chap) = find_chapter_header(&buf[sstart..]) {
+                        let diagpath = diagpath.clone();
+                        let subbuf = buf[sstart .. sstart + chap].to_owned();
+
+                        promises.push(state.exec.exec(move || parser::parse_segments(diagpath, &Arc::new(subbuf))));
+                        sstart += chap;
+                    } else {
+                        let subbuf = buf[sstart ..].to_owned();
+                        promises.push(state.exec.exec(move || parser::parse_segments(diagpath, &Arc::new(subbuf))));
+                        return promises;
+                    }
+                }
+            } else {
+                vec![state.exec.exec(move || parser::parse_segments(diagpath, &Arc::new(buf)))]
+            }
+        }
+
+        fn canonicalize_and_read(state: &mut RecState,
+                                 path: PathBuf)
+                                 -> io::Result<Vec<Promise<Vec<Segment>>>> {
             let cpath = try!(path.canonicalize());
             if state.workdir.is_none() {
                 state.workdir = Some(try!(try!(env::current_dir()).canonicalize()));
@@ -99,8 +131,7 @@ impl SegmentSet {
             try!(fh.read_to_end(&mut buf));
 
             let diagpath = relcpath.to_string_lossy().into_owned();
-            let bufp = Arc::new(buf);
-            Ok(vec![state.exec.exec(move || parser::parse_segments(diagpath, &bufp))])
+            Ok(split_and_parse(state, diagpath, buf))
         }
 
         fn read_and_parse(state: &mut RecState, path: PathBuf) -> Vec<Promise<Vec<Segment>>> {
@@ -120,7 +151,7 @@ impl SegmentSet {
                         Ok(segments) => segments,
                     }
                 }
-                Some(data) => vec![state.exec.exec(move || parser::parse_segments(path_str, &Arc::new(data)))],
+                Some(data) => split_and_parse(state, path_str, data),
             }
         }
 
@@ -151,6 +182,7 @@ impl SegmentSet {
         }
 
         let mut state = RecState {
+            options: self.options.clone(),
             segments: Vec::new(),
             included: new_set(),
             pre_included: new_set(),

@@ -68,10 +68,12 @@ fn main() {
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
 
+    let options = Arc::new(options);
+
     let exec = Executor::new(options.jobs);
 
     let set = time(&options, "parse", || {
-        let mut set = SegmentSet::new(&exec);
+        let mut set = SegmentSet::new(options.clone(), &exec);
         let mut data = Vec::new();
         if let Some(tvals) = matches.values_of_lossy("TEXT") {
             for kv in tvals.chunks(2) {
