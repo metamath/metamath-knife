@@ -570,7 +570,7 @@ impl<'a> Scanner<'a> {
                 if tok_str.contains("$)") {
                     self.diag(Diagnostic::BadCommentEnd(tok, opener));
                 }
-                if tok_str.contains("$()") {
+                if tok_str.contains("$(") {
                     self.diag(Diagnostic::NestedComment(tok, opener));
                 }
             }
