@@ -458,11 +458,23 @@ fn verify_segment(sset: &SegmentSet,
     out
 }
 
-pub fn verify(segments: &SegmentSet, nset: &Nameset, scope: &ScopeResult) -> VerifyResult {
+pub fn verify(segments: &Arc<SegmentSet>,
+              nset: &Arc<Nameset>,
+              scope: &Arc<ScopeResult>)
+              -> VerifyResult {
     let mut out = VerifyResult { segments: new_map() };
+    let mut ssrq = Vec::new();
     for sref in segments.segments() {
-        out.segments.insert(sref.id,
-                            Arc::new(verify_segment(segments, nset, scope, sref.id)));
+        let segments2 = segments.clone();
+        let nset = nset.clone();
+        let scope = scope.clone();
+        let id = sref.id;
+        ssrq.push(segments.exec
+            .exec(move || (id, Arc::new(verify_segment(&segments2, &nset, &scope, id)))))
+    }
+    for promise in ssrq {
+        let (id, arc) = promise.wait();
+        out.segments.insert(id, arc);
     }
     out
 }

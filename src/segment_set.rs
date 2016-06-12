@@ -1,3 +1,4 @@
+use database::Executor;
 use diag::Diagnostic;
 use parser;
 use parser::Comparer;
@@ -22,13 +23,15 @@ use util::new_set;
 
 #[derive(Debug)]
 pub struct SegmentSet {
+    pub exec: Executor,
     pub order: Arc<SegmentOrder>,
     pub segments: HashMap<SegmentId, Arc<Segment>>,
 }
 
 impl SegmentSet {
-    pub fn new() -> Self {
+    pub fn new(exec: &Executor) -> Self {
         SegmentSet {
+            exec: exec.clone(),
             order: Arc::new(SegmentOrder::new()),
             segments: new_map(),
         }

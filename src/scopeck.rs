@@ -20,6 +20,7 @@ use parser::TokenPtr;
 use parser::TokenRef;
 use segment_set::SegmentSet;
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 use util::fast_extend;
@@ -711,13 +712,21 @@ impl ScopeResult {
     }
 }
 
-pub fn scope_check(segments: &SegmentSet, names: &Nameset) -> ScopeResult {
+pub fn scope_check(segments: &Arc<SegmentSet>, names: &Arc<Nameset>) -> ScopeResult {
     let mut out = ScopeResult {
         segments: Vec::new(),
         frame_index: new_map(),
     };
+    let mut ssrq = VecDeque::new();
     for sref in segments.segments() {
-        let ssr = Arc::new(scope_check_single(names, sref));
+        let segments2 = segments.clone();
+        let names = names.clone();
+        let id = sref.id;
+        ssrq.push_back(segments.exec
+            .exec(move || Arc::new(scope_check_single(&names, segments2.segment(id)))));
+    }
+    for sref in segments.segments() {
+        let ssr = ssrq.pop_front().unwrap().wait();
         let six = out.segments.len();
         out.segments.push((sref.id, ssr.clone()));
 

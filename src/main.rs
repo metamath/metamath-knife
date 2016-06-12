@@ -15,12 +15,14 @@ mod verify;
 use clap::Arg;
 use clap::App;
 use database::DbOptions;
+use database::Executor;
 use diag::Notation;
 use nameck::Nameset;
 use segment_set::SegmentSet;
 use std::mem;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 
 fn positive_integer(val: String) -> Result<(), String> {
@@ -63,11 +65,13 @@ fn main() {
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
     options.verify = matches.is_present("verify");
-    options.jobs = u32::from_str(matches.value_of("jobs").unwrap_or("1"))
+    options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
 
+    let exec = Executor::new(options.jobs);
+
     let set = time(&options, "parse", || {
-        let mut set = SegmentSet::new();
+        let mut set = SegmentSet::new(&exec);
         let mut data = Vec::new();
         if let Some(tvals) = matches.values_of_lossy("TEXT") {
             for kv in tvals.chunks(2) {
@@ -78,16 +82,18 @@ fn main() {
             .map(|st| PathBuf::from(st))
             .unwrap_or_else(|| data[0].0.clone());
         set.read(start, data);
-        set
+        Arc::new(set)
     });
 
     let ns = time(&options, "nameck", || {
         let mut ns = Nameset::new();
         ns.update(&set);
-        ns
+        Arc::new(ns)
     });
 
-    let sr = time(&options, "scopeck", || scopeck::scope_check(&set, &ns));
+    let sr = time(&options,
+                  "scopeck",
+                  || Arc::new(scopeck::scope_check(&set, &ns)));
     let vr = time(&options, "verify", || verify::verify(&set, &ns, &sr));
 
     time(&options, "diag", || {
