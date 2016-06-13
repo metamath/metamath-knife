@@ -1,4 +1,4 @@
-// TODO experiment with FNV hashers, etc.
+use database::DbOptions;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -8,6 +8,8 @@ use parser::{Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAd
 use segment_set::SegmentSet;
 use util;
 use util::HashMap;
+use util::HashSet;
+use util::new_set;
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
@@ -55,9 +57,17 @@ fn deviv<K, Q: ?Sized, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
 struct SymbolInfo {
     atom: Atom,
+    generation: usize,
     all: NameSlot<TokenAddress, SymbolType>,
     constant: NameSlot<TokenAddress, ()>,
     float: NameSlot<StatementAddress, (Token, Token, Atom)>,
+}
+
+#[derive(Default, PartialEq, Eq, Debug, Clone)]
+struct LabelInfo {
+    atom: Atom,
+    generation: usize,
+    labels: NameSlot<StatementAddress, ()>,
 }
 
 #[derive(Default,Debug,Clone)]
@@ -83,11 +93,14 @@ fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
 #[derive(Default,Debug,Clone)]
 pub struct Nameset {
     atom_table: AtomTable,
+    options: Arc<DbOptions>,
     pub order: Arc<SegmentOrder>,
 
+    generation: usize,
+    dv_gen: usize,
     segments: HashMap<SegmentId, Arc<Segment>>,
     dv_info: NameSlot<StatementAddress, Vec<Atom>>,
-    labels: HashMap<Token, NameSlot<StatementAddress, ()>>,
+    labels: HashMap<Token, LabelInfo>,
     symbols: HashMap<Token, SymbolInfo>,
 }
 
@@ -98,6 +111,8 @@ impl Nameset {
 
     pub fn update(&mut self, segs: &SegmentSet) {
         self.order = segs.order.clone();
+        self.generation = self.generation.checked_add(1).unwrap();
+        self.options = segs.options.clone();
 
         let mut keys_to_remove = Vec::new();
         for (&seg_id, &ref seg) in &self.segments {
@@ -133,6 +148,7 @@ impl Nameset {
 
         for &ref symdef in &seg.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
+            slot.generation = self.generation;
             if slot.atom == Atom::default() {
                 slot.atom = intern(&mut self.atom_table, &symdef.name);
             }
@@ -149,9 +165,14 @@ impl Nameset {
         }
 
         for &ref labdef in &seg.labels {
-            let label = sref.statement(labdef.index).label().to_owned();
+            let labelr = sref.statement(labdef.index).label();
+            let label = labelr.to_owned();
             let slot = autoviv(&mut self.labels, label);
-            slot_insert(slot,
+            slot.generation = self.generation;
+            if self.options.incremental && slot.atom == Atom::default() {
+                slot.atom = intern(&mut self.atom_table, labelr);
+            }
+            slot_insert(&mut slot.labels,
                         &*self.order,
                         StatementAddress::new(id, labdef.index),
                         ());
@@ -159,6 +180,7 @@ impl Nameset {
 
         for &ref floatdef in &seg.floats {
             let slot = autoviv(&mut self.symbols, floatdef.name.clone());
+            slot.generation = self.generation;
             if slot.atom == Atom::default() {
                 slot.atom = intern(&mut self.atom_table, &floatdef.name);
             }
@@ -172,6 +194,7 @@ impl Nameset {
 
         for &ref dvdef in &seg.global_dvs {
             let vars = dvdef.vars.iter().map(|v| intern(&mut self.atom_table, &v)).collect();
+            self.dv_gen = self.generation;
             slot_insert(&mut self.dv_info,
                         &*self.order,
                         StatementAddress::new(id, dvdef.start),
@@ -185,9 +208,11 @@ impl Nameset {
                 segment: &seg,
                 id: id,
             };
+            let gen = self.generation;
             for &ref symdef in &seg.symbols {
                 deviv(&mut self.symbols, &symdef.name, |slot| {
                     let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
+                    slot.generation = gen;
                     slot_remove(&mut slot.all, address);
                     slot_remove(&mut slot.constant, address);
                 });
@@ -196,18 +221,21 @@ impl Nameset {
             for &ref labdef in &seg.labels {
                 let label = sref.statement(labdef.index).label();
                 deviv(&mut self.labels, label, |slot| {
-                    slot_remove(slot, StatementAddress::new(id, labdef.index));
+                    slot.generation = gen;
+                    slot_remove(&mut slot.labels, StatementAddress::new(id, labdef.index));
                 });
             }
 
             for &ref floatdef in &seg.floats {
                 deviv(&mut self.symbols, &floatdef.name, |slot| {
                     let address = StatementAddress::new(id, floatdef.start);
+                    slot.generation = gen;
                     slot_remove(&mut slot.float, address);
                 });
             }
 
             for &ref dvdef in &seg.global_dvs {
+                self.dv_gen = gen;
                 slot_remove(&mut self.dv_info, StatementAddress::new(id, dvdef.start));
             }
         }
@@ -224,6 +252,20 @@ impl Nameset {
 
 pub struct NameReader<'a> {
     nameset: &'a Nameset,
+    incremental: bool,
+    found_symbol: HashSet<Atom>,
+    not_found_symbol: HashSet<Token>,
+    found_label: HashSet<Atom>,
+    not_found_label: HashSet<Token>,
+}
+
+pub struct NameUsage {
+    generation: usize,
+    incremental: bool,
+    found_symbol: HashSet<Atom>,
+    not_found_symbol: HashSet<Token>,
+    found_label: HashSet<Atom>,
+    not_found_label: HashSet<Token>,
 }
 
 pub struct LookupLabel {
@@ -255,42 +297,92 @@ pub struct LookupGlobalDv<'a> {
 
 impl<'a> NameReader<'a> {
     pub fn new(nameset: &'a Nameset) -> Self {
-        NameReader { nameset: nameset }
+        NameReader {
+            nameset: nameset,
+            incremental: nameset.options.incremental,
+            found_symbol: new_set(),
+            not_found_symbol: new_set(),
+            found_label: new_set(),
+            not_found_label: new_set(),
+        }
+    }
+
+    pub fn into_usage(self) -> NameUsage {
+        NameUsage {
+            generation: self.nameset.generation,
+            incremental: self.incremental,
+            found_symbol: self.found_symbol,
+            not_found_symbol: self.not_found_symbol,
+            found_label: self.found_label,
+            not_found_label: self.not_found_label,
+        }
     }
 
     // TODO: add versions which fetch less data, to reduce dep tracking overhead
     pub fn lookup_label(&mut self, label: TokenPtr) -> Option<LookupLabel> {
-        self.nameset
-            .labels
-            .get(label)
-            .and_then(|&ref lslot| lslot.first().map(|&(addr, _)| LookupLabel { address: addr }))
+        match self.nameset.labels.get(label) {
+            Some(&ref lslot) => {
+                if self.incremental {
+                    self.found_label.insert(lslot.atom);
+                }
+                lslot.labels.first().map(|&(addr, _)| LookupLabel { address: addr })
+            }
+            None => {
+                if self.incremental {
+                    self.not_found_label.insert(label.to_owned());
+                }
+                None
+            }
+        }
     }
 
     pub fn lookup_symbol(&mut self, symbol: TokenPtr) -> Option<LookupSymbol> {
-        self.nameset.symbols.get(symbol).and_then(|&ref syminfo| {
-            syminfo.all.first().map(|&(addr, stype)| {
-                LookupSymbol {
-                    stype: stype,
-                    atom: syminfo.atom,
-                    address: addr,
-                    const_address: syminfo.constant.first().map(|&(addr, _)| addr),
+        match self.nameset.symbols.get(symbol) {
+            Some(&ref syminfo) => {
+                if self.incremental {
+                    self.found_symbol.insert(syminfo.atom);
                 }
-            })
-        })
+                syminfo.all.first().map(|&(addr, stype)| {
+                    LookupSymbol {
+                        stype: stype,
+                        atom: syminfo.atom,
+                        address: addr,
+                        const_address: syminfo.constant.first().map(|&(addr, _)| addr),
+                    }
+                })
+            }
+            None => {
+                if self.incremental {
+                    self.not_found_symbol.insert(symbol.to_owned());
+                }
+                None
+            }
+        }
     }
 
     // TODO: consider merging this with lookup_symbol
     pub fn lookup_float(&mut self, symbol: TokenPtr) -> Option<LookupFloat<'a>> {
-        self.nameset.symbols.get(symbol).and_then(|&ref syminfo| {
-            syminfo.float.first().map(|&(addr, (ref label, ref typecode, tcatom))| {
-                LookupFloat {
-                    address: addr,
-                    label: &label,
-                    typecode: &typecode,
-                    typecode_atom: tcatom,
+        match self.nameset.symbols.get(symbol) {
+            Some(&ref syminfo) => {
+                if self.incremental {
+                    self.found_symbol.insert(syminfo.atom);
                 }
-            })
-        })
+                syminfo.float.first().map(|&(addr, (ref label, ref typecode, tcatom))| {
+                    LookupFloat {
+                        address: addr,
+                        label: &label,
+                        typecode: &typecode,
+                        typecode_atom: tcatom,
+                    }
+                })
+            }
+            None => {
+                if self.incremental {
+                    self.not_found_symbol.insert(symbol.to_owned());
+                }
+                None
+            }
+        }
     }
 
     pub fn lookup_global_dv(&mut self) -> Vec<LookupGlobalDv> {
@@ -304,5 +396,55 @@ impl<'a> NameReader<'a> {
                 }
             })
             .collect()
+    }
+}
+
+impl NameUsage {
+    pub fn valid(&self, nameset: &Nameset) -> bool {
+        if nameset.dv_gen > self.generation {
+            // we don't track fine-grained global DV usage
+            return false;
+        }
+
+        if !self.incremental && nameset.generation > self.generation {
+            // not tracking fine-grained deps today
+            return false;
+        }
+
+        for &atom in &self.found_symbol {
+            match nameset.symbols.get(nameset.atom_name(atom)) {
+                None => return false,
+                Some(infop) => {
+                    if infop.generation > self.generation {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        for &ref name in &self.not_found_symbol {
+            if nameset.symbols.contains_key(name) {
+                return false;
+            }
+        }
+
+        for &atom in &self.found_label {
+            match nameset.labels.get(nameset.atom_name(atom)) {
+                None => return false,
+                Some(infop) => {
+                    if infop.generation > self.generation {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        for &ref name in &self.not_found_label {
+            if nameset.labels.contains_key(name) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

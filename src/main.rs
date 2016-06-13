@@ -54,6 +54,7 @@ fn main() {
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
     options.verify = matches.is_present("verify");
+    options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
 

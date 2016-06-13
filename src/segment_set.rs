@@ -139,9 +139,8 @@ impl SegmentSet {
                         promises.push(state.exec.exec(move || sres));
                     }
                     None => {
-                        promises.push(state.exec.exec(move || {
-                            (Some(name), parser::parse_segments(diagpath, &buf))
-                        }));
+                        promises.push(state.exec
+                            .exec(move || (Some(name), parser::parse_segments(diagpath, &buf))));
                     }
                 }
             }
@@ -247,16 +246,18 @@ impl SegmentSet {
         old_segs.sort_by(|x, y| self.order.cmp(&x.0, &y.0));
         let mut new_segs = state.segments;
 
-        let mut old_r = 0 .. old_segs.len();
-        let mut new_r = 0 .. new_segs.len();
+        let mut old_r = 0..old_segs.len();
+        let mut new_r = 0..new_segs.len();
 
         // LCS lite
-        while old_r.start < old_r.end && new_r.start < new_r.end && ptr_eq::<Segment>(&old_segs[old_r.start].1, &new_segs[new_r.start]) {
+        while old_r.start < old_r.end && new_r.start < new_r.end &&
+              ptr_eq::<Segment>(&old_segs[old_r.start].1, &new_segs[new_r.start]) {
             old_r.start += 1;
             new_r.start += 1;
         }
 
-        while old_r.start < old_r.end && new_r.start < new_r.end && ptr_eq::<Segment>(&old_segs[old_r.end - 1].1, &new_segs[new_r.end - 1]) {
+        while old_r.start < old_r.end && new_r.start < new_r.end &&
+              ptr_eq::<Segment>(&old_segs[old_r.end - 1].1, &new_segs[new_r.end - 1]) {
             old_r.end -= 1;
             new_r.end -= 1;
         }

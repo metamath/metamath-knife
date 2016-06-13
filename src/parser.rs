@@ -323,7 +323,7 @@ pub struct Statement {
 
 #[derive(Copy,Clone)]
 pub struct SegmentRef<'a> {
-    pub segment: &'a Segment,
+    pub segment: &'a Arc<Segment>,
     pub id: SegmentId,
 }
 

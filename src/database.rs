@@ -21,6 +21,7 @@ pub struct DbOptions {
     pub autosplit: bool,
     pub timing: bool,
     pub verify: bool,
+    pub incremental: bool,
     pub jobs: usize,
 }
 
@@ -205,12 +206,19 @@ impl Database {
     pub fn scope_result(&mut self) -> &Arc<ScopeResult> {
         if self.scopes.is_none() {
             self.name_result();
-            self.scopes = time(&self.options.clone(), "scopeck", || {
+            time(&self.options.clone(), "scopeck", || {
+                if self.prev_scopes.is_none() {
+                    self.prev_scopes = Some(Arc::new(ScopeResult::default()));
+                }
+
                 let parse = self.parse_result().clone();
                 let name = self.name_result().clone();
-                Some(Arc::new(scopeck::scope_check(&parse, &name)))
+                {
+                    let mut ns = Arc::make_mut(self.prev_scopes.as_mut().unwrap());
+                    scopeck::scope_check(ns, &parse, &name);
+                }
+                self.scopes = self.prev_scopes.clone();
             });
-            self.prev_scopes = self.scopes.clone();
         }
 
         self.scopes.as_ref().unwrap()

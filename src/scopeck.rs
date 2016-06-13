@@ -3,9 +3,11 @@ use diag::Diagnostic;
 use nameck::Atom;
 use nameck::NameReader;
 use nameck::Nameset;
+use nameck::NameUsage;
 use parser::Comparer;
 use parser::GlobalRange;
 use parser::NO_STATEMENT;
+use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
 use parser::SegmentRef;
@@ -26,6 +28,7 @@ use std::sync::Arc;
 use util::fast_extend;
 use util::HashMap;
 use util::new_map;
+use util::ptr_eq;
 
 // This module calculates 3 things which are related only by the fact that they can be done
 // at the same time:
@@ -657,6 +660,8 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
 }
 
 pub struct SegmentScopeResult {
+    source: Arc<Segment>,
+    name_usage: NameUsage,
     diagnostics: HashMap<StatementIndex, Vec<Diagnostic>>,
     frames_out: Vec<Frame>,
 }
@@ -688,11 +693,14 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
     }
 
     SegmentScopeResult {
+        source: seg.segment.clone(),
+        name_usage: state.gnames.into_usage(),
         diagnostics: state.diagnostics,
         frames_out: state.frames_out,
     }
 }
 
+#[derive(Default, Clone)]
 pub struct ScopeResult {
     segments: Vec<(SegmentId, Arc<SegmentScopeResult>)>,
     frame_index: HashMap<Token, (usize, usize)>,
@@ -712,31 +720,43 @@ impl ScopeResult {
     }
 }
 
-pub fn scope_check(segments: &Arc<SegmentSet>, names: &Arc<Nameset>) -> ScopeResult {
-    let mut out = ScopeResult {
-        segments: Vec::new(),
-        frame_index: new_map(),
-    };
+pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: &Arc<Nameset>) {
     let mut ssrq = VecDeque::new();
-    for sref in segments.segments() {
-        let segments2 = segments.clone();
-        let names = names.clone();
-        let id = sref.id;
-        ssrq.push_back(segments.exec
-            .exec(move || Arc::new(scope_check_single(&names, segments2.segment(id)))));
+    {
+        let mut prev = new_map();
+        for &(sid, ref ssr) in &result.segments {
+            prev.insert(sid, ssr.clone());
+        }
+        for sref in segments.segments() {
+            let segments2 = segments.clone();
+            let names = names.clone();
+            let id = sref.id;
+            let osr = prev.get(&id).cloned();
+            ssrq.push_back(segments.exec.exec(move || {
+                let sref = segments2.segment(id);
+                if let Some(old_res) = osr {
+                    if old_res.name_usage.valid(&names) &&
+                       ptr_eq::<Segment>(&old_res.source, sref.segment) {
+                        return old_res;
+                    }
+                }
+                Arc::new(scope_check_single(&names, sref))
+            }));
+        }
     }
+    result.segments = Vec::new();
+    result.frame_index = new_map();
     for sref in segments.segments() {
         let ssr = ssrq.pop_front().unwrap().wait();
-        let six = out.segments.len();
-        out.segments.push((sref.id, ssr.clone()));
+        let six = result.segments.len();
+        result.segments.push((sref.id, ssr.clone()));
 
         for (index, frame) in ssr.frames_out.iter().enumerate() {
             let label = sref.statement(frame.valid.start.index).label().to_owned();
-            let old = out.frame_index.insert(label, (six, index));
+            let old = result.frame_index.insert(label, (six, index));
             assert!(old.is_none(), "check_label_dup should prevent this");
         }
     }
-    out
 }
 
 #[derive(Clone,Copy)]
