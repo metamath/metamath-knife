@@ -766,8 +766,12 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
 
     for sref in segments.segments() {
         match ssrq.pop_front().unwrap().wait() {
-            Some(scoperes) => { to_add.push(scoperes); }
-            None => { stale_ids.remove(&sref.id); }
+            Some(scoperes) => {
+                to_add.push(scoperes);
+            }
+            None => {
+                stale_ids.remove(&sref.id);
+            }
         }
     }
 
@@ -811,7 +815,9 @@ impl<'a> ScopeReader<'a> {
     pub fn get(&self, name: TokenPtr) -> Option<&'a Frame> {
         match self.result.frame_index.get(name) {
             None => None,
-            Some(&(_gen, segid, frix)) => Some(&self.result.segments[segid].as_ref().unwrap().frames_out[frix]),
+            Some(&(_gen, segid, frix)) => {
+                Some(&self.result.segments[segid].as_ref().unwrap().frames_out[frix])
+            }
         }
     }
 }
