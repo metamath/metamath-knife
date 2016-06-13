@@ -228,13 +228,20 @@ impl Database {
         if self.verify.is_none() {
             self.name_result();
             self.scope_result();
-            self.verify = time(&self.options.clone(), "verify", || {
+            time(&self.options.clone(), "verify", || {
+                if self.prev_verify.is_none() {
+                    self.prev_verify = Some(Arc::new(VerifyResult::default()));
+                }
+
                 let parse = self.parse_result().clone();
                 let scope = self.scope_result().clone();
                 let name = self.name_result().clone();
-                Some(Arc::new(verify::verify(&parse, &name, &scope)))
+                {
+                    let mut ver = Arc::make_mut(self.prev_verify.as_mut().unwrap());
+                    verify::verify(ver, &parse, &name, &scope);
+                }
+                self.verify = self.prev_verify.clone();
             });
-            self.prev_verify = self.verify.clone();
         }
         self.verify.as_ref().unwrap()
     }

@@ -4,6 +4,7 @@ use nameck::Atom;
 use nameck::Nameset;
 use parser::Comparer;
 use parser::NO_STATEMENT;
+use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
 use parser::StatementAddress;
@@ -14,8 +15,10 @@ use scopeck::ExprFragment;
 use scopeck::Frame;
 use scopeck::ScopeReader;
 use scopeck::ScopeResult;
+use scopeck::ScopeUsage;
 use segment_set::SegmentSet;
 use std::cmp::Ordering;
+use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 use std::u32;
@@ -25,6 +28,7 @@ use util::fast_extend;
 use util::fast_truncate;
 use util::HashMap;
 use util::new_map;
+use util::ptr_eq;
 
 enum PreparedStep<'a> {
     Hyp(Bitset, Atom, Range<usize>),
@@ -291,12 +295,7 @@ fn save_step(state: &mut VerifyState) {
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
-fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
-                    sset: &'a SegmentSet,
-                    nset: &'a Nameset,
-                    scopes: ScopeReader<'a>,
-                    stmt: StatementRef<'a>)
-                    -> Option<Diagnostic> {
+fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Option<Diagnostic> {
     // only intend to check $p statements
     if stmt.statement.stype != StatementType::Provable {
         return None;
@@ -304,28 +303,11 @@ fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
 
     // no valid frame -> no use checking
     // may wish to record a secondary error?
-    let cur_frame = match scopes.get(stmt.label()) {
+    let cur_frame = match state.scoper.get(stmt.label()) {
         None => return None,
         Some(x) => x,
     };
 
-    if statepp.is_none() {
-        *statepp = Some(VerifyState {
-            scoper: scopes,
-            nameset: nset,
-            order: &sset.order,
-            cur_frame: cur_frame,
-            stack: Vec::new(),
-            stack_buffer: Vec::new(),
-            prepared: Vec::new(),
-            prep_buffer: Vec::new(),
-            temp_buffer: Vec::new(),
-            subst_info: Vec::new(),
-            var2bit: new_map(),
-            dv_map: &cur_frame.optional_dv,
-        });
-    }
-    let state = statepp.as_mut().unwrap();
     state.cur_frame = cur_frame;
     state.stack.clear();
     fast_clear(&mut state.stack_buffer);
@@ -423,9 +405,12 @@ fn verify_proof<'a>(statepp: &mut Option<VerifyState<'a>>,
 }
 
 struct VerifySegment {
+    source: Arc<Segment>,
+    scope_usage: ScopeUsage,
     diagnostics: HashMap<StatementAddress, Diagnostic>,
 }
 
+#[derive(Default,Clone)]
 pub struct VerifyResult {
     segments: HashMap<SegmentId, Arc<VerifySegment>>,
 }
@@ -447,34 +432,62 @@ fn verify_segment(sset: &SegmentSet,
                   scopes: &ScopeResult,
                   sid: SegmentId)
                   -> VerifySegment {
-    let reader = ScopeReader::new(scopes);
-    let mut out = VerifySegment { diagnostics: new_map() };
-    let mut state = None;
-    for stmt in sset.segment(sid).statement_iter() {
-        if let Some(diag) = verify_proof(&mut state, sset, nset, reader, stmt) {
-            out.diagnostics.insert(stmt.address(), diag);
+    let mut diagnostics = new_map();
+    let dummy_frame = Frame::default();
+    let mut state = VerifyState {
+        scoper: ScopeReader::new(scopes),
+        nameset: nset,
+        order: &sset.order,
+        cur_frame: &dummy_frame,
+        stack: Vec::new(),
+        stack_buffer: Vec::new(),
+        prepared: Vec::new(),
+        prep_buffer: Vec::new(),
+        temp_buffer: Vec::new(),
+        subst_info: Vec::new(),
+        var2bit: new_map(),
+        dv_map: &dummy_frame.optional_dv,
+    };
+    let sref = sset.segment(sid);
+    for stmt in sref.statement_iter() {
+        if let Some(diag) = verify_proof(&mut state, stmt) {
+            diagnostics.insert(stmt.address(), diag);
         }
     }
-    out
+    VerifySegment {
+        source: sref.segment.clone(),
+        diagnostics: diagnostics,
+        scope_usage: state.scoper.into_usage(),
+    }
 }
 
-pub fn verify(segments: &Arc<SegmentSet>,
+pub fn verify(result: &mut VerifyResult,
+              segments: &Arc<SegmentSet>,
               nset: &Arc<Nameset>,
-              scope: &Arc<ScopeResult>)
-              -> VerifyResult {
-    let mut out = VerifyResult { segments: new_map() };
+              scope: &Arc<ScopeResult>) {
+    let old = mem::replace(&mut result.segments, new_map());
     let mut ssrq = Vec::new();
     for sref in segments.segments() {
         let segments2 = segments.clone();
         let nset = nset.clone();
         let scope = scope.clone();
         let id = sref.id;
-        ssrq.push(segments.exec
-            .exec(move || (id, Arc::new(verify_segment(&segments2, &nset, &scope, id)))))
+        let old_res_o = old.get(&id).cloned();
+        ssrq.push(segments.exec.exec(move || {
+            let sref = segments2.segment(id);
+            if let Some(old_res) = old_res_o {
+                if old_res.scope_usage.valid(&nset, &scope) &&
+                   ptr_eq::<Segment>(&old_res.source, sref.segment) {
+                    return (id, old_res.clone());
+                }
+            }
+            (id, Arc::new(verify_segment(&segments2, &nset, &scope, id)))
+        }))
     }
+
+    result.segments.clear();
     for promise in ssrq {
         let (id, arc) = promise.wait();
-        out.segments.insert(id, arc);
+        result.segments.insert(id, arc);
     }
-    out
 }

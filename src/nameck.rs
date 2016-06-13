@@ -271,6 +271,8 @@ pub struct NameUsage {
 pub struct LookupLabel {
     /// Address of topmost statement with this label
     pub address: StatementAddress,
+    /// Atom assigned to this label; only valid if incremental=true in options
+    pub atom: Atom,
 }
 
 pub struct LookupSymbol {
@@ -325,7 +327,12 @@ impl<'a> NameReader<'a> {
                 if self.incremental {
                     self.found_label.insert(lslot.atom);
                 }
-                lslot.labels.first().map(|&(addr, _)| LookupLabel { address: addr })
+                lslot.labels.first().map(|&(addr, _)| {
+                    LookupLabel {
+                        atom: lslot.atom,
+                        address: addr,
+                    }
+                })
             }
             None => {
                 if self.incremental {

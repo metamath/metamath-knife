@@ -292,6 +292,12 @@ pub enum StatementType {
 }
 use self::StatementType::*;
 
+impl Default for StatementType {
+    fn default() -> StatementType {
+        Invalid
+    }
+}
+
 impl StatementType {
     fn takes_label(self) -> bool {
         match self {

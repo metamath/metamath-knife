@@ -27,6 +27,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use util::fast_extend;
 use util::HashMap;
+use util::HashSet;
 use util::new_map;
 use util::new_set;
 use util::ptr_eq;
@@ -90,7 +91,7 @@ pub enum ExprFragment {
     Constant(Range<usize>),
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Default)]
 pub struct VerifyExpr {
     pub typecode: Atom,
     pub tail: Vec<ExprFragment>,
@@ -104,10 +105,11 @@ pub struct Hyp {
     pub expr: VerifyExpr,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Default)]
 pub struct Frame {
     pub stype: StatementType,
     pub valid: GlobalRange,
+    pub label_atom: Atom,
     pub const_pool: Vec<u8>,
     pub hypotheses: Vec<Hyp>,
     pub target: VerifyExpr,
@@ -135,15 +137,17 @@ fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic)
     state.diagnostics.entry(ix).or_insert(Vec::new()).push(diag);
 }
 
-fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> bool {
+// atom will be meaningless in non-incremental mode
+fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> Option<Atom> {
     // is the label unique in the database?
     if let Some(def) = state.gnames.lookup_label(sref.label()) {
         if def.address != sref.address() {
             push_diagnostic(state, sref.index, Diagnostic::DuplicateLabel(def.address));
-            return false;
+            return None;
         }
+        return Some(def.atom);
     }
-    true
+    None // should be unreachable?
 }
 
 fn check_math_symbol(state: &mut ScopeState,
@@ -234,7 +238,10 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
     }
 }
 
-fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[CheckedToken]) {
+fn construct_stub_frame(state: &mut ScopeState,
+                        sref: StatementRef,
+                        latom: Atom,
+                        expr: &[CheckedToken]) {
     // gets data for $e and $f statements; these are not frames but they
     // are referenced by proofs using a frame-like structure
     let mut iter = expr.iter();
@@ -261,6 +268,7 @@ fn construct_stub_frame(state: &mut ScopeState, sref: StatementRef, expr: &[Chec
 
     state.frames_out.push(Frame {
         stype: sref.statement.stype,
+        label_atom: latom,
         valid: sref.scope_range(),
         hypotheses: Vec::new(),
         target: VerifyExpr {
@@ -365,6 +373,7 @@ fn scan_dv<'a>(iframe: &mut InchoateFrame, var_set: &[Atom]) {
 
 fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
                             sref: StatementRef<'a>,
+                            label_atom: Atom,
                             expr: &[CheckedToken<'a>]) {
     state.local_essen.retain(|hyp| check_endpoint(sref.index, hyp.valid.end));
     state.local_dv.retain(|hyp| check_endpoint(sref.index, hyp.valid.end));
@@ -419,6 +428,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
 
     state.frames_out.push(Frame {
         stype: sref.statement.stype,
+        label_atom: label_atom,
         valid: sref.address().unbounded_range(),
         hypotheses: hyps,
         target: scan_res,
@@ -432,11 +442,13 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
 }
 
 fn scope_check_axiom<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    if !check_label_dup(state, sref) {
+    let latom = check_label_dup(state, sref);
+    if latom.is_none() {
         return;
     }
+
     if let Some(expr) = check_eap(state, sref) {
-        construct_full_frame(state, sref, &expr);
+        construct_full_frame(state, sref, latom.unwrap(), &expr);
     }
 }
 
@@ -507,11 +519,12 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 }
 
 fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    if !check_label_dup(state, sref) {
+    let latom = check_label_dup(state, sref);
+    if latom.is_none() {
         return;
     }
     if let Some(expr) = check_eap(state, sref) {
-        construct_stub_frame(state, sref, &expr);
+        construct_stub_frame(state, sref, latom.unwrap(), &expr);
         state.local_essen.push(LocalEssentialInfo {
             valid: sref.scope_range(),
             label: sref.label(),
@@ -526,7 +539,8 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let const_tok = sref.math_at(0);
     let var_tok = sref.math_at(1);
 
-    if !check_label_dup(state, sref) {
+    let latom = check_label_dup(state, sref);
+    if latom.is_none() {
         return;
     }
 
@@ -576,10 +590,9 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             });
     }
 
-    construct_stub_frame(state,
-                         sref,
-                         &[CheckedToken::Const(const_tok.slice, const_at),
-                           CheckedToken::Var(var_tok.slice, var_at, LocalFloatInfo::default())]);
+    let expr = [CheckedToken::Const(const_tok.slice, const_at),
+                CheckedToken::Var(var_tok.slice, var_at, LocalFloatInfo::default())];
+    construct_stub_frame(state, sref, latom.unwrap(), &expr);
 }
 
 fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
@@ -608,11 +621,12 @@ fn maybe_add_local_var(state: &mut ScopeState,
 }
 
 fn scope_check_provable<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    if !check_label_dup(state, sref) {
+    let latom = check_label_dup(state, sref);
+    if latom.is_none() {
         return;
     }
     if let Some(expr) = check_eap(state, sref) {
-        construct_full_frame(state, sref, &expr);
+        construct_full_frame(state, sref, latom.unwrap(), &expr);
     }
 }
 
@@ -728,6 +742,12 @@ impl ScopeResult {
 }
 
 pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: &Arc<Nameset>) {
+    if result.frame_index.is_empty() {
+        result.incremental = true;
+    }
+    if !segments.options.incremental {
+        result.incremental = false;
+    }
     result.generation += 1;
     let gen = result.generation;
     let mut ssrq = VecDeque::new();
@@ -777,7 +797,10 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
 
     for stale_id in stale_ids {
         let oseg = result.segments[stale_id.0 as usize].take().unwrap();
-        let sref = segments.segment(oseg.id);
+        let sref = SegmentRef {
+            segment: &oseg.source,
+            id: stale_id,
+        };
         for frame in &oseg.frames_out {
             let label = sref.statement(frame.valid.start.index).label().to_owned();
             let old = result.frame_index.remove(&label);
@@ -802,22 +825,81 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
     }
 }
 
-#[derive(Clone,Copy)]
 pub struct ScopeReader<'a> {
     result: &'a ScopeResult,
+    incremental: bool,
+    found: HashSet<Atom>,
+    not_found: HashSet<Token>,
 }
 
 impl<'a> ScopeReader<'a> {
     pub fn new(res: &'a ScopeResult) -> ScopeReader<'a> {
-        ScopeReader { result: res }
+        ScopeReader {
+            result: res,
+            incremental: res.incremental,
+            found: new_set(),
+            not_found: new_set(),
+        }
     }
 
-    pub fn get(&self, name: TokenPtr) -> Option<&'a Frame> {
+    pub fn into_usage(self) -> ScopeUsage {
+        ScopeUsage {
+            generation: self.result.generation,
+            incremental: self.incremental,
+            found: self.found,
+            not_found: self.not_found,
+        }
+    }
+
+    pub fn get(&mut self, name: TokenPtr) -> Option<&'a Frame> {
         match self.result.frame_index.get(name) {
-            None => None,
+            None => {
+                if self.incremental {
+                    self.not_found.insert(name.to_owned());
+                }
+                None
+            }
             Some(&(_gen, segid, frix)) => {
-                Some(&self.result.segments[segid].as_ref().unwrap().frames_out[frix])
+                let framep = &self.result.segments[segid].as_ref().unwrap().frames_out[frix];
+                if self.incremental {
+                    self.found.insert(framep.label_atom);
+                }
+                Some(framep)
             }
         }
+    }
+}
+
+pub struct ScopeUsage {
+    generation: usize,
+    incremental: bool,
+    found: HashSet<Atom>,
+    not_found: HashSet<Token>,
+}
+
+impl ScopeUsage {
+    pub fn valid(&self, name: &Nameset, res: &ScopeResult) -> bool {
+        if !self.incremental && res.generation > self.generation {
+            return false;
+        }
+
+        for &atom in &self.found {
+            match res.frame_index.get(name.atom_name(atom)) {
+                None => return false,
+                Some(&(gen, _segid, _frix)) => {
+                    if gen > self.generation {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        for &ref name in &self.not_found {
+            if res.frame_index.contains_key(name) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
