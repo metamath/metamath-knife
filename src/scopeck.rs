@@ -28,6 +28,7 @@ use std::sync::Arc;
 use util::fast_extend;
 use util::HashMap;
 use util::new_map;
+use util::new_set;
 use util::ptr_eq;
 
 // This module calculates 3 things which are related only by the fact that they can be done
@@ -660,6 +661,7 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
 }
 
 pub struct SegmentScopeResult {
+    id: SegmentId,
     source: Arc<Segment>,
     name_usage: NameUsage,
     diagnostics: HashMap<StatementIndex, Vec<Diagnostic>>,
@@ -693,6 +695,7 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
     }
 
     SegmentScopeResult {
+        id: seg.id,
         source: seg.segment.clone(),
         name_usage: state.gnames.into_usage(),
         diagnostics: state.diagnostics,
@@ -702,17 +705,21 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
 
 #[derive(Default, Clone)]
 pub struct ScopeResult {
-    segments: Vec<(SegmentId, Arc<SegmentScopeResult>)>,
-    frame_index: HashMap<Token, (usize, usize)>,
+    incremental: bool,
+    generation: usize,
+    segments: Vec<Option<Arc<SegmentScopeResult>>>,
+    frame_index: HashMap<Token, (usize, usize, usize)>,
 }
 
 impl ScopeResult {
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
-        for &(sid, ref ssr) in &self.segments {
-            for (&six, &ref diag) in &ssr.diagnostics {
-                for &ref d in diag {
-                    out.push((StatementAddress::new(sid, six), d.clone()));
+        for (sid, &ref ssro) in self.segments.iter().enumerate() {
+            if let Some(ref ssr) = *ssro {
+                for (&six, &ref diag) in &ssr.diagnostics {
+                    for &ref d in diag {
+                        out.push((StatementAddress::new(SegmentId(sid as u32), six), d.clone()));
+                    }
                 }
             }
         }
@@ -721,41 +728,73 @@ impl ScopeResult {
 }
 
 pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: &Arc<Nameset>) {
+    result.generation += 1;
+    let gen = result.generation;
     let mut ssrq = VecDeque::new();
+    // process all segments in parallel to get new scope results or identify reusable ones
     {
         let mut prev = new_map();
-        for &(sid, ref ssr) in &result.segments {
-            prev.insert(sid, ssr.clone());
+        for (sid, &ref ssr) in result.segments.iter().enumerate() {
+            prev.insert(SegmentId(sid as u32), ssr.clone());
         }
         for sref in segments.segments() {
             let segments2 = segments.clone();
             let names = names.clone();
             let id = sref.id;
-            let osr = prev.get(&id).cloned();
+            let osr = prev.get(&id).and_then(|x| x.clone());
             ssrq.push_back(segments.exec.exec(move || {
                 let sref = segments2.segment(id);
                 if let Some(old_res) = osr {
                     if old_res.name_usage.valid(&names) &&
                        ptr_eq::<Segment>(&old_res.source, sref.segment) {
-                        return old_res;
+                        return None;
                     }
                 }
-                Arc::new(scope_check_single(&names, sref))
+                Some(Arc::new(scope_check_single(&names, sref)))
             }));
         }
     }
-    result.segments = Vec::new();
-    result.frame_index = new_map();
-    for sref in segments.segments() {
-        let ssr = ssrq.pop_front().unwrap().wait();
-        let six = result.segments.len();
-        result.segments.push((sref.id, ssr.clone()));
 
-        for (index, frame) in ssr.frames_out.iter().enumerate() {
+    let mut stale_ids = new_set();
+    let mut to_add = Vec::new();
+
+    for (sid, &ref res) in result.segments.iter().enumerate() {
+        if res.is_some() {
+            stale_ids.insert(SegmentId(sid as u32));
+        }
+    }
+
+    for sref in segments.segments() {
+        match ssrq.pop_front().unwrap().wait() {
+            Some(scoperes) => { to_add.push(scoperes); }
+            None => { stale_ids.remove(&sref.id); }
+        }
+    }
+
+    for stale_id in stale_ids {
+        let oseg = result.segments[stale_id.0 as usize].take().unwrap();
+        let sref = segments.segment(oseg.id);
+        for frame in &oseg.frames_out {
             let label = sref.statement(frame.valid.start.index).label().to_owned();
-            let old = result.frame_index.insert(label, (six, index));
+            let old = result.frame_index.remove(&label);
+            assert!(old.is_some(), "check_label_dup should prevent this");
+        }
+    }
+
+    for res_new in to_add {
+        let seg_index = res_new.id.0 as usize;
+        if seg_index >= result.segments.len() {
+            result.segments.resize(seg_index + 1, None);
+        }
+
+        let sref = segments.segment(res_new.id);
+        for (index, frame) in res_new.frames_out.iter().enumerate() {
+            let label = sref.statement(frame.valid.start.index).label().to_owned();
+            let old = result.frame_index.insert(label, (gen, seg_index, index));
             assert!(old.is_none(), "check_label_dup should prevent this");
         }
+
+        result.segments[seg_index] = Some(res_new);
     }
 }
 
@@ -772,7 +811,7 @@ impl<'a> ScopeReader<'a> {
     pub fn get(&self, name: TokenPtr) -> Option<&'a Frame> {
         match self.result.frame_index.get(name) {
             None => None,
-            Some(&(six, frix)) => Some(&self.result.segments[six].1.frames_out[frix]),
+            Some(&(_gen, segid, frix)) => Some(&self.result.segments[segid].as_ref().unwrap().frames_out[frix]),
         }
     }
 }
