@@ -117,8 +117,11 @@ impl<T> Promise<T> {
 pub struct Database {
     options: Arc<DbOptions>,
     segments: Option<Arc<SegmentSet>>,
+    prev_nameset: Option<Arc<Nameset>>,
     nameset: Option<Arc<Nameset>>,
+    prev_scopes: Option<Arc<ScopeResult>>,
     scopes: Option<Arc<ScopeResult>>,
+    prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
 }
 
@@ -141,8 +144,11 @@ pub enum DiagnosticClass {
 impl Drop for Database {
     fn drop(&mut self) {
         time(&self.options.clone(), "free", move || {
+            self.prev_verify = None;
             self.verify = None;
+            self.prev_scopes = None;
             self.scopes = None;
+            self.prev_nameset = None;
             self.nameset = None;
             self.segments = None;
         });
@@ -159,6 +165,9 @@ impl Database {
             nameset: None,
             scopes: None,
             verify: None,
+            prev_nameset: None,
+            prev_scopes: None,
+            prev_verify: None,
         }
     }
 
@@ -177,10 +186,16 @@ impl Database {
 
     pub fn name_result(&mut self) -> &Arc<Nameset> {
         if self.nameset.is_none() {
-            self.nameset = time(&self.options.clone(), "nameck", || {
-                let mut ns = Nameset::new();
-                ns.update(self.parse_result());
-                Some(Arc::new(ns))
+            time(&self.options.clone(), "nameck", || {
+                if self.prev_nameset.is_none() {
+                    self.prev_nameset = Some(Arc::new(Nameset::new()));
+                }
+                let pr = self.parse_result().clone();
+                {
+                    let mut ns = Arc::make_mut(self.prev_nameset.as_mut().unwrap());
+                    ns.update(&pr);
+                }
+                self.nameset = self.prev_nameset.clone();
             });
         }
 
@@ -195,6 +210,7 @@ impl Database {
                 let name = self.name_result().clone();
                 Some(Arc::new(scopeck::scope_check(&parse, &name)))
             });
+            self.prev_scopes = self.scopes.clone();
         }
 
         self.scopes.as_ref().unwrap()
@@ -210,6 +226,7 @@ impl Database {
                 let name = self.name_result().clone();
                 Some(Arc::new(verify::verify(&parse, &name, &scope)))
             });
+            self.prev_verify = self.verify.clone();
         }
         self.verify.as_ref().unwrap()
     }

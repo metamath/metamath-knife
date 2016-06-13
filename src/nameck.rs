@@ -52,7 +52,7 @@ fn deviv<K, Q: ?Sized, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
     }
 }
 
-#[derive(Default, PartialEq, Eq, Debug)]
+#[derive(Default, PartialEq, Eq, Debug, Clone)]
 struct SymbolInfo {
     atom: Atom,
     all: NameSlot<TokenAddress, SymbolType>,
@@ -60,7 +60,7 @@ struct SymbolInfo {
     float: NameSlot<StatementAddress, (Token, Token, Atom)>,
 }
 
-#[derive(Default,Debug)]
+#[derive(Default,Debug,Clone)]
 struct AtomTable {
     table: HashMap<Token, Atom>,
     reverse: Vec<Token>,
@@ -80,7 +80,7 @@ fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
     next
 }
 
-#[derive(Default,Debug)]
+#[derive(Default,Debug,Clone)]
 pub struct Nameset {
     atom_table: AtomTable,
     pub order: Arc<SegmentOrder>,
