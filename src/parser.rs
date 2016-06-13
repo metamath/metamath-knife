@@ -89,10 +89,10 @@ impl SegmentOrder {
         }
     }
 
-    // pub fn free_id(&mut self, id: SegmentId) {
-    //     self.order.remove(self.reverse[id.0 as usize] as usize);
-    //     self.reindex();
-    // }
+    pub fn free_id(&mut self, id: SegmentId) {
+        self.order.remove(self.reverse[id.0 as usize] as usize);
+        self.reindex();
+    }
 
     // pub fn new_after(&mut self, after: SegmentId) -> SegmentId {
     //     let id = self.alloc_id();
@@ -1042,7 +1042,7 @@ fn is_valid_label(label: &[u8]) -> bool {
 /// useful for our purposes to parse comments that are strictly between statements as if they were
 /// statements (SMM2 did this too; may revisit) and we require file inclusions to be between
 /// statements at the top nesting level (this has been approved by Norman Megill).
-pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
+pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Arc<Segment>> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner {
         source: Arc::new(SourceInfo {
@@ -1058,15 +1058,15 @@ pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Segment> {
     loop {
         let (seg, last) = scanner.get_segment();
         // we can almost use seg.next_file == Span::null here, but for the error case
-        closed_spans.push(seg);
+        closed_spans.push(Arc::new(seg));
         if last {
             return closed_spans;
         }
     }
 }
 
-pub fn dummy_segment(path: String, diag: Diagnostic) -> Segment {
+pub fn dummy_segment(path: String, diag: Diagnostic) -> Arc<Segment> {
     let mut seg = parse_segments(path, &Arc::new(Vec::new())).pop().unwrap();
-    seg.diagnostics.push((0, diag));
+    Arc::get_mut(&mut seg).unwrap().diagnostics.push((0, diag));
     seg
 }

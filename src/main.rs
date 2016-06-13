@@ -18,6 +18,7 @@ use database::Database;
 use database::DbOptions;
 use database::DiagnosticClass;
 use diag::Notation;
+use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -35,6 +36,7 @@ fn main() {
             .long("split"))
         .arg(Arg::with_name("timing").help("Print milliseconds after each stage").long("timing"))
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
+        .arg(Arg::with_name("repeat").help("Demonstrate incremental verifier").long("repeat"))
         .arg(Arg::with_name("jobs")
             .help("Number of threads to use for verification")
             .long("jobs")
@@ -67,19 +69,30 @@ fn main() {
         .map(|st| PathBuf::from(st))
         .unwrap_or_else(|| data[0].0.clone());
 
-    db.parse(start, data);
+    loop {
+        db.parse(start.clone(), data.clone());
 
-    let mut types = vec![
-        DiagnosticClass::Parse,
-        DiagnosticClass::Scope,
-    ];
+        let mut types = vec![
+            DiagnosticClass::Parse,
+            DiagnosticClass::Scope,
+        ];
 
-    if matches.is_present("verify") {
-        types.push(DiagnosticClass::Verify);
-    }
+        if matches.is_present("verify") {
+            types.push(DiagnosticClass::Verify);
+        }
 
-    for notation in db.diag_notations(types) {
-        print_annotation(notation);
+        for notation in db.diag_notations(types) {
+            print_annotation(notation);
+        }
+
+        if matches.is_present("repeat") {
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input).unwrap() == 0 {
+                break;
+            }
+        } else {
+            break;
+        }
     }
 }
 

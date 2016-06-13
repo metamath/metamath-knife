@@ -2,6 +2,7 @@ use fnv::FnvHasher;
 use std::collections;
 use std::hash::BuildHasherDefault;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::ptr;
 use std::slice;
 
@@ -127,5 +128,14 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
                 }
             }
         }
+    }
+}
+
+#[derive(Eq,PartialEq,Copy,Clone)]
+pub struct LongStr<'a>(pub &'a [u8]);
+
+impl<'a> Hash for LongStr<'a> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.len().hash(state);
     }
 }
