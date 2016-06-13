@@ -1,7 +1,9 @@
-use parser::{Comparer, Span, StatementIndex, StatementAddress, StatementRef, SourceInfo, Token,
-             TokenIndex, TokenAddress};
+use parser::{Comparer, Span, StatementIndex, StatementAddress, StatementRef, Token, TokenIndex,
+             TokenAddress};
 use segment_set::SegmentSet;
+use segment_set::SourceInfo;
 use std::fmt::Display;
+use std::mem;
 use std::sync::Arc;
 
 #[derive(Debug,Clone,Eq,PartialEq)]
@@ -65,7 +67,7 @@ pub enum Diagnostic {
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
 }
 
-#[derive(Debug)]
+#[derive(Copy,Clone,Debug)]
 pub enum Level {
     Note,
     Warning,
@@ -92,25 +94,32 @@ pub fn to_annotations(sset: &SegmentSet,
     out
 }
 
-fn annotate(notes: &mut Vec<Notation>,
-            stmt: StatementRef,
-            message: &'static str,
-            span: Span,
-            level: Level,
-            args: Vec<(&'static str, String)>) {
-    notes.push(Notation {
-        source: stmt.segment.segment.source.clone(),
-        message: message,
-        span: span,
-        level: level,
-        args: args,
-    })
-}
-
 fn annotate_diagnostic(notes: &mut Vec<Notation>,
                        sset: &SegmentSet,
                        stmt: StatementRef,
                        diag: &Diagnostic) {
+    struct AnnInfo<'a> {
+        notes: &'a mut Vec<Notation>,
+        sset: &'a SegmentSet,
+        stmt: StatementRef<'a>,
+        level: Level,
+        s: &'static str,
+        args: Vec<(&'static str, String)>,
+    }
+
+    fn ann<'a>(info: &mut AnnInfo<'a>, mut span: Span) {
+        if span.is_null() {
+            span = info.stmt.span();
+        }
+        info.notes.push(Notation {
+            source: info.sset.source_info(info.stmt.segment.id).clone(),
+            message: info.s,
+            span: span,
+            level: info.level,
+            args: mem::replace(&mut info.args, Vec::new()),
+        })
+    }
+
     use self::Diagnostic::*;
     fn d<V: Display>(v: V) -> String {
         format!("{}", v)
@@ -120,268 +129,299 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         String::from_utf8(v.to_owned()).expect("utf-8 is checked before making Token")
     }
 
+    let mut info = AnnInfo {
+        notes: notes,
+        sset: sset,
+        stmt: stmt,
+        level: Error,
+        s: "",
+        args: Vec::new(),
+    };
+
     match *diag {
         BadCharacter(span, byte) => {
-            let s = "Invalid character (byte value {byte}); Metamath source files are limited to \
-                     US-ASCII with controls TAB, CR, LF, FF)";
-            annotate(notes, stmt, s, span, Error, vec![("byte", d(byte))]);
+            info.s = "Invalid character (byte value {byte}); Metamath source files are limited to \
+                      US-ASCII with controls TAB, CR, LF, FF)";
+            info.args.push(("byte", d(byte)));
+            ann(&mut info, span);
         }
         BadCommentEnd(tok, opener) => {
-            let s = "$) sequence must be surrounded by whitespace to end a comment";
-            annotate(notes, stmt, s, tok, Warning, Vec::new());
-            let s = "Comment started here";
-            annotate(notes, stmt, s, opener, Note, Vec::new());
+            info.s = "$) sequence must be surrounded by whitespace to end a comment";
+            info.level = Warning;
+            ann(&mut info, tok);
+            info.s = "Comment started here";
+            info.level = Note;
+            ann(&mut info, opener);
         }
         BadFloating => {
-            let s = "A $f statement must have exactly two math tokens";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "A $f statement must have exactly two math tokens";
+            ann(&mut info, stmt.span());
         }
         BadLabel(lbl) => {
-            let s = "Statement labels may contain only alphanumeric characters and - _ .";
-            annotate(notes, stmt, s, lbl, Error, Vec::new());
+            info.s = "Statement labels may contain only alphanumeric characters and - _ .";
+            ann(&mut info, lbl);
         }
         CommentMarkerNotStart(marker) => {
-            let s = "This comment marker must be the first token in the comment to be effective";
-            annotate(notes, stmt, s, marker, Warning, Vec::new());
+            info.s = "This comment marker must be the first token in the comment to be effective";
+            info.level = Warning;
+            ann(&mut info, marker);
         }
         ConstantNotTopLevel => {
-            let s = "$c statements are not allowed in nested groups";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "$c statements are not allowed in nested groups";
+            ann(&mut info, stmt.span());
         }
         DisjointSingle => {
-            let s = "A $d statement which lists only one variable is meaningless";
-            annotate(notes, stmt, s, stmt.span(), Warning, Vec::new());
+            info.s = "A $d statement which lists only one variable is meaningless";
+            info.level = Warning;
+            ann(&mut info, stmt.span());
         }
         DjNotVariable(index) => {
-            let s = "$d constraints are not applicable to constants";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
+            info.s = "$d constraints are not applicable to constants";
+            ann(&mut info, stmt.math_span(index));
         }
         DjRepeatedVariable(index1, index2) => {
-            let s = "A variable may not be used twice in the same $d constraint";
-            annotate(notes, stmt, s, stmt.math_span(index1), Error, Vec::new());
-            let s = "Previous appearance was here";
-            annotate(notes, stmt, s, stmt.math_span(index2), Note, Vec::new());
+            info.s = "A variable may not be used twice in the same $d constraint";
+            ann(&mut info, stmt.math_span(index1));
+            info.s = "Previous appearance was here";
+            info.level = Note;
+            ann(&mut info, stmt.math_span(index2));
         }
         DuplicateLabel(prevstmt) => {
-            let s = "Statement labels must be unique";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
-            let stmt2 = sset.statement(prevstmt);
-            let s = "Label was previously used here";
-            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
+            info.s = "Statement labels must be unique";
+            ann(&mut info, stmt.span());
+            info.stmt = sset.statement(prevstmt);
+            info.s = "Label was previously used here";
+            info.level = Note;
+            ann(&mut info, Span::null());
         }
         EmptyFilename => {
-            let s = "Filename included by a $[ directive must not be empty";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "Filename included by a $[ directive must not be empty";
+            ann(&mut info, stmt.span());
         }
         EmptyMathString => {
-            let s = "A math string must have at least one token";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "A math string must have at least one token";
+            ann(&mut info, stmt.span());
         }
         EssentialAtTopLevel => {
-            let s = "$e statements must be inside scope brackets, not at the top level";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "$e statements must be inside scope brackets, not at the top level";
+            ann(&mut info, stmt.span());
         }
         ExprNotConstantPrefix(index) => {
-            let s = "The math string of an $a, $e, or $p assertion must start with a constant, \
+            info.s = "The math string of an $a, $e, or $p assertion must start with a constant, \
                      not a variable";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
+            ann(&mut info, stmt.math_span(index));
         }
         FilenameDollar => {
-            let s = "Filenames included by $[ are not allowed to contain the $ character";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "Filenames included by $[ are not allowed to contain the $ character";
+            ann(&mut info, stmt.span());
         }
         FilenameSpaces => {
-            let s = "Filenames included by $[ are not allowed to contain whitespace";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "Filenames included by $[ are not allowed to contain whitespace";
+            ann(&mut info, stmt.span());
         }
         FloatNotConstant(index) => {
-            let s = "The first token of a $f statement must be a declared constant (typecode)";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
+            info.s = "The first token of a $f statement must be a declared constant (typecode)";
+            ann(&mut info, stmt.math_span(index));
         }
         FloatNotVariable(index) => {
-            let s = "The second token of a $f statement must be a declared variable (to \
+            info.s = "The second token of a $f statement must be a declared variable (to \
                      associate the type)";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
+            ann(&mut info, stmt.math_span(index));
         }
         FloatRedeclared(saddr) => {
-            let s = "There is already an active $f for this variable";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
-            let stmt2 = sset.statement(saddr);
-            let s = "Previous $f was here";
-            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
+            info.s = "There is already an active $f for this variable";
+            ann(&mut info, stmt.span());
+            info.stmt = sset.statement(saddr);
+            info.s = "Previous $f was here";
+            info.level = Note;
+            ann(&mut info, Span::null());
         }
         IoError(ref err) => {
-            let s = "Source file could not be read (error: {error})";
-            let p = vec![("error", err.clone())];
-            annotate(notes, stmt, s, stmt.span(), Error, p);
+            info.s = "Source file could not be read (error: {error})";
+            info.args.push(("error", err.clone()));
+            ann(&mut info, Span::null());
         }
         MidStatementCommentMarker(marker) => {
-            let s = "Marked comments are only effective between statements, not inside them";
-            annotate(notes, stmt, s, marker, Warning, Vec::new());
+            info.s = "Marked comments are only effective between statements, not inside them";
+            info.level = Warning;
+            ann(&mut info, marker);
         }
         MissingLabel => {
-            let s = "This statement type requires a label";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "This statement type requires a label";
+            ann(&mut info, stmt.span());
         }
         MissingProof(math_end) => {
-            let s = "Provable assertion requires a proof introduced with $= here; use $= ? $. \
+            info.s = "Provable assertion requires a proof introduced with $= here; use $= ? $. \
                      if you do not have a proof yet";
-            annotate(notes, stmt, s, math_end, Error, Vec::new());
+            ann(&mut info, math_end);
         }
         NestedComment(tok, opener) => {
-            let s = "Nested comments are not supported - comment will end at the first $)";
-            annotate(notes, stmt, s, tok, Warning, Vec::new());
-            let s = "Comment started here";
-            annotate(notes, stmt, s, opener, Note, Vec::new());
+            info.s = "Nested comments are not supported - comment will end at the first $)";
+            info.level = Warning;
+            ann(&mut info, tok);
+            info.s = "Comment started here";
+            info.level = Note;
+            ann(&mut info, opener);
         }
         NotActiveSymbol(index) => {
-            let s = "Token used here must be active in the current scope";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
+            info.s = "Token used here must be active in the current scope";
+            ann(&mut info, stmt.math_span(index));
         }
         ProofDvViolation => {
-            let s = "Disjoint variable constraint violated";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Disjoint variable constraint violated";
+            ann(&mut info, stmt.span());
         }
         ProofExcessEnd => {
-            let s = "Must be exactly one statement on stack at end of proof";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Must be exactly one statement on stack at end of proof";
+            ann(&mut info, stmt.span());
         }
         ProofIncomplete => {
-            let s = "Proof is incomplete";
-            annotate(notes, stmt, s, stmt.span(), Warning, vec![]);
+            info.s = "Proof is incomplete";
+            info.level = Warning;
+            ann(&mut info, stmt.span());
         }
         ProofInvalidSave => {
-            let s = "Z must appear immediately after a complete step integer";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Z must appear immediately after a complete step integer";
+            ann(&mut info, stmt.span());
         }
         ProofMalformedVarint => {
-            let s = "Proof step number too long or missing terminator";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Proof step number too long or missing terminator";
+            ann(&mut info, stmt.span());
         }
         ProofNoSteps => {
-            let s = "Proof must have at least one step (use ? if deliberately incomplete)";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Proof must have at least one step (use ? if deliberately incomplete)";
+            ann(&mut info, stmt.span());
         }
         ProofUnderflow => {
-            let s = "Too few statements on stack to satisfy step's mandatory hypotheses";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Too few statements on stack to satisfy step's mandatory hypotheses";
+            ann(&mut info, stmt.span());
         }
         ProofUnterminatedRoster => {
-            let s = "List of referenced assertions in a compressed proof must be terminated by )";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "List of referenced assertions in a compressed proof must be terminated by )";
+            ann(&mut info, stmt.span());
         }
         ProofWrongExprEnd => {
-            let s = "Final step statement does not match assertion";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Final step statement does not match assertion";
+            ann(&mut info, stmt.span());
         }
         ProofWrongTypeEnd => {
-            let s = "Final step typecode does not match assertion";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Final step typecode does not match assertion";
+            ann(&mut info, stmt.span());
         }
         RepeatedLabel(lspan, fspan) => {
-            let s = "A statement may have only one label";
-            annotate(notes, stmt, s, lspan, Error, Vec::new());
-            annotate(notes, stmt, "First label was here", fspan, Note, Vec::new());
+            info.s = "A statement may have only one label";
+            ann(&mut info, lspan);
+            info.s = "First label was here";
+            info.level = Note;
+            ann(&mut info, fspan);
         }
         SpuriousLabel(lspan) => {
-            let s = "Labels are only permitted for statements of type $a, $e, $f, or $p";
-            annotate(notes, stmt, s, lspan, Error, Vec::new());
+            info.s = "Labels are only permitted for statements of type $a, $e, $f, or $p";
+            ann(&mut info, lspan);
         }
         SpuriousProof(math_end) => {
-            let s = "Proofs are only allowed on $p assertions";
-            annotate(notes, stmt, s, math_end, Error, Vec::new());
+            info.s = "Proofs are only allowed on $p assertions";
+            ann(&mut info, math_end);
         }
         StepEssenWrong => {
-            let s = "Step used for $e hypothesis does not match statement";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Step used for $e hypothesis does not match statement";
+            ann(&mut info, stmt.span());
         }
         StepEssenWrongType => {
-            let s = "Step used for $e hypothesis does not match typecode";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Step used for $e hypothesis does not match typecode";
+            ann(&mut info, stmt.span());
         }
         StepFloatWrongType => {
-            let s = "Step used for $f hypothesis does not match typecode";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Step used for $f hypothesis does not match typecode";
+            ann(&mut info, stmt.span());
         }
         StepMissing(ref tok) => {
-            let s = "Step {step} referenced by proof does not correspond to a $p statement (or is \
-                     malformed)";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
+            info.s = "Step {step} referenced by proof does not correspond to a $p statement (or \
+                      is malformed)";
+            info.args.push(("step", t(tok)));
+            ann(&mut info, stmt.span());
         }
         StepOutOfRange => {
-            let s = "Step in compressed proof is out of range of defined steps";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![]);
+            info.s = "Step in compressed proof is out of range of defined steps";
+            ann(&mut info, stmt.span());
         }
         StepUsedAfterScope(ref tok) => {
-            let s = "Step {step} referenced by proof is a hypothesis not active in this scope";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
+            info.s = "Step {step} referenced by proof is a hypothesis not active in this scope";
+            info.args.push(("step", t(tok)));
+            ann(&mut info, stmt.span());
         }
         StepUsedBeforeDefinition(ref tok) => {
-            let s = "Step {step} referenced by proof has not yet been proved";
-            annotate(notes, stmt, s, stmt.span(), Error, vec![("step", t(tok))]);
+            info.s = "Step {step} referenced by proof has not yet been proved";
+            info.args.push(("step", t(tok)));
+            ann(&mut info, stmt.span());
         }
         SymbolDuplicatesLabel(index, saddr) => {
-            let s = "Metamath spec forbids symbols which are the same as labels in the same \
+            info.s = "Metamath spec forbids symbols which are the same as labels in the same \
                      database";
-            annotate(notes, stmt, s, stmt.math_span(index), Warning, Vec::new());
-            let stmt2 = sset.statement(saddr);
-            let s = "Symbol was used as a label here";
-            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
+            info.level = Warning;
+            ann(&mut info, stmt.math_span(index));
+            info.stmt = sset.statement(saddr);
+            info.s = "Symbol was used as a label here";
+            info.level = Note;
+            ann(&mut info, Span::null());
         }
         SymbolRedeclared(index, taddr) => {
-            let s = "This symbol is already active in this scope";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
-            let stmt2 = sset.statement(taddr.statement);
-            let s = "Symbol was previously declared here";
-            let sp = stmt2.math_span(taddr.token_index);
-            annotate(notes, stmt2, s, sp, Note, Vec::new());
+            info.s = "This symbol is already active in this scope";
+            ann(&mut info, stmt.math_span(index));
+            info.stmt = sset.statement(taddr.statement);
+            info.s = "Symbol was previously declared here";
+            info.level = Note;
+            let sp = info.stmt.math_span(taddr.token_index);
+            ann(&mut info, sp);
         }
         UnclosedBeforeEof => {
-            let s = "${ group must be closed with a $} before end of file";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "${ group must be closed with a $} before end of file";
+            ann(&mut info, stmt.span());
         }
         UnclosedBeforeInclude(index) => {
-            let s = "${ group must be closed with a $} before another file can be included";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
-            let stmt2 = stmt.segment.statement(index);
-            let s = "Include statement is here";
-            annotate(notes, stmt2, s, stmt2.span(), Note, Vec::new());
+            info.s = "${ group must be closed with a $} before another file can be included";
+            ann(&mut info, stmt.span());
+            info.stmt = stmt.segment.statement(index);
+            info.s = "Include statement is here";
+            info.level = Note;
+            ann(&mut info, Span::null());
         }
         UnclosedComment(comment) => {
-            let s = "Comment requires closing $) before end of file";
-            annotate(notes, stmt, s, comment, Error, Vec::new());
+            info.s = "Comment requires closing $) before end of file";
+            ann(&mut info, comment);
         }
         UnclosedInclude => {
-            let s = "$[ requires a matching $]";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "$[ requires a matching $]";
+            ann(&mut info, stmt.span());
         }
         UnclosedMath => {
-            let s = "A math string must be closed with $= or $.";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "A math string must be closed with $= or $.";
+            ann(&mut info, stmt.span());
         }
         UnclosedProof => {
-            let s = "A proof must be closed with $.";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "A proof must be closed with $.";
+            ann(&mut info, stmt.span());
         }
         UnknownKeyword(kwspan) => {
-            let s = "Statement-starting keyword must be one of $a $c $d $e $f $p $v";
-            annotate(notes, stmt, s, kwspan, Error, Vec::new());
+            info.s = "Statement-starting keyword must be one of $a $c $d $e $f $p $v";
+            ann(&mut info, kwspan);
         }
         UnmatchedCloseGroup => {
-            let s = "This $} does not match any open ${";
-            annotate(notes, stmt, s, stmt.span(), Error, Vec::new());
+            info.s = "This $} does not match any open ${";
+            ann(&mut info, stmt.span());
         }
         VariableMissingFloat(index) => {
-            let s = "Variable token used in statement must have an active $f";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
+            info.s = "Variable token used in statement must have an active $f";
+            ann(&mut info, stmt.math_span(index));
         }
         VariableRedeclaredAsConstant(index, taddr) => {
-            let s = "Symbol cannot be used as a variable here and as a constant later";
-            annotate(notes, stmt, s, stmt.math_span(index), Error, Vec::new());
-            let stmt2 = sset.statement(taddr.statement);
-            let s = "Symbol will be used as a constant here";
-            let sp = stmt2.math_span(taddr.token_index);
-            annotate(notes, stmt2, s, sp, Note, Vec::new());
+            info.s = "Symbol cannot be used as a variable here and as a constant later";
+            ann(&mut info, stmt.math_span(index));
+            info.stmt = sset.statement(taddr.statement);
+            info.s = "Symbol will be used as a constant here";
+            let sp = info.stmt.math_span(taddr.token_index);
+            info.level = Note;
+            ann(&mut info, sp);
         }
     }
 }

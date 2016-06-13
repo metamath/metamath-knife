@@ -18,7 +18,7 @@ pub struct Span {
 }
 
 impl Span {
-    fn new(start: usize, end: usize) -> Span {
+    pub fn new(start: usize, end: usize) -> Span {
         Span {
             start: start as FilePos,
             end: end as FilePos,
@@ -227,19 +227,12 @@ pub struct LocalVarDef {
     pub ordinal: TokenIndex,
 }
 
-#[derive(Debug, Default)]
-pub struct SourceInfo {
-    pub buffer: BufferRef,
-    pub filepath: String,
-}
-
 /// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
 /// the future have an "unpacked" segment which is used for active editing, as well as a "lazy" or
 /// "mmap" segment type for fast incremental startup.
 #[derive(Debug)]
 pub struct Segment {
     pub buffer: BufferRef,
-    pub source: Arc<SourceInfo>,
     // straight outputs
     pub statements: Vec<Statement>,
     span_pool: Vec<Span>,
@@ -466,7 +459,6 @@ impl<'a> Iterator for TokenIter<'a> {
 #[derive(Default)]
 struct Scanner<'a> {
     buffer: &'a [u8],
-    source: Arc<SourceInfo>,
     buffer_ref: BufferRef,
     position: FilePos,
     diagnostics: Vec<(StatementIndex, Diagnostic)>,
@@ -891,7 +883,6 @@ impl<'a> Scanner<'a> {
             labels: Vec::new(),
             floats: Vec::new(),
             buffer: self.buffer_ref.clone(),
-            source: self.source.clone(),
             diagnostics: Vec::new(),
             span_pool: Vec::new(),
         };
@@ -1048,13 +1039,9 @@ fn is_valid_label(label: &[u8]) -> bool {
 /// useful for our purposes to parse comments that are strictly between statements as if they were
 /// statements (SMM2 did this too; may revisit) and we require file inclusions to be between
 /// statements at the top nesting level (this has been approved by Norman Megill).
-pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Arc<Segment>> {
+pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner {
-        source: Arc::new(SourceInfo {
-            buffer: input.clone(),
-            filepath: path,
-        }),
         buffer_ref: input.clone(),
         buffer: input,
         ..Scanner::default()
@@ -1071,8 +1058,8 @@ pub fn parse_segments(path: String, input: &BufferRef) -> Vec<Arc<Segment>> {
     }
 }
 
-pub fn dummy_segment(path: String, diag: Diagnostic) -> Arc<Segment> {
-    let mut seg = parse_segments(path, &Arc::new(Vec::new())).pop().unwrap();
+pub fn dummy_segment(diag: Diagnostic) -> Arc<Segment> {
+    let mut seg = parse_segments(&Arc::new(Vec::new())).pop().unwrap();
     Arc::get_mut(&mut seg).unwrap().diagnostics.push((0, diag));
     seg
 }

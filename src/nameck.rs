@@ -118,7 +118,7 @@ impl Nameset {
         for (&seg_id, &ref seg) in &self.segments {
             let stale = match segs.segments.get(&seg_id) {
                 None => true,
-                Some(seg_new) => !util::ptr_eq::<Segment>(seg_new, seg),
+                Some(&(ref seg_new, _)) => !util::ptr_eq::<Segment>(&seg_new, seg),
             };
 
             if stale {
@@ -130,7 +130,7 @@ impl Nameset {
             self.remove_segment(seg_id);
         }
 
-        for (&seg_id, &ref seg) in &segs.segments {
+        for (&seg_id, &(ref seg, _)) in &segs.segments {
             self.add_segment(seg_id, seg.clone());
         }
     }

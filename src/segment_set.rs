@@ -38,13 +38,20 @@ impl Hash for LongBuf {
     }
 }
 
+#[derive(Debug)]
+pub struct SourceInfo {
+    pub name: String,
+    pub text: Arc<Vec<u8>>,
+    pub span: Span,
+}
+
 #[derive(Debug,Clone)]
 pub struct SegmentSet {
     pub options: Arc<DbOptions>,
     pub exec: Executor,
     pub order: Arc<SegmentOrder>,
-    pub segments: HashMap<SegmentId, Arc<Segment>>,
-    parse_cache: HashMap<(String, LongBuf), Vec<Arc<Segment>>>,
+    pub segments: HashMap<SegmentId, (Arc<Segment>, Arc<SourceInfo>)>,
+    parse_cache: HashMap<LongBuf, Vec<Arc<Segment>>>,
 }
 
 impl SegmentSet {
@@ -61,10 +68,10 @@ impl SegmentSet {
     pub fn segments(&self) -> Vec<SegmentRef> {
         let mut out: Vec<SegmentRef> = self.segments
             .iter()
-            .map(|(&seg_id, seg)| {
+            .map(|(&seg_id, &(ref seg, ref _sinfo))| {
                 SegmentRef {
                     id: seg_id,
-                    segment: seg,
+                    segment: &seg,
                 }
             })
             .collect();
@@ -75,8 +82,12 @@ impl SegmentSet {
     pub fn segment(&self, seg_id: SegmentId) -> SegmentRef {
         SegmentRef {
             id: seg_id,
-            segment: &self.segments[&seg_id],
+            segment: &self.segments[&seg_id].0,
         }
+    }
+
+    pub fn source_info(&self, seg_id: SegmentId) -> &Arc<SourceInfo> {
+        &self.segments[&seg_id].1
     }
 
     pub fn statement(&self, addr: StatementAddress) -> StatementRef {
@@ -96,9 +107,9 @@ impl SegmentSet {
     pub fn read(&mut self, path: PathBuf, data: Vec<(PathBuf, Vec<u8>)>) {
         struct RecState {
             options: Arc<DbOptions>,
-            existing: HashMap<(String, LongBuf), Vec<Arc<Segment>>>,
-            new_cache: HashMap<(String, LongBuf), Vec<Arc<Segment>>>,
-            segments: Vec<Arc<Segment>>,
+            existing: HashMap<LongBuf, Vec<Arc<Segment>>>,
+            new_cache: HashMap<LongBuf, Vec<Arc<Segment>>>,
+            segments: SegList,
             pre_included: HashSet<PathBuf>,
             included: HashSet<PathBuf>,
             preload: HashMap<PathBuf, Vec<u8>>,
@@ -106,41 +117,54 @@ impl SegmentSet {
             exec: Executor,
         }
 
-        type ScanResult = (Option<(String, LongBuf)>, Vec<Arc<Segment>>);
+        type ScanResult = (Option<LongBuf>, Vec<Arc<Segment>>, Arc<SourceInfo>);
+        type SegList = Vec<(Arc<Segment>, Arc<SourceInfo>)>;
 
         fn split_and_parse(state: &RecState,
                            diagpath: String,
                            buf: Vec<u8>)
                            -> Vec<Promise<ScanResult>> {
             let mut parts = Vec::new();
+            let buf = Arc::new(buf);
             if state.options.autosplit && buf.len() > 1_048_576 {
                 let mut sstart = 0;
                 loop {
                     if let Some(chap) = find_chapter_header(&buf[sstart..]) {
-                        parts.push(buf[sstart..sstart + chap].to_owned());
+                        parts.push(sstart..sstart + chap);
                         sstart += chap;
                     } else {
-                        parts.push(buf[sstart..].to_owned());
+                        parts.push(sstart..buf.len());
                         break;
                     }
                 }
             } else {
-                parts.push(buf);
+                parts.push(0..buf.len());
             }
 
             let mut promises = Vec::new();
-            for buf in parts {
-                let buf = Arc::new(buf);
-                let diagpath = diagpath.clone();
-                let name = (diagpath.clone(), LongBuf(buf.clone()));
+            for range in parts {
+                let partbuf = if range == (0..buf.len()) {
+                    buf.clone()
+                } else {
+                    Arc::new(buf[range.clone()].to_owned())
+                };
+
+                let srcinfo = Arc::new(SourceInfo {
+                    name: diagpath.clone(),
+                    text: buf.clone(),
+                    span: Span::new(range.start, range.end),
+                });
+
+                let name = LongBuf(partbuf.clone());
+
                 match state.existing.get(&name) {
                     Some(eseg) => {
-                        let sres = (Some(name), eseg.clone());
+                        let sres = (Some(name), eseg.clone(), srcinfo);
                         promises.push(state.exec.exec(move || sres));
                     }
                     None => {
                         promises.push(state.exec
-                            .exec(move || (Some(name), parser::parse_segments(diagpath, &buf))));
+                            .exec(move || (Some(name), parser::parse_segments(&partbuf), srcinfo)));
                     }
                 }
             }
@@ -177,9 +201,14 @@ impl SegmentSet {
                     // read from FS
                     match canonicalize_and_read(state, path) {
                         Err(cerr) => {
-                            let svec = vec![parser::dummy_segment(path_str,
-                                                       Diagnostic::IoError(format!("{}", cerr)))];
-                            vec![state.exec.exec(move || (None, svec))]
+                            let sinfo = SourceInfo {
+                                name: path_str.clone(),
+                                text: Arc::new(Vec::new()),
+                                span: Span::null(),
+                            };
+                            let svec = vec![parser::dummy_segment(Diagnostic::IoError(format!("{}",
+                                                                                       cerr)))];
+                            vec![state.exec.exec(move || (None, svec, Arc::new(sinfo)))]
                         }
                         Ok(segments) => segments,
                     }
@@ -188,23 +217,25 @@ impl SegmentSet {
             }
         }
 
-        fn flat(state: &mut RecState, inp: Vec<Promise<ScanResult>>) -> Vec<Arc<Segment>> {
+        fn flat(state: &mut RecState, inp: Vec<Promise<ScanResult>>) -> SegList {
             let mut out = Vec::new();
             for promise in inp {
-                let (nameo, vec) = promise.wait();
+                let (nameo, vec, sinfo) = promise.wait();
                 if let Some(name) = nameo {
                     state.new_cache.insert(name, vec.clone());
                 }
-                out.extend_from_slice(&vec);
+                for aseg in vec {
+                    out.push((aseg, sinfo.clone()));
+                }
             }
             out
         }
 
-        fn recurse(state: &mut RecState, path: PathBuf, segments: Vec<Arc<Segment>>) {
+        fn recurse(state: &mut RecState, path: PathBuf, segments: SegList) {
             let mut promises = VecDeque::new();
             for seg in &segments {
-                if seg.next_file != Span::null() {
-                    let chain = str::from_utf8(seg.next_file.as_ref(&seg.buffer))
+                if seg.0.next_file != Span::null() {
+                    let chain = str::from_utf8(seg.0.next_file.as_ref(&seg.0.buffer))
                         .expect("parser verified ASCII")
                         .to_owned();
                     let newpath = path.parent().unwrap_or(&path).join(PathBuf::from(chain));
@@ -212,7 +243,7 @@ impl SegmentSet {
                 }
             }
             for seg in segments {
-                if seg.next_file != Span::null() {
+                if seg.0.next_file != Span::null() {
                     state.segments.push(seg);
                     let (newpath, pp) = promises.pop_front().unwrap();
                     let nsegs = flat(state, pp);
@@ -251,13 +282,13 @@ impl SegmentSet {
 
         // LCS lite
         while old_r.start < old_r.end && new_r.start < new_r.end &&
-              ptr_eq::<Segment>(&old_segs[old_r.start].1, &new_segs[new_r.start]) {
+              ptr_eq::<Segment>(&(old_segs[old_r.start].1).0, &new_segs[new_r.start].0) {
             old_r.start += 1;
             new_r.start += 1;
         }
 
         while old_r.start < old_r.end && new_r.start < new_r.end &&
-              ptr_eq::<Segment>(&old_segs[old_r.end - 1].1, &new_segs[new_r.end - 1]) {
+              ptr_eq::<Segment>(&(old_segs[old_r.end - 1].1).0, &new_segs[new_r.end - 1].0) {
             old_r.end -= 1;
             new_r.end -= 1;
         }

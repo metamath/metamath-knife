@@ -103,9 +103,9 @@ fn print_annotation(ann: Notation) {
         args.push_str(&format!(" {}={}", id, val));
     }
     println!("{}:{}-{}:{:?}:{}{}",
-             ann.source.filepath,
-             ann.span.start,
-             ann.span.end,
+             ann.source.name,
+             ann.span.start + ann.source.span.start,
+             ann.span.end + ann.source.span.start,
              ann.level,
              ann.message,
              args);
