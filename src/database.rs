@@ -116,16 +116,24 @@ impl<T> Promise<T> {
         (self.0)()
     }
 
-    pub fn new_once<FN>(fun: FN) -> Promise<T> where FN: FnOnce() -> T + Send + 'static {
+    pub fn new_once<FN>(fun: FN) -> Promise<T>
+        where FN: FnOnce() -> T + Send + 'static
+    {
         let mut funcell = Some(fun);
         Promise(Box::new(move || (funcell.take().unwrap())()))
     }
 
-    pub fn new(value: T) -> Self where T: Send + 'static {
+    pub fn new(value: T) -> Self
+        where T: Send + 'static
+    {
         Promise::new_once(move || value)
     }
 
-    pub fn map<FN,RV>(self, fun: FN) -> Promise<RV> where T: 'static, FN: 'static, FN: Send + FnOnce(T) -> RV {
+    pub fn map<FN, RV>(self, fun: FN) -> Promise<RV>
+        where T: 'static,
+              FN: 'static,
+              FN: Send + FnOnce(T) -> RV
+    {
         Promise::new_once(move || fun(self.wait()))
     }
 }
@@ -133,9 +141,7 @@ impl<T> Promise<T> {
 impl<T: 'static> Promise<Vec<T>> {
     pub fn join(promises: Vec<Promise<T>>) -> Promise<Vec<T>> {
         let mut pcell = Some(promises);
-        Promise(Box::new(move || {
-            pcell.take().unwrap().into_iter().map(|x| x.wait()).collect()
-        }))
+        Promise(Box::new(move || pcell.take().unwrap().into_iter().map(|x| x.wait()).collect()))
     }
 }
 

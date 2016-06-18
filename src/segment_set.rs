@@ -2,6 +2,7 @@ use database::DbOptions;
 use database::Executor;
 use database::Promise;
 use diag::Diagnostic;
+use filetime::FileTime;
 use parser;
 use parser::Comparer;
 use parser::Segment;
@@ -12,6 +13,7 @@ use parser::Span;
 use parser::StatementAddress;
 use parser::StatementRef;
 use std::collections::VecDeque;
+use std::fs;
 use std::fs::File;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -44,12 +46,18 @@ pub struct SourceInfo {
 }
 
 #[derive(Debug,Clone)]
+struct SliceSR(Option<LongBuf>, Vec<Arc<Segment>>, Arc<SourceInfo>);
+#[derive(Debug,Clone)]
+struct FileSR(Option<(String, FileTime)>, Vec<SliceSR>);
+
+#[derive(Debug,Clone)]
 pub struct SegmentSet {
     pub options: Arc<DbOptions>,
     pub exec: Executor,
     pub order: Arc<SegmentOrder>,
     pub segments: HashMap<SegmentId, (Arc<Segment>, Arc<SourceInfo>)>,
     parse_cache: HashMap<LongBuf, Vec<Arc<Segment>>>,
+    file_cache: HashMap<(String, FileTime), FileSR>,
 }
 
 impl SegmentSet {
@@ -60,6 +68,7 @@ impl SegmentSet {
             order: Arc::new(SegmentOrder::new()),
             segments: new_map(),
             parse_cache: new_map(),
+            file_cache: new_map(),
         }
     }
 
@@ -105,21 +114,23 @@ impl SegmentSet {
     pub fn read(&mut self, path: String, data: Vec<(String, Vec<u8>)>) {
         struct RecState {
             options: Arc<DbOptions>,
-            existing: HashMap<LongBuf, Vec<Arc<Segment>>>,
-            new_cache: HashMap<LongBuf, Vec<Arc<Segment>>>,
+            old_by_content: HashMap<LongBuf, Vec<Arc<Segment>>>,
+            new_by_content: HashMap<LongBuf, Vec<Arc<Segment>>>,
+            old_by_time: HashMap<(String, FileTime), FileSR>,
+            new_by_time: HashMap<(String, FileTime), FileSR>,
             segments: SegList,
             included: HashSet<String>,
             preload: HashMap<String, Vec<u8>>,
             exec: Executor,
         }
 
-        type ScanResult = (Option<LongBuf>, Vec<Arc<Segment>>, Arc<SourceInfo>);
         type SegList = Vec<(Arc<Segment>, Arc<SourceInfo>)>;
 
         fn split_and_parse(state: &RecState,
-                           diagpath: String,
+                           path: String,
+                           timestamp: Option<FileTime>,
                            buf: Vec<u8>)
-                           -> Vec<Promise<ScanResult>> {
+                           -> Promise<FileSR> {
             let mut parts = Vec::new();
             let buf = Arc::new(buf);
             if state.options.autosplit && buf.len() > 1_048_576 {
@@ -146,40 +157,49 @@ impl SegmentSet {
                 };
 
                 let srcinfo = Arc::new(SourceInfo {
-                    name: diagpath.clone(),
+                    name: path.clone(),
                     text: buf.clone(),
                     span: Span::new(range.start, range.end),
                 });
 
                 let name = LongBuf(partbuf.clone());
 
-                match state.existing.get(&name) {
+                match state.old_by_content.get(&name) {
                     Some(eseg) => {
-                        let sres = (Some(name), eseg.clone(), srcinfo);
-                        promises.push(state.exec.exec(move || sres));
+                        let sres = SliceSR(Some(name), eseg.clone(), srcinfo);
+                        promises.push(Promise::new(sres));
                     }
                     None => {
                         promises.push(state.exec
-                            .exec(move || (Some(name), parser::parse_segments(&partbuf), srcinfo)));
+                            .exec(move || SliceSR(Some(name), parser::parse_segments(&partbuf), srcinfo)));
                     }
                 }
             }
-            promises
+            Promise::join(promises).map(move |srlist| {
+                FileSR(timestamp.map(move |s| (path.clone(), s)), srlist)
+            })
         }
 
         fn canonicalize_and_read(state: &mut RecState,
                                  path: String)
-                                 -> io::Result<Vec<Promise<ScanResult>>> {
-            let mut fh = try!(File::open(&path));
-            let mut buf = Vec::new();
-            try!(fh.read_to_end(&mut buf));
+                                 -> io::Result<Promise<FileSR>> {
+            let time = FileTime::from_last_modification_time(&try!(fs::metadata(&path)));
 
-            Ok(split_and_parse(state, path, buf))
+            match state.old_by_time.get(&(path.clone(), time)) {
+                Some(old_fsr) => Ok(Promise::new(old_fsr.clone())),
+                None => {
+                    let mut fh = try!(File::open(&path));
+                    let mut buf = Vec::new();
+                    try!(fh.read_to_end(&mut buf));
+
+                    Ok(split_and_parse(state, path, Some(time), buf))
+                }
+            }
         }
 
-        fn read_and_parse(state: &mut RecState, path: String) -> Vec<Promise<ScanResult>> {
+        fn read_and_parse(state: &mut RecState, path: String) -> Promise<FileSR> {
             if !state.included.insert(path.clone()) {
-                return Vec::new();
+                return Promise::new(FileSR(None, Vec::new()));
             }
             match state.preload.get(&path).cloned() {
                 None => {
@@ -193,21 +213,23 @@ impl SegmentSet {
                             };
                             let svec = vec![parser::dummy_segment(Diagnostic::IoError(format!("{}",
                                                                                        cerr)))];
-                            vec![state.exec.exec(move || (None, svec, Arc::new(sinfo)))]
+                            Promise::new(FileSR(None, vec![SliceSR(None, svec, Arc::new(sinfo))]))
                         }
                         Ok(segments) => segments,
                     }
                 }
-                Some(data) => split_and_parse(state, path, data),
+                Some(data) => split_and_parse(state, path, None, data),
             }
         }
 
-        fn flat(state: &mut RecState, inp: Vec<Promise<ScanResult>>) -> SegList {
+        fn flat(state: &mut RecState, inp: FileSR) -> SegList {
             let mut out = Vec::new();
-            for promise in inp {
-                let (nameo, vec, sinfo) = promise.wait();
+            if let Some(key) = inp.0.clone() {
+                state.new_by_time.insert(key, inp.clone());
+            }
+            for SliceSR(nameo, vec, sinfo) in inp.1 {
                 if let Some(name) = nameo {
-                    state.new_cache.insert(name, vec.clone());
+                    state.new_by_content.insert(name, vec.clone());
                 }
                 for aseg in vec {
                     out.push((aseg, sinfo.clone()));
@@ -229,7 +251,7 @@ impl SegmentSet {
             for seg in segments {
                 if seg.0.next_file != Span::null() {
                     state.segments.push(seg);
-                    let pp = promises.pop_front().unwrap();
+                    let pp = promises.pop_front().unwrap().wait();
                     let nsegs = flat(state, pp);
                     recurse(state, nsegs);
                 } else {
@@ -240,8 +262,10 @@ impl SegmentSet {
 
         let mut state = RecState {
             options: self.options.clone(),
-            existing: mem::replace(&mut self.parse_cache, new_map()),
-            new_cache: new_map(),
+            old_by_content: mem::replace(&mut self.parse_cache, new_map()),
+            new_by_content: new_map(),
+            old_by_time: mem::replace(&mut self.file_cache, new_map()),
+            new_by_time: new_map(),
             segments: Vec::new(),
             included: new_set(),
             preload: data.into_iter().collect(),
@@ -249,7 +273,7 @@ impl SegmentSet {
         };
 
         let isegs = read_and_parse(&mut state, path.clone());
-        let isegs = flat(&mut state, isegs);
+        let isegs = flat(&mut state, isegs.wait());
         recurse(&mut state, isegs);
 
         let mut old_segs = Vec::new();
@@ -276,7 +300,9 @@ impl SegmentSet {
         }
 
         // reuse as many IDs as possible
-        self.parse_cache = state.new_cache;
+        self.parse_cache = state.new_by_content;
+        self.file_cache = state.new_by_time;
+
         while old_r.start < old_r.end && new_r.start < new_r.end {
             self.segments.insert(old_segs[old_r.start].0, new_segs[new_r.start].clone());
             new_r.start += 1;

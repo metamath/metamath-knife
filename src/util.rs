@@ -65,7 +65,7 @@ fn aligned_part(buffer: &[u8]) -> (usize, &[u32]) {
         return (0, Default::default());
     }
 
-    let offset = (0 - sptr) & 3;
+    let offset = sptr.wrapping_neg() & 3;
     sptr += offset; // just checked this won't overflow
     eptr -= eptr & 3; // cannot overflow by construction
 
