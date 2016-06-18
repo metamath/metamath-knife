@@ -7,7 +7,6 @@ use segment_set::SegmentSet;
 use std::collections::VecDeque;
 use std::fmt;
 use std::panic;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
@@ -97,21 +96,46 @@ impl Executor {
             partsc.1.notify_one();
         }));
 
-        Promise { inner: parts }
+        let awaiter = move || {
+            let mut g = parts.0.lock().unwrap();
+            while g.is_none() {
+                g = parts.1.wait(g).unwrap();
+            }
+            g.take().unwrap().unwrap()
+        };
+        Promise(Box::new(awaiter))
     }
 }
 
-pub struct Promise<T> {
-    inner: Arc<(Mutex<Option<thread::Result<T>>>, Condvar)>,
-}
+// if we start getting serious about performance, this will have to be fancier
+// note: boxed function will be called once only
+pub struct Promise<T>(Box<FnMut() -> T + Send>);
 
 impl<T> Promise<T> {
-    pub fn wait(self) -> T {
-        let mut g = self.inner.0.lock().unwrap();
-        while g.is_none() {
-            g = self.inner.1.wait(g).unwrap();
-        }
-        g.take().unwrap().unwrap()
+    pub fn wait(mut self) -> T {
+        (self.0)()
+    }
+
+    pub fn new_once<FN>(fun: FN) -> Promise<T> where FN: FnOnce() -> T + Send + 'static {
+        let mut funcell = Some(fun);
+        Promise(Box::new(move || (funcell.take().unwrap())()))
+    }
+
+    pub fn new(value: T) -> Self where T: Send + 'static {
+        Promise::new_once(move || value)
+    }
+
+    pub fn map<FN,RV>(self, fun: FN) -> Promise<RV> where T: 'static, FN: 'static, FN: Send + FnOnce(T) -> RV {
+        Promise::new_once(move || fun(self.wait()))
+    }
+}
+
+impl<T: 'static> Promise<Vec<T>> {
+    pub fn join(promises: Vec<Promise<T>>) -> Promise<Vec<T>> {
+        let mut pcell = Some(promises);
+        Promise(Box::new(move || {
+            pcell.take().unwrap().into_iter().map(|x| x.wait()).collect()
+        }))
     }
 }
 
@@ -172,7 +196,7 @@ impl Database {
         }
     }
 
-    pub fn parse(&mut self, start: PathBuf, text: Vec<(PathBuf, Vec<u8>)>) {
+    pub fn parse(&mut self, start: String, text: Vec<(String, Vec<u8>)>) {
         time(&self.options.clone(), "parse", || {
             Arc::make_mut(self.segments.as_mut().unwrap()).read(start, text);
             self.nameset = None;

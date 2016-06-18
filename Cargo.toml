@@ -5,6 +5,7 @@ version = "3.0.0-1"
 
 [dependencies]
 clap = "2.5.2"
+filetime = "0.1.10"
 fnv = "1.0.2"
 
 [profile]

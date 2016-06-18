@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate clap;
+extern crate filetime;
 extern crate fnv;
 
 mod bit_set;
@@ -19,7 +20,6 @@ use database::DbOptions;
 use database::DiagnosticClass;
 use diag::Notation;
 use std::io;
-use std::path::PathBuf;
 use std::str::FromStr;
 
 fn positive_integer(val: String) -> Result<(), String> {
@@ -63,11 +63,11 @@ fn main() {
     let mut data = Vec::new();
     if let Some(tvals) = matches.values_of_lossy("TEXT") {
         for kv in tvals.chunks(2) {
-            data.push((PathBuf::from(&kv[0]), kv[1].clone().into_bytes()));
+            data.push((kv[0].clone(), kv[1].clone().into_bytes()));
         }
     }
     let start = matches.value_of("DATABASE")
-        .map(|st| PathBuf::from(st))
+        .map(|x| x.to_owned())
         .unwrap_or_else(|| data[0].0.clone());
 
     loop {

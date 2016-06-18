@@ -12,14 +12,12 @@ use parser::Span;
 use parser::StatementAddress;
 use parser::StatementRef;
 use std::collections::VecDeque;
-use std::env;
 use std::fs::File;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::io;
 use std::io::Read;
 use std::mem;
-use std::path::PathBuf;
 use std::str;
 use std::sync::Arc;
 use util::find_chapter_header;
@@ -104,16 +102,14 @@ impl SegmentSet {
         out
     }
 
-    pub fn read(&mut self, path: PathBuf, data: Vec<(PathBuf, Vec<u8>)>) {
+    pub fn read(&mut self, path: String, data: Vec<(String, Vec<u8>)>) {
         struct RecState {
             options: Arc<DbOptions>,
             existing: HashMap<LongBuf, Vec<Arc<Segment>>>,
             new_cache: HashMap<LongBuf, Vec<Arc<Segment>>>,
             segments: SegList,
-            pre_included: HashSet<PathBuf>,
-            included: HashSet<PathBuf>,
-            preload: HashMap<PathBuf, Vec<u8>>,
-            workdir: Option<PathBuf>,
+            included: HashSet<String>,
+            preload: HashMap<String, Vec<u8>>,
             exec: Executor,
         }
 
@@ -172,37 +168,26 @@ impl SegmentSet {
         }
 
         fn canonicalize_and_read(state: &mut RecState,
-                                 path: PathBuf)
+                                 path: String)
                                  -> io::Result<Vec<Promise<ScanResult>>> {
-            let cpath = try!(path.canonicalize());
-            if state.workdir.is_none() {
-                state.workdir = Some(try!(try!(env::current_dir()).canonicalize()));
-            }
-            let relcpath =
-                cpath.strip_prefix(&state.workdir.as_ref().unwrap()).unwrap_or(&cpath).to_owned();
-            if !state.included.insert(relcpath.to_path_buf()) {
-                return Ok(Vec::new());
-            }
-            let mut fh = try!(File::open(&relcpath));
+            let mut fh = try!(File::open(&path));
             let mut buf = Vec::new();
             try!(fh.read_to_end(&mut buf));
 
-            let diagpath = relcpath.to_string_lossy().into_owned();
-            Ok(split_and_parse(state, diagpath, buf))
+            Ok(split_and_parse(state, path, buf))
         }
 
-        fn read_and_parse(state: &mut RecState, path: PathBuf) -> Vec<Promise<ScanResult>> {
-            if !state.pre_included.insert(path.clone()) {
+        fn read_and_parse(state: &mut RecState, path: String) -> Vec<Promise<ScanResult>> {
+            if !state.included.insert(path.clone()) {
                 return Vec::new();
             }
-            let path_str = path.to_string_lossy().into_owned();
             match state.preload.get(&path).cloned() {
                 None => {
                     // read from FS
-                    match canonicalize_and_read(state, path) {
+                    match canonicalize_and_read(state, path.clone()) {
                         Err(cerr) => {
                             let sinfo = SourceInfo {
-                                name: path_str.clone(),
+                                name: path.clone(),
                                 text: Arc::new(Vec::new()),
                                 span: Span::null(),
                             };
@@ -213,7 +198,7 @@ impl SegmentSet {
                         Ok(segments) => segments,
                     }
                 }
-                Some(data) => split_and_parse(state, path_str, data),
+                Some(data) => split_and_parse(state, path, data),
             }
         }
 
@@ -231,23 +216,22 @@ impl SegmentSet {
             out
         }
 
-        fn recurse(state: &mut RecState, path: PathBuf, segments: SegList) {
+        fn recurse(state: &mut RecState, segments: SegList) {
             let mut promises = VecDeque::new();
             for seg in &segments {
                 if seg.0.next_file != Span::null() {
                     let chain = str::from_utf8(seg.0.next_file.as_ref(&seg.0.buffer))
                         .expect("parser verified ASCII")
                         .to_owned();
-                    let newpath = path.parent().unwrap_or(&path).join(PathBuf::from(chain));
-                    promises.push_back((newpath.clone(), read_and_parse(state, newpath)));
+                    promises.push_back(read_and_parse(state, chain));
                 }
             }
             for seg in segments {
                 if seg.0.next_file != Span::null() {
                     state.segments.push(seg);
-                    let (newpath, pp) = promises.pop_front().unwrap();
+                    let pp = promises.pop_front().unwrap();
                     let nsegs = flat(state, pp);
-                    recurse(state, newpath, nsegs);
+                    recurse(state, nsegs);
                 } else {
                     state.segments.push(seg);
                 }
@@ -260,15 +244,13 @@ impl SegmentSet {
             new_cache: new_map(),
             segments: Vec::new(),
             included: new_set(),
-            pre_included: new_set(),
             preload: data.into_iter().collect(),
-            workdir: None,
             exec: self.exec.clone(),
         };
 
         let isegs = read_and_parse(&mut state, path.clone());
         let isegs = flat(&mut state, isegs);
-        recurse(&mut state, path, isegs);
+        recurse(&mut state, isegs);
 
         let mut old_segs = Vec::new();
         for (&seg_id, seg) in &self.segments {
