@@ -1,4 +1,5 @@
 use diag::Diagnostic;
+use std::cmp;
 use std::cmp::Ordering;
 use std::mem;
 use std::slice;
@@ -1027,6 +1028,43 @@ fn is_valid_label(label: &[u8]) -> bool {
         }
     }
     true
+}
+
+// this is a kinda set.mm specific hack, but ok
+// look for the first indented line in the first 500 bytes
+pub fn guess_buffer_name(buffer: &[u8]) -> &str {
+    let buffer = &buffer[0..cmp::min(500, buffer.len())];
+    let mut index = 0;
+    while index < buffer.len() {
+        if buffer[index] == b' ' {
+            break;
+        }
+        while index < buffer.len() && buffer[index] != b'\n' {
+            index += 1;
+        }
+        if index < buffer.len() {
+            index += 1;
+        }
+    }
+    // index points at the beginning of an indented line, or EOF
+
+    while index < buffer.len() && buffer[index] == b' ' {
+        index += 1;
+    }
+
+    let mut eol = index;
+    while eol < buffer.len() && buffer[eol] != b'\n' {
+        eol += 1;
+    }
+    while eol > index && (buffer[eol - 1] == b'\r' || buffer[eol - 1] == b' ') {
+        eol -= 1;
+    }
+
+    if eol == index {
+        "<no section name found>"
+    } else {
+        str::from_utf8(&buffer[index..eol]).unwrap_or("<invalid UTF-8 in section name>")
+    }
 }
 
 /// This function implements parsing stage 1, which breaks down the metalanguage grammar, finding

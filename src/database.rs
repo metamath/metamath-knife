@@ -19,6 +19,7 @@ use verify::VerifyResult;
 pub struct DbOptions {
     pub autosplit: bool,
     pub timing: bool,
+    pub trace_recalc: bool,
     pub verify: bool,
     pub incremental: bool,
     pub jobs: usize,

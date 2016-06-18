@@ -170,14 +170,18 @@ impl SegmentSet {
                         promises.push(Promise::new(sres));
                     }
                     None => {
-                        promises.push(state.exec
-                            .exec(move || SliceSR(Some(name), parser::parse_segments(&partbuf), srcinfo)));
+                        let trace = state.options.trace_recalc;
+                        promises.push(state.exec.exec(move || {
+                            if trace {
+                                println!("parse({:?})", parser::guess_buffer_name(&partbuf));
+                            }
+                            SliceSR(Some(name), parser::parse_segments(&partbuf), srcinfo)
+                        }));
                     }
                 }
             }
-            Promise::join(promises).map(move |srlist| {
-                FileSR(timestamp.map(move |s| (path.clone(), s)), srlist)
-            })
+            Promise::join(promises)
+                .map(move |srlist| FileSR(timestamp.map(move |s| (path.clone(), s)), srlist))
         }
 
         fn canonicalize_and_read(state: &mut RecState,

@@ -2,6 +2,7 @@ use bit_set::Bitset;
 use diag::Diagnostic;
 use nameck::Atom;
 use nameck::Nameset;
+use parser;
 use parser::Comparer;
 use parser::NO_STATEMENT;
 use parser::Segment;
@@ -480,6 +481,10 @@ pub fn verify(result: &mut VerifyResult,
                    ptr_eq::<Segment>(&old_res.source, sref.segment) {
                     return (id, old_res.clone());
                 }
+            }
+            if segments2.options.trace_recalc {
+                println!("verify({:?})",
+                         parser::guess_buffer_name(&sref.segment.buffer));
             }
             (id, Arc::new(verify_segment(&segments2, &nset, &scope, id)))
         }))

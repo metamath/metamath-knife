@@ -4,6 +4,7 @@ use nameck::Atom;
 use nameck::NameReader;
 use nameck::Nameset;
 use nameck::NameUsage;
+use parser;
 use parser::Comparer;
 use parser::GlobalRange;
 use parser::NO_STATEMENT;
@@ -769,6 +770,10 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
                        ptr_eq::<Segment>(&old_res.source, sref.segment) {
                         return None;
                     }
+                }
+                if segments2.options.trace_recalc {
+                    println!("scopeck({:?})",
+                             parser::guess_buffer_name(&sref.segment.buffer));
                 }
                 Some(Arc::new(scope_check_single(&names, sref)))
             }));

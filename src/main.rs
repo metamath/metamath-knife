@@ -29,13 +29,16 @@ fn positive_integer(val: String) -> Result<(), String> {
 fn main() {
     let matches = App::new("smetamath-rs")
         .version(crate_version!())
-        .about("About text")
+        .about("A Metamath database verifier and processing tool")
         .arg(Arg::with_name("DATABASE").help("Database file to load").required_unless("TEXT"))
         .arg(Arg::with_name("split")
             .help("Process files > 1 MiB in multiple segments")
             .long("split"))
         .arg(Arg::with_name("timing").help("Print milliseconds after each stage").long("timing"))
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
+        .arg(Arg::with_name("trace-recalc")
+            .help("Print segments as they are recalculated")
+            .long("trace-recalc"))
         .arg(Arg::with_name("repeat").help("Demonstrate incremental verifier").long("repeat"))
         .arg(Arg::with_name("jobs")
             .help("Number of threads to use for verification")
@@ -54,6 +57,7 @@ fn main() {
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
     options.verify = matches.is_present("verify");
+    options.trace_recalc = matches.is_present("trace-recalc");
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
