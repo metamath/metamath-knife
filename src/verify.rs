@@ -210,8 +210,9 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     }
     let sbase = state.stack.len() - fref.hypotheses.len();
 
-    state.subst_info.clear();
-    for _ in 0 .. fref.mandatory_count {
+    while state.subst_info.len() < fref.mandatory_count {
+        // this is mildly unhygenic, since slots corresponding to $e hyps won't get cleared, but
+        // scopeck shouldn't generate references to them
         state.subst_info.push((0..0, Bitset::new()));
     }
 
