@@ -3,6 +3,7 @@ use std::collections;
 use std::hash::BuildHasherDefault;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Range;
 use std::ptr;
 use std::slice;
 
@@ -41,6 +42,21 @@ pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
                                  vec.get_unchecked_mut(len),
                                  other.len());
         vec.set_len(len + other.len());
+    }
+}
+
+pub fn copy_portion(vec: &mut Vec<u8>, from: Range<usize>) {
+    let Range { start: copy_start, end: copy_end } = from.clone();
+    &vec[from]; // for the bounds check
+    unsafe {
+        let copy_len = copy_end - copy_start;
+        vec.reserve(copy_len);
+
+        let old_len = vec.len();
+        let copy_from = vec.as_ptr().offset(copy_start as isize);
+        let copy_to = vec.as_mut_ptr().offset(old_len as isize);
+        ptr::copy_nonoverlapping(copy_from, copy_to, copy_len);
+        vec.set_len(old_len + copy_len);
     }
 }
 

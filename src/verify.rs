@@ -24,6 +24,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::u32;
 use std::usize;
+use util::copy_portion;
 use util::fast_clear;
 use util::fast_extend;
 use util::HashMap;
@@ -126,12 +127,11 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
 fn do_substitute(target: &mut Vec<u8>,
                  frame: &Frame,
                  expr: &[ExprFragment],
-                 vars: &[(Range<usize>, Bitset)],
-                 var_buffer: &[u8]) {
+                 vars: &[(Range<usize>, Bitset)]) {
     for part in expr {
         match *part {
             ExprFragment::Var(ix) => {
-                fast_extend(target, &var_buffer[vars[ix].0.clone()]);
+                copy_portion(target, vars[ix].0.clone());
             }
             ExprFragment::Constant(ref string) => {
                 fast_extend(target, &frame.const_pool[string.clone()]);
@@ -241,24 +241,14 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
         }
     }
 
-    fast_clear(&mut state.temp_buffer);
-    do_substitute(&mut state.temp_buffer,
+    let tos = state.stack_buffer.len();
+    do_substitute(&mut state.stack_buffer,
                   fref,
                   &fref.target.tail,
-                  &state.subst_info,
-                  &state.stack_buffer);
-
-    state.stack.truncate(sbase);
-    /*fast_truncate(&mut state.stack_buffer,
-                  if sbase == 0 {
-                      0
-                  } else {
-                      state.stack[sbase - 1].expr.end
-                  });*/
-    let tos = state.stack_buffer.len();
-    fast_extend(&mut state.stack_buffer, &state.temp_buffer);
+                  &state.subst_info);
     let ntos = state.stack_buffer.len();
 
+    state.stack.truncate(sbase);
     state.stack.push(StackSlot {
         code: fref.target.typecode,
         vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
