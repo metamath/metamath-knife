@@ -142,6 +142,29 @@ fn do_substitute(target: &mut Vec<u8>,
     }
 }
 
+fn do_substitute_eq(mut compare: &[u8],
+                    frame: &Frame,
+                    expr: &[ExprFragment],
+                    vars: &[(Range<usize>, Bitset)],
+                    var_buffer: &[u8])
+                    -> bool {
+    for part in expr {
+        let slice = match *part {
+            ExprFragment::Var(ix) => &var_buffer[vars[ix].0.clone()],
+            ExprFragment::Constant(ref string) => &frame.const_pool[string.clone()],
+        };
+        let len = slice.len();
+        if compare.len() < len {
+            return false;
+        }
+        if slice != &compare[0..len] {
+            return false;
+        }
+        compare = &compare[len..];
+    }
+    return compare.is_empty();
+}
+
 fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
     for part in &frame.target.tail {
         match *part {
@@ -213,13 +236,11 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
             if slot.code != hyp.expr.typecode {
                 return Some(Diagnostic::StepEssenWrongType);
             }
-            fast_clear(&mut state.temp_buffer);
-            do_substitute(&mut state.temp_buffer,
-                          fref,
-                          &hyp.expr.tail,
-                          &state.subst_info,
-                          &state.stack_buffer);
-            if state.stack_buffer[slot.expr.clone()] != state.temp_buffer[..] {
+            if !do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
+                                 fref,
+                                 &hyp.expr.tail,
+                                 &state.subst_info,
+                                 &state.stack_buffer) {
                 return Some(Diagnostic::StepEssenWrong);
             }
         }
