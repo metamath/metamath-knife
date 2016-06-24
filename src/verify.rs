@@ -74,7 +74,7 @@ fn prepare_hypotheses(state: &mut VerifyState) {
                     fast_extend(&mut state.prep_buffer,
                                 state.nameset.atom_name(state.cur_frame.var_list[ix]));
                     vars.set_bit(ix); // and we have prior knowledge it's identity mapped
-                    state.prep_buffer.push(b' ');
+                    *state.prep_buffer.last_mut().unwrap() |= 0x80;
                 }
                 ExprFragment::Constant(ref string) => {
                     fast_extend(&mut state.prep_buffer,
@@ -147,7 +147,7 @@ fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
         match *part {
             ExprFragment::Var(ix) => {
                 fast_extend(target, nameset.atom_name(frame.var_list[ix]));
-                target.push(b' ');
+                *target.last_mut().unwrap() |= 0x80;
             }
             ExprFragment::Constant(ref string) => {
                 fast_extend(target, &frame.const_pool[string.clone()]);

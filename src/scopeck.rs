@@ -257,11 +257,11 @@ fn construct_stub_frame(state: &mut ScopeState,
         match *ctok {
             CheckedToken::Const(tref, _) => {
                 conststr.extend_from_slice(tref);
-                conststr.push(b' ');
+                *conststr.last_mut().unwrap() |= 0x80;
             }
             CheckedToken::Var(tref, atom, _) => {
                 conststr.extend_from_slice(tref);
-                conststr.push(b' ');
+                *conststr.last_mut().unwrap() |= 0x80;
                 mvars.push(atom);
             }
         }
@@ -307,7 +307,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
         match *ctok {
             CheckedToken::Const(tref, _) => {
                 fast_extend(&mut iframe.const_pool, tref);
-                iframe.const_pool.push(b' ');
+                *iframe.const_pool.last_mut().unwrap() |= 0x80;
             }
             CheckedToken::Var(_, atom, lfi) => {
                 if open_const != iframe.const_pool.len() {
