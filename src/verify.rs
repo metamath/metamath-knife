@@ -211,26 +211,28 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     let sbase = state.stack.len() - fref.hypotheses.len();
 
     state.subst_info.clear();
-    state.subst_info.resize(fref.mandatory_count, (0..0, Bitset::new()));
-
-    // check $f, build substitution
-    for (ix, hyp) in fref.hypotheses.iter().enumerate() {
-        if hyp.is_float {
-            let slot = &state.stack[sbase + ix];
-            if slot.code != hyp.expr.typecode {
-                return Some(Diagnostic::StepFloatWrongType);
-            }
-            state.subst_info[hyp.variable_index] = (slot.expr.clone(), slot.vars.clone());
-        }
+    for _ in 0 .. fref.mandatory_count {
+        state.subst_info.push((0..0, Bitset::new()));
     }
 
+    // check $f, build substitution
     // check $e
+    // metamath spec guarantees $f will always come before any $e they affect (!)
     for (ix, hyp) in fref.hypotheses.iter().enumerate() {
-        if !hyp.is_float {
-            let slot = &state.stack[sbase + ix];
-            if slot.code != hyp.expr.typecode {
+        let slot = &state.stack[sbase + ix];
+
+        // schedule a memory ref and nice predicable branch before the ugly branch
+        if slot.code != hyp.expr.typecode {
+            if hyp.is_float {
+                return Some(Diagnostic::StepFloatWrongType);
+            } else {
                 return Some(Diagnostic::StepEssenWrongType);
             }
+        }
+
+        if hyp.is_float {
+            state.subst_info[hyp.variable_index] = (slot.expr.clone(), slot.vars.clone());
+        } else {
             if !do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
                                  fref,
                                  &hyp.expr.tail,
