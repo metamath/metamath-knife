@@ -33,14 +33,6 @@ pub fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
     }
 }
 
-pub fn fast_truncate<T: Copy>(vec: &mut Vec<T>, len: usize) {
-    unsafe {
-        if len > vec.len() {
-            vec.set_len(0);
-        }
-    }
-}
-
 pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
     vec.reserve(other.len());
     unsafe {

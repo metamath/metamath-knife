@@ -26,7 +26,6 @@ use std::u32;
 use std::usize;
 use util::fast_clear;
 use util::fast_extend;
-use util::fast_truncate;
 use util::HashMap;
 use util::new_map;
 use util::ptr_eq;
@@ -48,7 +47,6 @@ struct VerifyState<'a> {
     scoper: ScopeReader<'a>,
     cur_frame: &'a Frame,
     prepared: Vec<PreparedStep<'a>>,
-    prep_buffer: Vec<u8>,
     stack: Vec<StackSlot>,
     stack_buffer: Vec<u8>,
     temp_buffer: Vec<u8>,
@@ -66,24 +64,24 @@ fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
 fn prepare_hypotheses(state: &mut VerifyState) {
     for hyp in &state.cur_frame.hypotheses {
         let mut vars = Bitset::new();
-        let tos = state.prep_buffer.len();
+        let tos = state.stack_buffer.len();
 
         for part in &hyp.expr.tail {
             match *part {
                 ExprFragment::Var(ix) => {
-                    fast_extend(&mut state.prep_buffer,
+                    fast_extend(&mut state.stack_buffer,
                                 state.nameset.atom_name(state.cur_frame.var_list[ix]));
                     vars.set_bit(ix); // and we have prior knowledge it's identity mapped
-                    *state.prep_buffer.last_mut().unwrap() |= 0x80;
+                    *state.stack_buffer.last_mut().unwrap() |= 0x80;
                 }
                 ExprFragment::Constant(ref string) => {
-                    fast_extend(&mut state.prep_buffer,
+                    fast_extend(&mut state.stack_buffer,
                                 &state.cur_frame.const_pool[string.clone()]);
                 }
             }
         }
 
-        let ntos = state.prep_buffer.len();
+        let ntos = state.stack_buffer.len();
         state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
     }
 }
@@ -115,9 +113,9 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
             vars.set_bit(map_var(state, var));
         }
 
-        let tos = state.prep_buffer.len();
-        fast_extend(&mut state.prep_buffer, &frame.stub_expr);
-        let ntos = state.prep_buffer.len();
+        let tos = state.stack_buffer.len();
+        fast_extend(&mut state.stack_buffer, &frame.stub_expr);
+        let ntos = state.stack_buffer.len();
         state.prepared
             .push(PreparedStep::Hyp(vars, frame.target.typecode, tos..ntos));
     }
@@ -197,13 +195,10 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
 
     let fref = match state.prepared[index] {
         PreparedStep::Hyp(ref vars, code, ref expr) => {
-            let tos = state.stack_buffer.len();
-            fast_extend(&mut state.stack_buffer, &state.prep_buffer[expr.clone()]);
-            let ntos = state.stack_buffer.len();
             state.stack.push(StackSlot {
                 vars: vars.clone(),
                 code: code,
-                expr: tos..ntos,
+                expr: expr.clone(),
             });
             return None;
         }
@@ -254,12 +249,12 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
                   &state.stack_buffer);
 
     state.stack.truncate(sbase);
-    fast_truncate(&mut state.stack_buffer,
+    /*fast_truncate(&mut state.stack_buffer,
                   if sbase == 0 {
                       0
                   } else {
                       state.stack[sbase - 1].expr.end
-                  });
+                  });*/
     let tos = state.stack_buffer.len();
     fast_extend(&mut state.stack_buffer, &state.temp_buffer);
     let ntos = state.stack_buffer.len();
@@ -309,11 +304,7 @@ fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
 
 fn save_step(state: &mut VerifyState) {
     let top = state.stack.last().expect("can_save should prevent getting here");
-    let tos = state.prep_buffer.len();
-    fast_extend(&mut state.prep_buffer,
-                &state.stack_buffer[top.expr.clone()]);
-    let ntos = state.prep_buffer.len();
-    state.prepared.push(PreparedStep::Hyp(top.vars.clone(), top.code, tos..ntos));
+    state.prepared.push(PreparedStep::Hyp(top.vars.clone(), top.code, top.expr.clone()));
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
@@ -334,7 +325,6 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Opti
     state.stack.clear();
     fast_clear(&mut state.stack_buffer);
     state.prepared.clear();
-    fast_clear(&mut state.prep_buffer);
     state.var2bit.clear();
     state.dv_map = &cur_frame.optional_dv;
     // temp_buffer and subst_info are cleared before use
@@ -464,7 +454,6 @@ fn verify_segment(sset: &SegmentSet,
         stack: Vec::new(),
         stack_buffer: Vec::new(),
         prepared: Vec::new(),
-        prep_buffer: Vec::new(),
         temp_buffer: Vec::new(),
         subst_info: Vec::new(),
         var2bit: new_map(),
