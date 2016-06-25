@@ -187,13 +187,15 @@ impl SegmentSet {
         fn canonicalize_and_read(state: &mut RecState,
                                  path: String)
                                  -> io::Result<Promise<FileSR>> {
-            let time = FileTime::from_last_modification_time(&try!(fs::metadata(&path)));
+            let metadata = try!(fs::metadata(&path));
+            let time = FileTime::from_last_modification_time(&metadata);
 
             match state.old_by_time.get(&(path.clone(), time)) {
                 Some(old_fsr) => Ok(Promise::new(old_fsr.clone())),
                 None => {
                     let mut fh = try!(File::open(&path));
-                    let mut buf = Vec::new();
+                    let mut buf = Vec::with_capacity(metadata.len() as usize + 1);
+                    // note: File's read_to_end uses the buffer capacity to choose how much to read
                     try!(fh.read_to_end(&mut buf));
 
                     Ok(split_and_parse(state, path, Some(time), buf))
