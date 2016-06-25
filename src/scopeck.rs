@@ -421,11 +421,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
             expr: VerifyExpr {
                 typecode: lfi.typecode,
                 rump: 0..0,
-                tail: vec![ExprFragment {
-                               var: index,
-                               prefix: 0..0,
-                           }]
-                    .into_boxed_slice(),
+                tail: Box::default(),
             },
         })
     }

@@ -71,16 +71,23 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
 
-    for part in &*hyp.expr.tail {
+    if hyp.is_float {
         fast_extend(&mut state.stack_buffer,
-                    &state.cur_frame.const_pool[part.prefix.clone()]);
-        fast_extend(&mut state.stack_buffer,
-                    state.nameset.atom_name(state.cur_frame.var_list[part.var]));
+                    state.nameset.atom_name(state.cur_frame.var_list[hyp.variable_index]));
         *state.stack_buffer.last_mut().unwrap() |= 0x80;
-        vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
+        vars.set_bit(hyp.variable_index); // and we have prior knowledge it's identity mapped
+    } else {
+        for part in &*hyp.expr.tail {
+            fast_extend(&mut state.stack_buffer,
+                        &state.cur_frame.const_pool[part.prefix.clone()]);
+            fast_extend(&mut state.stack_buffer,
+                        state.nameset.atom_name(state.cur_frame.var_list[part.var]));
+            *state.stack_buffer.last_mut().unwrap() |= 0x80;
+            vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
+        }
+        fast_extend(&mut state.stack_buffer,
+                    &state.cur_frame.const_pool[hyp.expr.rump.clone()]);
     }
-    fast_extend(&mut state.stack_buffer,
-                &state.cur_frame.const_pool[hyp.expr.rump.clone()]);
 
     let ntos = state.stack_buffer.len();
     state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
