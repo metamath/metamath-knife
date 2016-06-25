@@ -1,6 +1,6 @@
 [root]
 name = "smetamath"
-version = "3.0.0-1"
+version = "3.0.0"
 dependencies = [
  "clap 2.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "filetime 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -1,7 +1,11 @@
 [package]
-authors = ["Stefan O'Rear <stefanor@cox.net>"]
+authors = ["Stefan O'Rear <sorear2@gmail.com>"]
+license = "MIT"
 name = "smetamath"
+readme = "README.md"
 version = "3.0.0"
+description = "A parallel and incremental verifier for Metamath databases"
+repository = "https://github.com/sorear/smetamath-rs"
 
 [dependencies]
 clap = "2.5.2"
