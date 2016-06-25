@@ -19,6 +19,7 @@ use scopeck::Hyp;
 use scopeck::ScopeReader;
 use scopeck::ScopeResult;
 use scopeck::ScopeUsage;
+use scopeck::VerifyExpr;
 use segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::mem;
@@ -70,19 +71,15 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
     let tos = state.stack_buffer.len();
 
     for part in &hyp.expr.tail {
-        match *part {
-            ExprFragment::Var(ix) => {
-                fast_extend(&mut state.stack_buffer,
-                            state.nameset.atom_name(state.cur_frame.var_list[ix]));
-                vars.set_bit(ix); // and we have prior knowledge it's identity mapped
-                *state.stack_buffer.last_mut().unwrap() |= 0x80;
-            }
-            ExprFragment::Constant(ref string) => {
-                fast_extend(&mut state.stack_buffer,
-                            &state.cur_frame.const_pool[string.clone()]);
-            }
-        }
+        fast_extend(&mut state.stack_buffer,
+                    &state.cur_frame.const_pool[part.prefix.clone()]);
+        fast_extend(&mut state.stack_buffer,
+                    state.nameset.atom_name(state.cur_frame.var_list[part.var]));
+        *state.stack_buffer.last_mut().unwrap() |= 0x80;
+        vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
     }
+    fast_extend(&mut state.stack_buffer,
+                &state.cur_frame.const_pool[hyp.expr.rump.clone()]);
 
     let ntos = state.stack_buffer.len();
     state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
@@ -145,64 +142,62 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
 
 fn do_substitute(target: &mut Vec<u8>,
                  frame: &Frame,
-                 expr: &[ExprFragment],
+                 expr: &VerifyExpr,
                  vars: &[(Range<usize>, Bitset)]) {
-    for part in expr {
-        match *part {
-            ExprFragment::Var(ix) => {
-                copy_portion(target, vars[ix].0.clone());
-            }
-            ExprFragment::Constant(ref string) => {
-                fast_extend(target, &frame.const_pool[string.clone()]);
-            }
-        }
+    for part in &expr.tail {
+        fast_extend(target, &frame.const_pool[part.prefix.clone()]);
+        copy_portion(target, vars[part.var].0.clone());
     }
+    fast_extend(target, &frame.const_pool[expr.rump.clone()]);
 }
 
 fn do_substitute_eq(mut compare: &[u8],
                     frame: &Frame,
-                    expr: &[ExprFragment],
+                    expr: &VerifyExpr,
                     vars: &[(Range<usize>, Bitset)],
                     var_buffer: &[u8])
                     -> bool {
-    for part in expr {
-        let slice = match *part {
-            ExprFragment::Var(ix) => &var_buffer[vars[ix].0.clone()],
-            ExprFragment::Constant(ref string) => &frame.const_pool[string.clone()],
-        };
+    fn step(compare: &mut &[u8], slice: &[u8]) -> bool {
         let len = slice.len();
-        if compare.len() < len {
-            return false;
+        if (*compare).len() < len {
+            return true;
         }
-        if slice != &compare[0..len] {
-            return false;
+        if slice != &(*compare)[0..len] {
+            return true;
         }
-        compare = &compare[len..];
+        *compare = &(*compare)[len..];
+        return false;
     }
+
+    for part in &expr.tail {
+        if step(&mut compare, &frame.const_pool[part.prefix.clone()]) {
+            return false;
+        }
+        if step(&mut compare, &var_buffer[vars[part.var].0.clone()]) {
+            return false;
+        }
+    }
+
+    if step(&mut compare, &frame.const_pool[expr.rump.clone()]) {
+        return false;
+    }
+
     return compare.is_empty();
 }
 
 fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
     for part in &frame.target.tail {
-        match *part {
-            ExprFragment::Var(ix) => {
-                fast_extend(target, nameset.atom_name(frame.var_list[ix]));
-                *target.last_mut().unwrap() |= 0x80;
-            }
-            ExprFragment::Constant(ref string) => {
-                fast_extend(target, &frame.const_pool[string.clone()]);
-            }
-        }
+        fast_extend(target, &frame.const_pool[part.prefix.clone()]);
+        fast_extend(target, nameset.atom_name(frame.var_list[part.var]));
+        *target.last_mut().unwrap() |= 0x80;
     }
+    fast_extend(target, &frame.const_pool[frame.target.rump.clone()]);
 }
 
 fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) -> Bitset {
     let mut out = Bitset::new();
     for part in expr {
-        match *part {
-            ExprFragment::Var(ix) => out |= &vars[ix].1,
-            ExprFragment::Constant(_) => {}
-        }
+        out |= &vars[part.var].1;
     }
     out
 }
@@ -255,7 +250,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
         } else {
             if !do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
                                  fref,
-                                 &hyp.expr.tail,
+                                 &hyp.expr,
                                  &state.subst_info,
                                  &state.stack_buffer) {
                 return Some(Diagnostic::StepEssenWrong);
@@ -266,7 +261,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     let tos = state.stack_buffer.len();
     do_substitute(&mut state.stack_buffer,
                   fref,
-                  &fref.target.tail,
+                  &fref.target,
                   &state.subst_info);
     let ntos = state.stack_buffer.len();
 

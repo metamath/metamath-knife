@@ -87,15 +87,22 @@ struct LocalEssentialInfo<'a> {
 pub type VarIndex = usize;
 
 #[derive(Clone,Debug)]
-pub enum ExprFragment {
-    Var(VarIndex),
-    Constant(Range<usize>),
+pub struct ExprFragment {
+    pub prefix: Range<usize>,
+    pub var: VarIndex,
 }
 
-#[derive(Clone,Debug,Default)]
+#[derive(Clone,Debug)]
 pub struct VerifyExpr {
     pub typecode: Atom,
+    pub rump: Range<usize>,
     pub tail: Vec<ExprFragment>,
+}
+
+impl Default for VerifyExpr {
+    fn default() -> VerifyExpr {
+        VerifyExpr { typecode: Atom::default(), rump: 0..0, tail: Vec::new() }
+    }
 }
 
 #[derive(Clone,Debug)]
@@ -274,6 +281,7 @@ fn construct_stub_frame(state: &mut ScopeState,
         hypotheses: Vec::new(),
         target: VerifyExpr {
             typecode: typecode,
+            rump: 0..0,
             tail: Vec::new(),
         },
         const_pool: Vec::new(),
@@ -310,11 +318,6 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
                 *iframe.const_pool.last_mut().unwrap() |= 0x80;
             }
             CheckedToken::Var(_, atom, lfi) => {
-                if open_const != iframe.const_pool.len() {
-                    tail.push(ExprFragment::Constant(open_const..iframe.const_pool.len()));
-                    open_const = iframe.const_pool.len();
-                }
-
                 let index = match iframe.variables.get(&atom).map(|&(x, _)| x) {
                     Some(mvarindex) => mvarindex,
                     None => {
@@ -325,17 +328,18 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
                         index
                     }
                 };
-                tail.push(ExprFragment::Var(index));
+                tail.push(ExprFragment {
+                    prefix: open_const..iframe.const_pool.len(),
+                    var: index,
+                });
+                open_const = iframe.const_pool.len();
             }
         }
     }
 
-    if open_const != iframe.const_pool.len() {
-        tail.push(ExprFragment::Constant(open_const..iframe.const_pool.len()));
-    }
-
     VerifyExpr {
         typecode: head.to_owned(),
+        rump: open_const..iframe.const_pool.len(),
         tail: tail,
     }
 }
@@ -411,7 +415,8 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
             variable_index: index,
             expr: VerifyExpr {
                 typecode: lfi.typecode,
-                tail: vec![ExprFragment::Var(index)],
+                rump: 0..0,
+                tail: vec![ExprFragment { var: index, prefix: 0..0 }],
             },
         })
     }
