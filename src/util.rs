@@ -34,11 +34,21 @@ pub fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
     }
 }
 
+unsafe fn short_copy<T>(src: *const T, dst: *mut T, count: usize) {
+    if count == 2 {
+        ptr::write(dst as *mut [T; 2], ptr::read(src as *const [T; 2]));
+    } else if count == 1 {
+        ptr::write(dst, ptr::read(src));
+    } else {
+        ptr::copy_nonoverlapping(src, dst, count);
+    }
+}
+
 pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
     vec.reserve(other.len());
     unsafe {
         let len = vec.len();
-        ptr::copy_nonoverlapping(other.get_unchecked(0),
+        short_copy(other.get_unchecked(0),
                                  vec.get_unchecked_mut(len),
                                  other.len());
         vec.set_len(len + other.len());
@@ -55,7 +65,7 @@ pub fn copy_portion(vec: &mut Vec<u8>, from: Range<usize>) {
         let old_len = vec.len();
         let copy_from = vec.as_ptr().offset(copy_start as isize);
         let copy_to = vec.as_mut_ptr().offset(old_len as isize);
-        ptr::copy_nonoverlapping(copy_from, copy_to, copy_len);
+        short_copy(copy_from, copy_to, copy_len);
         vec.set_len(old_len + copy_len);
     }
 }
