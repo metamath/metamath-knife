@@ -20,6 +20,7 @@ use database::DbOptions;
 use database::DiagnosticClass;
 use diag::Notation;
 use std::io;
+use std::mem;
 use std::str::FromStr;
 
 fn positive_integer(val: String) -> Result<(), String> {
@@ -39,6 +40,9 @@ fn main() {
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
+        .arg(Arg::with_name("free")
+            .help("Explicitly deallocate working memory before exit")
+            .long("free"))
         .arg(Arg::with_name("repeat").help("Demonstrate incremental verifier").long("repeat"))
         .arg(Arg::with_name("jobs")
             .help("Number of threads to use for verification")
@@ -98,6 +102,10 @@ fn main() {
         } else {
             break;
         }
+    }
+
+    if !matches.is_present("free") {
+        mem::forget(db);
     }
 }
 
