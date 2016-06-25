@@ -71,7 +71,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
 
-    if hyp.is_float {
+    if hyp.is_float() {
         fast_extend(&mut state.stack_buffer,
                     state.nameset.atom_name(state.cur_frame.var_list[hyp.variable_index]));
         *state.stack_buffer.last_mut().unwrap() |= 0x80;
@@ -97,7 +97,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
 /// array due to infrequent use, so other measures are needed.
 fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
     for hyp in &*state.cur_frame.hypotheses {
-        if hyp.is_float {
+        if hyp.is_float() {
             continue;
         }
         assert!(hyp.address.segment_id == state.this_seg.id);
@@ -246,14 +246,14 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
 
         // schedule a memory ref and nice predicable branch before the ugly branch
         if slot.code != hyp.expr.typecode {
-            if hyp.is_float {
+            if hyp.is_float() {
                 return Some(Diagnostic::StepFloatWrongType);
             } else {
                 return Some(Diagnostic::StepEssenWrongType);
             }
         }
 
-        if hyp.is_float {
+        if hyp.is_float() {
             state.subst_info[hyp.variable_index] = (slot.expr.clone(), slot.vars.clone());
         } else {
             if !do_substitute_eq(&state.stack_buffer[slot.expr.clone()],

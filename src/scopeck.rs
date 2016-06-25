@@ -113,9 +113,14 @@ impl Default for VerifyExpr {
 #[derive(Clone,Debug)]
 pub struct Hyp {
     pub address: StatementAddress,
-    pub is_float: bool,
     pub variable_index: VarIndex,
     pub expr: VerifyExpr,
+}
+
+impl Hyp {
+    pub fn is_float(&self) -> bool {
+        0 != !self.variable_index
+    }
 }
 
 #[derive(Clone,Debug,Default)]
@@ -404,8 +409,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         let scanned = scan_expression(&mut iframe, &ess.string);
         hyps.push(Hyp {
             address: ess.valid.start,
-            is_float: false,
-            variable_index: 0,
+            variable_index: !0,
             expr: scanned,
         });
     }
@@ -416,7 +420,6 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     for &(index, ref lfi) in iframe.variables.values() {
         hyps.push(Hyp {
             address: lfi.valid.start,
-            is_float: true,
             variable_index: index,
             expr: VerifyExpr {
                 typecode: lfi.typecode,
