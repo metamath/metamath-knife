@@ -507,6 +507,15 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_raw(&mut self) -> Span {
+        #[inline(never)]
+        #[cold]
+        fn badchar(slf: &mut Scanner, ix: usize) -> Span {
+            let ch = slf.buffer[ix];
+            let diag = Diagnostic::BadCharacter(ix, ch);
+            slf.diagnostics.push((slf.statement_index, diag));
+            return slf.get_raw();
+        }
+
         let len = self.buffer.len();
         let mut ix = self.position as usize;
 
@@ -514,28 +523,27 @@ impl<'a> Scanner<'a> {
             // For the purpose of error recovery, we consider C0 control characters to be
             // whitespace (following SMM2)
             if !is_mm_space_c0(self.buffer[ix]) {
-                let ch = self.buffer[ix];
-                self.diag(Diagnostic::BadCharacter(Span::new(ix, ix + 1), ch));
+                self.position = (ix + 1) as FilePos;
+                return badchar(self, ix);
             }
             ix += 1;
         }
 
-        let mut start = ix;
-        while ix < len && self.buffer[ix] > 32 {
-            if self.buffer[ix] > 126 {
+        let start = ix;
+        while ix < len {
+            if self.buffer[ix] <= 32 || self.buffer[ix] > 126 {
+                if self.buffer[ix] <= 32 {
+                    break;
+                }
                 // DEL or C1 control or non-ASCII bytes (presumably UTF-8)
-                let ch = self.buffer[ix];
-                self.diag(Diagnostic::BadCharacter(Span::new(ix, ix + 1), ch));
+                let badix = ix;
                 // skip this "token"
                 ix += 1;
                 while ix < len && !is_mm_space(self.buffer[ix]) {
                     ix += 1;
                 }
-                while ix < len && is_mm_space(self.buffer[ix]) {
-                    ix += 1;
-                }
-                start = ix;
-                continue;
+                self.position = ix as FilePos;
+                return badchar(self, badix);
             }
 
             ix += 1;

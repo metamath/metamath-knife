@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[derive(Debug,Clone,Eq,PartialEq)]
 pub enum Diagnostic {
-    BadCharacter(Span, u8),
+    BadCharacter(usize, u8),
     BadCommentEnd(Span, Span),
     BadFloating,
     BadLabel(Span),
@@ -143,7 +143,7 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.s = "Invalid character (byte value {byte}); Metamath source files are limited to \
                       US-ASCII with controls TAB, CR, LF, FF)";
             info.args.push(("byte", d(byte)));
-            ann(&mut info, span);
+            ann(&mut info, Span::new(span, span + 1));
         }
         BadCommentEnd(tok, opener) => {
             info.s = "$) sequence must be surrounded by whitespace to end a comment";
