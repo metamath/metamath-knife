@@ -210,7 +210,7 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
     // does the math string consist of active tokens, where the first is a constant
     // and all variables have typecodes in scope?
     let mut bad = false;
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(sref.math_len() as usize);
 
     for tref in sref.math_iter() {
         match check_math_symbol(state, sref, tref) {
@@ -309,7 +309,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
         _ => unreachable!(),
     };
     let mut open_const = iframe.const_pool.len();
-    let mut tail = Vec::new();
+    let mut tail = Vec::with_capacity(expr.len());
 
     while let Some(ctok) = iter.next() {
         match *ctok {
@@ -337,6 +337,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
         }
     }
 
+    tail.shrink_to_fit();
     VerifyExpr {
         typecode: head.to_owned(),
         rump: open_const..iframe.const_pool.len(),
@@ -421,6 +422,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         })
     }
 
+    hyps.shrink_to_fit();
     hyps.sort_by(|h1, h2| state.order.cmp(&h1.address, &h2.address));
     iframe.mandatory_count = iframe.var_list.len();
 
@@ -712,6 +714,8 @@ pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResul
             _ => {}
         }
     }
+
+    state.frames_out.shrink_to_fit();
 
     SegmentScopeResult {
         id: seg.id,

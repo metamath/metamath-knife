@@ -956,6 +956,8 @@ impl<'a> Scanner<'a> {
 
         seg.diagnostics = mem::replace(&mut self.diagnostics, Vec::new());
         seg.span_pool = mem::replace(&mut self.span_pool, Vec::new());
+        seg.span_pool.shrink_to_fit();
+        seg.statements.shrink_to_fit();
         collect_definitions(&mut seg);
         (seg, is_end)
     }
