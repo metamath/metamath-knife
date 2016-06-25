@@ -70,8 +70,8 @@ fn queue_work(exec: &Executor, estimate: usize, mut f: Box<FnMut() + Send>) {
 
 impl Executor {
     pub fn new(concurrency: usize) -> Executor {
-        let mutex: Arc<Mutex<BinaryHeap<Job>>> = Default::default();
-        let cv: Arc<Condvar> = Default::default();
+        let mutex: Arc<Mutex<BinaryHeap<Job>>> = Arc::new(Mutex::new(BinaryHeap::new()));
+        let cv: Arc<Condvar> = Arc::new(Condvar::new());
 
         if concurrency > 1 {
             for _ in 0..concurrency {
@@ -104,7 +104,7 @@ impl Executor {
               TASK: Send + 'static,
               RV: Send + 'static
     {
-        let parts: Arc<(Mutex<Option<thread::Result<RV>>>, Condvar)> = Default::default();
+        let parts = Arc::new((Mutex::new(None), Condvar::new()));
 
         let partsc = parts.clone();
         let mut tasko = Some(task);
