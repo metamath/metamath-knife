@@ -185,8 +185,12 @@ pub struct GlobalRange {
     pub end: StatementIndex, // or NO_STATEMENT
 }
 
-pub type Token = Vec<u8>;
+pub type Token = Box<[u8]>;
 pub type TokenPtr<'a> = &'a [u8];
+
+pub fn copy_token(ptr: TokenPtr) -> Token {
+    ptr.to_owned().into_boxed_slice()
+}
 
 // TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
 #[derive(Debug)]
@@ -992,7 +996,7 @@ fn collect_definitions(seg: &mut Segment) {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Constant,
                         start: index,
-                        name: span.as_ref(buf).to_owned(),
+                        name: copy_token(span.as_ref(buf)),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -1002,7 +1006,7 @@ fn collect_definitions(seg: &mut Segment) {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Variable,
                         start: index,
-                        name: span.as_ref(buf).to_owned(),
+                        name: copy_token(span.as_ref(buf)),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -1010,15 +1014,15 @@ fn collect_definitions(seg: &mut Segment) {
             Disjoint => {
                 seg.global_dvs.push(GlobalDv {
                     start: index,
-                    vars: math.iter().map(|sp| sp.as_ref(buf).to_owned()).collect(),
+                    vars: math.iter().map(|sp| copy_token(sp.as_ref(buf))).collect(),
                 });
             }
             Floating => {
                 seg.floats.push(FloatDef {
                     start: index,
-                    typecode: math[0].as_ref(buf).to_owned(),
-                    label: stmt.label.as_ref(buf).to_owned(),
-                    name: math[1].as_ref(buf).to_owned(),
+                    typecode: copy_token(math[0].as_ref(buf)),
+                    label: copy_token(stmt.label.as_ref(buf)),
+                    name: copy_token(math[1].as_ref(buf)),
                 });
             }
             _ => {}

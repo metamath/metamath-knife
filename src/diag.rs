@@ -126,7 +126,7 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
     }
 
     fn t(v: &Token) -> String {
-        String::from_utf8(v.to_owned()).expect("utf-8 is checked before making Token")
+        String::from_utf8((**v).to_owned()).expect("utf-8 is checked before making Token")
     }
 
     let mut info = AnnInfo {

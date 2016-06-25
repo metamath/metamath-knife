@@ -3,8 +3,8 @@ use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::u32;
-use parser::{Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress, SymbolType,
-             Token, TokenAddress, TokenPtr};
+use parser::{Comparer, copy_token, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress,
+             SymbolType, Token, TokenAddress, TokenPtr};
 use segment_set::SegmentSet;
 use util;
 use util::HashMap;
@@ -82,11 +82,11 @@ fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
         None => {}
         Some(atom) => return *atom,
     };
-    table.table.insert(tok.to_owned(), next);
+    table.table.insert(copy_token(tok), next);
     if table.reverse.len() == 0 {
-        table.reverse.push(Token::new());
+        table.reverse.push(Token::default());
     }
-    table.reverse.push(tok.to_owned());
+    table.reverse.push(copy_token(tok));
     next
 }
 
@@ -166,7 +166,7 @@ impl Nameset {
 
         for &ref labdef in &seg.labels {
             let labelr = sref.statement(labdef.index).label();
-            let label = labelr.to_owned();
+            let label = copy_token(labelr);
             let slot = autoviv(&mut self.labels, label);
             slot.generation = self.generation;
             if self.options.incremental && slot.atom == Atom::default() {
@@ -336,7 +336,7 @@ impl<'a> NameReader<'a> {
             }
             None => {
                 if self.incremental {
-                    self.not_found_label.insert(label.to_owned());
+                    self.not_found_label.insert(copy_token(label));
                 }
                 None
             }
@@ -360,7 +360,7 @@ impl<'a> NameReader<'a> {
             }
             None => {
                 if self.incremental {
-                    self.not_found_symbol.insert(symbol.to_owned());
+                    self.not_found_symbol.insert(copy_token(symbol));
                 }
                 None
             }
@@ -385,7 +385,7 @@ impl<'a> NameReader<'a> {
             }
             None => {
                 if self.incremental {
-                    self.not_found_symbol.insert(symbol.to_owned());
+                    self.not_found_symbol.insert(copy_token(symbol));
                 }
                 None
             }

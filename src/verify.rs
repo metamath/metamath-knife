@@ -4,6 +4,7 @@ use nameck::Atom;
 use nameck::Nameset;
 use parser;
 use parser::Comparer;
+use parser::copy_token;
 use parser::NO_STATEMENT;
 use parser::Segment;
 use parser::SegmentId;
@@ -70,7 +71,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
 
-    for part in &hyp.expr.tail {
+    for part in &*hyp.expr.tail {
         fast_extend(&mut state.stack_buffer,
                     &state.cur_frame.const_pool[part.prefix.clone()]);
         fast_extend(&mut state.stack_buffer,
@@ -88,7 +89,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the frame
 /// array due to infrequent use, so other measures are needed.
 fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
-    for hyp in &state.cur_frame.hypotheses {
+    for hyp in &*state.cur_frame.hypotheses {
         if hyp.is_float {
             continue;
         }
@@ -98,7 +99,7 @@ fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnos
             return None;
         }
     }
-    return Some(Diagnostic::StepMissing(label.to_owned()));
+    return Some(Diagnostic::StepMissing(copy_token(label)));
 }
 
 fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
@@ -112,12 +113,12 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
     let valid = frame.valid;
     let pos = state.cur_frame.valid.start;
     if state.order.cmp(&pos, &valid.start) != Ordering::Greater {
-        return Some(Diagnostic::StepUsedBeforeDefinition(label.to_owned()));
+        return Some(Diagnostic::StepUsedBeforeDefinition(copy_token(label)));
     }
 
     if valid.end != NO_STATEMENT {
         if pos.segment_id != valid.start.segment_id || pos.index >= valid.end {
-            return Some(Diagnostic::StepUsedAfterScope(label.to_owned()));
+            return Some(Diagnostic::StepUsedAfterScope(copy_token(label)));
         }
     }
 
@@ -126,7 +127,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
     } else {
         let mut vars = Bitset::new();
 
-        for &var in &frame.var_list {
+        for &var in &*frame.var_list {
             vars.set_bit(map_var(state, var));
         }
 
@@ -144,7 +145,7 @@ fn do_substitute(target: &mut Vec<u8>,
                  frame: &Frame,
                  expr: &VerifyExpr,
                  vars: &[(Range<usize>, Bitset)]) {
-    for part in &expr.tail {
+    for part in &*expr.tail {
         fast_extend(target, &frame.const_pool[part.prefix.clone()]);
         copy_portion(target, vars[part.var].0.clone());
     }
@@ -169,7 +170,7 @@ fn do_substitute_eq(mut compare: &[u8],
         return false;
     }
 
-    for part in &expr.tail {
+    for part in &*expr.tail {
         if step(&mut compare, &frame.const_pool[part.prefix.clone()]) {
             return false;
         }
@@ -186,7 +187,7 @@ fn do_substitute_eq(mut compare: &[u8],
 }
 
 fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
-    for part in &frame.target.tail {
+    for part in &*frame.target.tail {
         fast_extend(target, &frame.const_pool[part.prefix.clone()]);
         fast_extend(target, nameset.atom_name(frame.var_list[part.var]));
         *target.last_mut().unwrap() |= 0x80;
@@ -273,7 +274,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
     });
 
     // check $d
-    for &(ix1, ix2) in &fref.mandatory_dv {
+    for &(ix1, ix2) in &*fref.mandatory_dv {
         for var1 in &state.subst_info[ix1].1 {
             for var2 in &state.subst_info[ix2].1 {
                 if var1 >= state.dv_map.len() || !state.dv_map[var1].has_bit(var2) {
@@ -343,7 +344,7 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Opti
     if stmt.proof_slice_at(0) == b"(" {
         let mut i = 1;
 
-        for hyp in &cur_frame.hypotheses {
+        for hyp in &*cur_frame.hypotheses {
             prepare_hypothesis(state, hyp);
         }
 

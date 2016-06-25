@@ -6,6 +6,7 @@ use nameck::Nameset;
 use nameck::NameUsage;
 use parser;
 use parser::Comparer;
+use parser::copy_token;
 use parser::GlobalRange;
 use parser::NO_STATEMENT;
 use parser::Segment;
@@ -96,12 +97,16 @@ pub struct ExprFragment {
 pub struct VerifyExpr {
     pub typecode: Atom,
     pub rump: Range<usize>,
-    pub tail: Vec<ExprFragment>,
+    pub tail: Box<[ExprFragment]>,
 }
 
 impl Default for VerifyExpr {
     fn default() -> VerifyExpr {
-        VerifyExpr { typecode: Atom::default(), rump: 0..0, tail: Vec::new() }
+        VerifyExpr {
+            typecode: Atom::default(),
+            rump: 0..0,
+            tail: Box::default(),
+        }
     }
 }
 
@@ -118,14 +123,14 @@ pub struct Frame {
     pub stype: StatementType,
     pub valid: GlobalRange,
     pub label_atom: Atom,
-    pub const_pool: Vec<u8>,
-    pub hypotheses: Vec<Hyp>,
+    pub const_pool: Box<[u8]>,
+    pub hypotheses: Box<[Hyp]>,
     pub target: VerifyExpr,
-    pub stub_expr: Vec<u8>,
-    pub var_list: Vec<Atom>,
+    pub stub_expr: Box<[u8]>,
+    pub var_list: Box<[Atom]>,
     pub mandatory_count: usize,
-    pub mandatory_dv: Vec<(VarIndex, VarIndex)>,
-    pub optional_dv: Vec<Bitset>,
+    pub mandatory_dv: Box<[(VarIndex, VarIndex)]>,
+    pub optional_dv: Box<[Bitset]>,
 }
 
 struct ScopeState<'a> {
@@ -278,18 +283,18 @@ fn construct_stub_frame(state: &mut ScopeState,
         stype: sref.statement.stype,
         label_atom: latom,
         valid: sref.scope_range(),
-        hypotheses: Vec::new(),
+        hypotheses: Box::default(),
         target: VerifyExpr {
             typecode: typecode,
             rump: 0..0,
-            tail: Vec::new(),
+            tail: Box::default(),
         },
-        const_pool: Vec::new(),
-        stub_expr: conststr,
+        const_pool: Box::default(),
+        stub_expr: conststr.into_boxed_slice(),
         mandatory_count: mvars.len(),
-        var_list: mvars,
-        mandatory_dv: Vec::new(),
-        optional_dv: Vec::new(),
+        var_list: mvars.into_boxed_slice(),
+        mandatory_dv: Box::default(),
+        optional_dv: Box::default(),
     });
 }
 
@@ -337,11 +342,10 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
         }
     }
 
-    tail.shrink_to_fit();
     VerifyExpr {
         typecode: head.to_owned(),
         rump: open_const..iframe.const_pool.len(),
-        tail: tail,
+        tail: tail.into_boxed_slice(),
     }
 }
 
@@ -417,12 +421,15 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
             expr: VerifyExpr {
                 typecode: lfi.typecode,
                 rump: 0..0,
-                tail: vec![ExprFragment { var: index, prefix: 0..0 }],
+                tail: vec![ExprFragment {
+                               var: index,
+                               prefix: 0..0,
+                           }]
+                    .into_boxed_slice(),
             },
         })
     }
 
-    hyps.shrink_to_fit();
     hyps.sort_by(|h1, h2| state.order.cmp(&h1.address, &h2.address));
     iframe.mandatory_count = iframe.var_list.len();
 
@@ -438,14 +445,14 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
         stype: sref.statement.stype,
         label_atom: label_atom,
         valid: sref.address().unbounded_range(),
-        hypotheses: hyps,
+        hypotheses: hyps.into_boxed_slice(),
         target: scan_res,
-        stub_expr: Vec::new(),
-        const_pool: iframe.const_pool,
-        var_list: iframe.var_list,
+        stub_expr: Box::default(),
+        const_pool: iframe.const_pool.into_boxed_slice(),
+        var_list: iframe.var_list.into_boxed_slice(),
         mandatory_count: iframe.mandatory_count,
-        mandatory_dv: iframe.mandatory_dv,
-        optional_dv: iframe.optional_dv,
+        mandatory_dv: iframe.mandatory_dv.into_boxed_slice(),
+        optional_dv: iframe.optional_dv.into_boxed_slice(),
     });
 }
 
@@ -589,7 +596,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     // record the $f
     if sref.statement.group_end != NO_STATEMENT {
         state.local_floats
-            .entry(var_tok.slice.to_owned())
+            .entry(copy_token(var_tok.slice))
             .or_insert(Vec::new())
             .push(LocalFloatInfo {
                 typecode: const_at,
@@ -611,7 +618,7 @@ fn maybe_add_local_var(state: &mut ScopeState,
                        sref: StatementRef,
                        tokref: TokenRef)
                        -> Option<TokenAddress> {
-    let lv_slot = state.local_vars.entry(tokref.slice.to_owned()).or_insert(Vec::new());
+    let lv_slot = state.local_vars.entry(copy_token(tokref.slice)).or_insert(Vec::new());
 
     if let Some(lv_most_recent) = lv_slot.last() {
         if check_endpoint(sref.index, lv_most_recent.end) {
@@ -815,8 +822,8 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
             id: stale_id,
         };
         for frame in &oseg.frames_out {
-            let label = sref.statement(frame.valid.start.index).label().to_owned();
-            let old = result.frame_index.remove(&label);
+            let label = sref.statement(frame.valid.start.index).label();
+            let old = result.frame_index.remove(label);
             assert!(old.is_some(), "check_label_dup should prevent this");
         }
     }
@@ -829,7 +836,7 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
 
         let sref = segments.segment(res_new.id);
         for (index, frame) in res_new.frames_out.iter().enumerate() {
-            let label = sref.statement(frame.valid.start.index).label().to_owned();
+            let label = copy_token(sref.statement(frame.valid.start.index).label());
             let old = result.frame_index.insert(label, (gen, seg_index, index));
             assert!(old.is_none(), "check_label_dup should prevent this");
         }
@@ -868,7 +875,7 @@ impl<'a> ScopeReader<'a> {
         match self.result.frame_index.get(name) {
             None => {
                 if self.incremental {
-                    self.not_found.insert(name.to_owned());
+                    self.not_found.insert(copy_token(name));
                 }
                 None
             }
