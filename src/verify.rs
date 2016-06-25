@@ -499,7 +499,7 @@ pub fn verify(result: &mut VerifyResult,
         let scope = scope.clone();
         let id = sref.id;
         let old_res_o = old.get(&id).cloned();
-        ssrq.push(segments.exec.exec(move || {
+        ssrq.push(segments.exec.exec(sref.bytes(), move || {
             let sref = segments2.segment(id);
             if let Some(old_res) = old_res_o {
                 if old_res.scope_usage.valid(&nset, &scope) &&

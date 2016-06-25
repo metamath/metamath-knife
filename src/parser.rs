@@ -263,6 +263,10 @@ impl<'a> SegmentRef<'a> {
             index: index,
         }
     }
+
+    pub fn bytes(self) -> usize {
+        self.segment.buffer.len()
+    }
 }
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]

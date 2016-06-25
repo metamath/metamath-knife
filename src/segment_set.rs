@@ -171,7 +171,7 @@ impl SegmentSet {
                     }
                     None => {
                         let trace = state.options.trace_recalc;
-                        promises.push(state.exec.exec(move || {
+                        promises.push(state.exec.exec(partbuf.len(), move || {
                             if trace {
                                 println!("parse({:?})", parser::guess_buffer_name(&partbuf));
                             }

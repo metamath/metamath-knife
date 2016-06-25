@@ -762,7 +762,7 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
             let names = names.clone();
             let id = sref.id;
             let osr = prev.get(&id).and_then(|x| x.clone());
-            ssrq.push_back(segments.exec.exec(move || {
+            ssrq.push_back(segments.exec.exec(sref.bytes(), move || {
                 let sref = segments2.segment(id);
                 if let Some(old_res) = osr {
                     if old_res.name_usage.valid(&names) &&

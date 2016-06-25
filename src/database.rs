@@ -4,7 +4,8 @@ use nameck::Nameset;
 use scopeck;
 use scopeck::ScopeResult;
 use segment_set::SegmentSet;
-use std::collections::VecDeque;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::fmt;
 use std::panic;
 use std::sync::Arc;
@@ -25,10 +26,28 @@ pub struct DbOptions {
     pub jobs: usize,
 }
 
+struct Job(usize, Box<FnMut() + Send>);
+impl PartialEq for Job {
+    fn eq(&self, other: &Job) -> bool {
+        self.0 == other.0
+    }
+}
+impl Eq for Job {}
+impl PartialOrd for Job {
+    fn partial_cmp(&self, other: &Job) -> Option<Ordering> {
+        Some(self.0.cmp(&other.0))
+    }
+}
+impl Ord for Job {
+    fn cmp(&self, other: &Job) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
 #[derive(Clone)]
 pub struct Executor {
     concurrency: usize,
-    mutex: Arc<Mutex<VecDeque<Box<FnMut() + Send>>>>,
+    mutex: Arc<Mutex<BinaryHeap<Job>>>,
     work_cv: Arc<Condvar>,
 }
 
@@ -39,19 +58,19 @@ impl fmt::Debug for Executor {
     }
 }
 
-fn queue_work(exec: &Executor, mut f: Box<FnMut() + Send>) {
+fn queue_work(exec: &Executor, estimate: usize, mut f: Box<FnMut() + Send>) {
     if exec.concurrency <= 1 {
         f();
         return;
     }
     let mut wq = exec.mutex.lock().unwrap();
-    wq.push_back(f);
+    wq.push(Job(estimate, f));
     exec.work_cv.notify_one();
 }
 
 impl Executor {
     pub fn new(concurrency: usize) -> Executor {
-        let mutex: Arc<Mutex<VecDeque<Box<FnMut() + Send>>>> = Default::default();
+        let mutex: Arc<Mutex<BinaryHeap<Job>>> = Default::default();
         let cv: Arc<Condvar> = Default::default();
 
         if concurrency > 1 {
@@ -65,9 +84,9 @@ impl Executor {
                             while mutexg.is_empty() {
                                 mutexg = cv.wait(mutexg).unwrap();
                             }
-                            mutexg.pop_front().unwrap()
+                            mutexg.pop().unwrap()
                         };
-                        task();
+                        (task.1)();
                     }
                 });
             }
@@ -80,7 +99,7 @@ impl Executor {
         }
     }
 
-    pub fn exec<TASK, RV>(&self, task: TASK) -> Promise<RV>
+    pub fn exec<TASK, RV>(&self, estimate: usize, task: TASK) -> Promise<RV>
         where TASK: FnOnce() -> RV,
               TASK: Send + 'static,
               RV: Send + 'static
@@ -90,6 +109,7 @@ impl Executor {
         let partsc = parts.clone();
         let mut tasko = Some(task);
         queue_work(self,
+                   estimate,
                    Box::new(move || {
             let mut g = partsc.0.lock().unwrap();
             let taskf = panic::AssertUnwindSafe(tasko.take().expect("should only be called once"));
