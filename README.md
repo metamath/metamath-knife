@@ -7,13 +7,14 @@ See http://us.metamath.org/#faq.
 
 ## Building
 
-Install Rust ([rustup.sh]), then:
+Install Rust ([rustup.sh]), version 1.9.0 or later, then check out this repository and run:
 
     cargo build --release
 
-Rust 1.11.0 or newer is recommended as SMM3 benefits measurably from the "non-filling drop" change added to Rust on 2016-06-05.
-At the time of writing, that requires a nightly build and the `-Z orbit` compiler flag, which is included in the `.cargo/config` file in this repository.
-If you are trying to use an older or newer stable build and `-Z orbit` is giving an error, delete `.cargo/config` and try again.
+Alternatively using `cargo install`:
+
+    cargo install --git https://github.com/sorear/smetamath-rs
+    # $HOME/.cargo/bin/smetamath has been installed, use it as the binary in the following instructions
 
 ## Running
 
@@ -29,7 +30,6 @@ If you are trying to use an older or newer stable build and `-Z orbit` is giving
 
 # TODO
 
- * Biggest remaining oneshot optimization is to replace `HashMap<Token, ...>` with something more cache-friendly
  * For incremental verifiers, we can do finer-grained dependency tracking
  * There's no grammatical parser or outline inference just yet
- * Might want to get into some proof model stufff?
+ * Might want to get into some proof model stuff?
