@@ -8,12 +8,14 @@ use parser::NO_STATEMENT;
 use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
+use parser::SegmentRef;
 use parser::StatementAddress;
 use parser::StatementRef;
 use parser::StatementType;
 use parser::TokenPtr;
 use scopeck::ExprFragment;
 use scopeck::Frame;
+use scopeck::Hyp;
 use scopeck::ScopeReader;
 use scopeck::ScopeResult;
 use scopeck::ScopeUsage;
@@ -43,6 +45,7 @@ struct StackSlot {
 }
 
 struct VerifyState<'a> {
+    this_seg: SegmentRef<'a>,
     order: &'a SegmentOrder,
     nameset: &'a Nameset,
     scoper: ScopeReader<'a>,
@@ -62,35 +65,51 @@ fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
 }
 
 // the initial hypotheses are accessed directly to avoid having to look up their names
-fn prepare_hypotheses(state: &mut VerifyState) {
-    for hyp in &state.cur_frame.hypotheses {
-        let mut vars = Bitset::new();
-        let tos = state.stack_buffer.len();
+fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
+    let mut vars = Bitset::new();
+    let tos = state.stack_buffer.len();
 
-        for part in &hyp.expr.tail {
-            match *part {
-                ExprFragment::Var(ix) => {
-                    fast_extend(&mut state.stack_buffer,
-                                state.nameset.atom_name(state.cur_frame.var_list[ix]));
-                    vars.set_bit(ix); // and we have prior knowledge it's identity mapped
-                    *state.stack_buffer.last_mut().unwrap() |= 0x80;
-                }
-                ExprFragment::Constant(ref string) => {
-                    fast_extend(&mut state.stack_buffer,
-                                &state.cur_frame.const_pool[string.clone()]);
-                }
+    for part in &hyp.expr.tail {
+        match *part {
+            ExprFragment::Var(ix) => {
+                fast_extend(&mut state.stack_buffer,
+                            state.nameset.atom_name(state.cur_frame.var_list[ix]));
+                vars.set_bit(ix); // and we have prior knowledge it's identity mapped
+                *state.stack_buffer.last_mut().unwrap() |= 0x80;
+            }
+            ExprFragment::Constant(ref string) => {
+                fast_extend(&mut state.stack_buffer,
+                            &state.cur_frame.const_pool[string.clone()]);
             }
         }
-
-        let ntos = state.stack_buffer.len();
-        state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
     }
+
+    let ntos = state.stack_buffer.len();
+    state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
+}
+
+/// Adds a named $e hypothesis to the prepared array.  These are not kept in the frame
+/// array due to infrequent use, so other measures are needed.
+fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
+    for hyp in &state.cur_frame.hypotheses {
+        if hyp.is_float {
+            continue;
+        }
+        assert!(hyp.address.segment_id == state.this_seg.id);
+        if state.this_seg.statement(hyp.address.index).label() == label {
+            prepare_hypothesis(state, hyp);
+            return None;
+        }
+    }
+    return Some(Diagnostic::StepMissing(label.to_owned()));
 }
 
 fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
     let frame = match state.scoper.get(label) {
         Some(fp) => fp,
-        None => return Some(Diagnostic::StepMissing(label.to_owned())),
+        None => {
+            return prepare_named_hyp(state, label);
+        }
     };
 
     let valid = frame.valid;
@@ -329,7 +348,9 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Opti
     if stmt.proof_slice_at(0) == b"(" {
         let mut i = 1;
 
-        prepare_hypotheses(state);
+        for hyp in &cur_frame.hypotheses {
+            prepare_hypothesis(state, hyp);
+        }
 
         loop {
             if i >= stmt.proof_len() {
@@ -439,7 +460,9 @@ fn verify_segment(sset: &SegmentSet,
                   -> VerifySegment {
     let mut diagnostics = new_map();
     let dummy_frame = Frame::default();
+    let sref = sset.segment(sid);
     let mut state = VerifyState {
+        this_seg: sref,
         scoper: ScopeReader::new(scopes),
         nameset: nset,
         order: &sset.order,
@@ -452,7 +475,6 @@ fn verify_segment(sset: &SegmentSet,
         var2bit: new_map(),
         dv_map: &dummy_frame.optional_dv,
     };
-    let sref = sset.segment(sid);
     for stmt in sref.statement_iter() {
         if let Some(diag) = verify_proof(&mut state, stmt) {
             diagnostics.insert(stmt.address(), diag);

@@ -525,7 +525,6 @@ fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>)
         return;
     }
     if let Some(expr) = check_eap(state, sref) {
-        construct_stub_frame(state, sref, latom.unwrap(), &expr);
         state.local_essen.push(LocalEssentialInfo {
             valid: sref.scope_range(),
             label: sref.label(),
