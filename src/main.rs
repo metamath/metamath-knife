@@ -1,7 +1,11 @@
+#![cfg_attr(feature = "sysalloc", feature(alloc_system))]
 #[macro_use]
 extern crate clap;
 extern crate filetime;
 extern crate fnv;
+
+#[cfg(feature = "sysalloc")]
+extern crate alloc_system;
 
 mod bit_set;
 mod database;

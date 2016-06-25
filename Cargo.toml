@@ -8,6 +8,9 @@ clap = "2.5.2"
 filetime = "0.1.10"
 fnv = "1.0.2"
 
+[features]
+sysalloc = []
+
 [profile]
 
 [profile.release]
