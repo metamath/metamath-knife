@@ -28,8 +28,17 @@ Alternatively using `cargo install`:
     (while sleep 5; do echo; done) | target/release/smetamath --timing --jobs 4 --split --repeat --trace-recalc --verify set.mm/set.mm
     # then make small changes to the beginning, end, or middle of the DB and observe how behavior changes
 
-# TODO
+## License
 
- * For incremental verifiers, we can do finer-grained dependency tracking
- * There's no grammatical parser or outline inference just yet
- * Might want to get into some proof model stuff?
+Licensed under either of
+
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.
