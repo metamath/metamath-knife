@@ -6,6 +6,13 @@ use std::fmt::Display;
 use std::mem;
 use std::sync::Arc;
 
+#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+pub enum DiagnosticClass {
+    Parse,
+    Scope,
+    Verify,
+}
+
 #[derive(Debug,Clone,Eq,PartialEq)]
 pub enum Diagnostic {
     BadCharacter(usize, u8),

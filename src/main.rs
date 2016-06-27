@@ -1,3 +1,7 @@
+//! A library for manipulating [Metamath](http://us.metamath.org/#faq)
+//! databases.  The entry point for all API operations is in the `database`
+//! module, as is a discussion of the data representation.
+#![warn(missing_docs)]
 #![cfg_attr(feature = "sysalloc", feature(alloc_system))]
 #[macro_use]
 extern crate clap;
@@ -7,21 +11,21 @@ extern crate fnv;
 #[cfg(feature = "sysalloc")]
 extern crate alloc_system;
 
-mod bit_set;
-mod database;
-mod diag;
-mod nameck;
-mod parser;
-mod scopeck;
-mod segment_set;
-mod util;
-mod verify;
+pub mod bit_set;
+pub mod database;
+pub mod diag;
+pub mod nameck;
+pub mod parser;
+pub mod scopeck;
+pub mod segment_set;
+pub mod util;
+pub mod verify;
 
 use clap::Arg;
 use clap::App;
 use database::Database;
 use database::DbOptions;
-use database::DiagnosticClass;
+use diag::DiagnosticClass;
 use diag::Notation;
 use std::io;
 use std::mem;
@@ -64,7 +68,6 @@ fn main() {
     let mut options = DbOptions::default();
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
-    options.verify = matches.is_present("verify");
     options.trace_recalc = matches.is_present("trace-recalc");
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))

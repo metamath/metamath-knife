@@ -1,6 +1,17 @@
+//! Mini-library for an optimized `HashSet<usize>` which reduces to bit
+//! operations for a small universe.
+//!
+//! The current implementation falls back to bit operations on a large dense
+//! array, which would be problematic if sparse; however, this is used to
+//! support the verifier, and will never see an index larger than ~40 on the
+//! standard set.mm.  (Thus, on a 64-bit build the fallback code doesn't get
+//! exercised at all without special measures.)
+
 use std::ops::BitOrAssign;
 use std::slice;
 
+
+/// A set of variable indices.
 #[derive(Default,Debug)]
 pub struct Bitset {
     head: usize,
@@ -30,6 +41,8 @@ impl Clone for Bitset {
 }
 
 impl Bitset {
+    /// Creates a new empty `Bitset`.  Does not allocate.  Equivalent to
+    /// `Bitset::default()`.
     pub fn new() -> Bitset {
         Bitset {
             head: 0,
@@ -51,6 +64,7 @@ impl Bitset {
         self.tail.as_mut().unwrap()
     }
 
+    /// Adds a single bit to a set.
     pub fn set_bit(&mut self, bit: usize) {
         if bit < bits_per_word() {
             self.head |= 1 << bit;
@@ -64,6 +78,7 @@ impl Bitset {
         }
     }
 
+    /// Tests a set for a specific bit.
     pub fn has_bit(&self, bit: usize) -> bool {
         if bit < bits_per_word() {
             (self.head & (1 << bit)) != 0
@@ -108,6 +123,7 @@ impl<'a> IntoIterator for &'a Bitset {
     }
 }
 
+/// Iterator for set bits in a bitset.
 pub struct BitsetIter<'a> {
     bits: usize,
     offset: usize,
