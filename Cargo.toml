@@ -3,7 +3,7 @@ authors = ["Stefan O'Rear <sorear2@gmail.com>"]
 license = "MIT/Apache-2.0"
 name = "smetamath"
 readme = "README.md"
-version = "3.0.0"
+version = "3.0.1-1"
 description = "A parallel and incremental verifier for Metamath databases"
 repository = "https://github.com/sorear/smetamath-rs"
 
