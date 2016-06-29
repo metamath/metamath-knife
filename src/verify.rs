@@ -25,6 +25,7 @@ use segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
+use std::result;
 use std::sync::Arc;
 use std::u32;
 use std::usize;
@@ -61,6 +62,8 @@ struct VerifyState<'a> {
     dv_map: &'a [Bitset],
 }
 
+type Result<T> = result::Result<T, Diagnostic>;
+
 fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
     let nbit = state.var2bit.len();
     *state.var2bit.entry(token).or_insert(nbit)
@@ -95,7 +98,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the frame
 /// array due to infrequent use, so other measures are needed.
-fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
+fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
     for hyp in &*state.cur_frame.hypotheses {
         if hyp.is_float() {
             continue;
@@ -103,13 +106,13 @@ fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnos
         assert!(hyp.address.segment_id == state.this_seg.id);
         if state.this_seg.statement(hyp.address.index).label() == label {
             prepare_hypothesis(state, hyp);
-            return None;
+            return Ok(());
         }
     }
-    return Some(Diagnostic::StepMissing(copy_token(label)));
+    return Err(Diagnostic::StepMissing(copy_token(label)));
 }
 
-fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> {
+fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
     let frame = match state.scoper.get(label) {
         Some(fp) => fp,
         None => {
@@ -120,12 +123,12 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
     let valid = frame.valid;
     let pos = state.cur_frame.valid.start;
     if state.order.cmp(&pos, &valid.start) != Ordering::Greater {
-        return Some(Diagnostic::StepUsedBeforeDefinition(copy_token(label)));
+        return Err(Diagnostic::StepUsedBeforeDefinition(copy_token(label)));
     }
 
     if valid.end != NO_STATEMENT {
         if pos.segment_id != valid.start.segment_id || pos.index >= valid.end {
-            return Some(Diagnostic::StepUsedAfterScope(copy_token(label)));
+            return Err(Diagnostic::StepUsedAfterScope(copy_token(label)));
         }
     }
 
@@ -145,7 +148,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Option<Diagnostic> 
             .push(PreparedStep::Hyp(vars, frame.target.typecode, tos..ntos));
     }
 
-    return None;
+    return Ok(());
 }
 
 fn do_substitute(target: &mut Vec<u8>,
@@ -210,9 +213,9 @@ fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) ->
     out
 }
 
-fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
+fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
     if index >= state.prepared.len() {
-        return Some(Diagnostic::StepOutOfRange);
+        return Err(Diagnostic::StepOutOfRange);
     }
 
     let fref = match state.prepared[index] {
@@ -222,13 +225,13 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
                 code: code,
                 expr: expr.clone(),
             });
-            return None;
+            return Ok(());
         }
         PreparedStep::Assert(fref) => fref,
     };
 
     if state.stack.len() < fref.hypotheses.len() {
-        return Some(Diagnostic::ProofUnderflow);
+        return Err(Diagnostic::ProofUnderflow);
     }
     let sbase = state.stack.len() - fref.hypotheses.len();
 
@@ -247,9 +250,9 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
         // schedule a memory ref and nice predicable branch before the ugly branch
         if slot.code != hyp.expr.typecode {
             if hyp.is_float() {
-                return Some(Diagnostic::StepFloatWrongType);
+                return Err(Diagnostic::StepFloatWrongType);
             } else {
-                return Some(Diagnostic::StepEssenWrongType);
+                return Err(Diagnostic::StepEssenWrongType);
             }
         }
 
@@ -261,7 +264,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
                                  &hyp.expr,
                                  &state.subst_info,
                                  &state.stack_buffer) {
-                return Some(Diagnostic::StepEssenWrong);
+                return Err(Diagnostic::StepEssenWrong);
             }
         }
     }
@@ -285,36 +288,36 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Option<Diagnostic> {
         for var1 in &state.subst_info[ix1].1 {
             for var2 in &state.subst_info[ix2].1 {
                 if var1 >= state.dv_map.len() || !state.dv_map[var1].has_bit(var2) {
-                    return Some(Diagnostic::ProofDvViolation);
+                    return Err(Diagnostic::ProofDvViolation);
                 }
             }
         }
     }
 
-    return None;
+    return Ok(());
 }
 
-fn finalize_step(state: &mut VerifyState) -> Option<Diagnostic> {
+fn finalize_step(state: &mut VerifyState) -> Result<()> {
     if state.stack.len() == 0 {
-        return Some(Diagnostic::ProofNoSteps);
+        return Err(Diagnostic::ProofNoSteps);
     }
     if state.stack.len() > 1 {
-        return Some(Diagnostic::ProofExcessEnd);
+        return Err(Diagnostic::ProofExcessEnd);
     }
     let tos = state.stack.last().unwrap();
 
     if tos.code != state.cur_frame.target.typecode {
-        return Some(Diagnostic::ProofWrongTypeEnd);
+        return Err(Diagnostic::ProofWrongTypeEnd);
     }
 
     fast_clear(&mut state.temp_buffer);
     do_substitute_raw(&mut state.temp_buffer, &state.cur_frame, state.nameset);
 
     if state.stack_buffer[tos.expr.clone()] != state.temp_buffer[..] {
-        return Some(Diagnostic::ProofWrongExprEnd);
+        return Err(Diagnostic::ProofWrongExprEnd);
     }
 
-    None
+    Ok(())
 }
 
 fn save_step(state: &mut VerifyState) {
@@ -323,16 +326,16 @@ fn save_step(state: &mut VerifyState) {
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
-fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Option<Diagnostic> {
+fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Result<()> {
     // only intend to check $p statements
     if stmt.statement.stype != StatementType::Provable {
-        return None;
+        return Ok(());
     }
 
     // no valid frame -> no use checking
     // may wish to record a secondary error?
     let cur_frame = match state.scoper.get(stmt.label()) {
-        None => return None,
+        None => return Ok(()),
         Some(x) => x,
     };
 
@@ -357,7 +360,7 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Opti
 
         loop {
             if i >= stmt.proof_len() {
-                return Some(Diagnostic::ProofUnterminatedRoster);
+                return Err(Diagnostic::ProofUnterminatedRoster);
             }
             let chunk = stmt.proof_slice_at(i);
             i += 1;
@@ -366,9 +369,7 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Opti
                 break;
             }
 
-            if let Some(err) = prepare_step(state, chunk) {
-                return Some(err);
-            }
+            try!(prepare_step(state, chunk));
         }
 
         let mut k = 0usize;
@@ -378,59 +379,51 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Opti
             for &ch in chunk {
                 if ch >= b'A' && ch <= b'T' {
                     k = k * 20 + (ch - b'A') as usize;
-                    if let Some(err) = execute_step(state, k) {
-                        return Some(err);
-                    }
+                    try!(execute_step(state, k));
                     k = 0;
                     can_save = true;
                 } else if ch >= b'U' && ch <= b'Y' {
                     k = k * 5 + 1 + (ch - b'U') as usize;
                     if k >= (u32::max_value() as usize / 20) - 1 {
-                        return Some(Diagnostic::ProofMalformedVarint);
+                        return Err(Diagnostic::ProofMalformedVarint);
                     }
                     can_save = false;
                 } else if ch == b'Z' {
                     if !can_save {
-                        return Some(Diagnostic::ProofInvalidSave);
+                        return Err(Diagnostic::ProofInvalidSave);
                     }
                     save_step(state);
                     can_save = false;
                 } else if ch == b'?' {
                     if k > 0 {
-                        return Some(Diagnostic::ProofMalformedVarint);
+                        return Err(Diagnostic::ProofMalformedVarint);
                     }
-                    return Some(Diagnostic::ProofIncomplete);
+                    return Err(Diagnostic::ProofIncomplete);
                 }
             }
             i += 1;
         }
 
         if k > 0 {
-            return Some(Diagnostic::ProofMalformedVarint);
+            return Err(Diagnostic::ProofMalformedVarint);
         }
     } else {
         let mut count = 0;
         for i in 0..stmt.proof_len() {
             let chunk = stmt.proof_slice_at(i);
             if chunk == b"?" {
-                return Some(Diagnostic::ProofIncomplete);
+                return Err(Diagnostic::ProofIncomplete);
             } else {
-                if let Some(err) = prepare_step(state, chunk) {
-                    return Some(err);
-                }
-                if let Some(err) = execute_step(state, count) {
-                    return Some(err);
-                }
+                try!(prepare_step(state, chunk));
+                try!(execute_step(state, count));
                 count += 1;
             }
         }
     }
 
-    if let Some(err) = finalize_step(state) {
-        return Some(err);
-    }
+    try!(finalize_step(state));
 
-    return None;
+    return Ok(());
 }
 
 struct VerifySegment {
@@ -479,7 +472,7 @@ fn verify_segment(sset: &SegmentSet,
         dv_map: &dummy_frame.optional_dv,
     };
     for stmt in sref.statement_iter() {
-        if let Some(diag) = verify_proof(&mut state, stmt) {
+        if let Err(diag) = verify_proof(&mut state, stmt) {
             diagnostics.insert(stmt.address(), diag);
         }
     }
