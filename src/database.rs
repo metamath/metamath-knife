@@ -435,10 +435,15 @@ impl Database {
         });
     }
 
+    /// Obtains a reference to the current parsed data.
+    ///
+    /// Unlike the other accessors, this is not lazy (subject to change when the
+    /// modification API goes in.)
     pub fn parse_result(&mut self) -> &Arc<SegmentSet> {
         self.segments.as_ref().unwrap()
     }
 
+    /// Calculates and returns the name to definition lookup table.
     pub fn name_result(&mut self) -> &Arc<Nameset> {
         if self.nameset.is_none() {
             time(&self.options.clone(), "nameck", || {
@@ -457,6 +462,11 @@ impl Database {
         self.nameset.as_ref().unwrap()
     }
 
+    /// Calculates and returns the frames for this database, i.e. the actual
+    /// logical system.
+    ///
+    /// All logical properties of the database (as opposed to surface syntactic
+    /// properties) can be obtained from this object.
     pub fn scope_result(&mut self) -> &Arc<ScopeResult> {
         if self.scopes.is_none() {
             self.name_result();
@@ -478,6 +488,10 @@ impl Database {
         self.scopes.as_ref().unwrap()
     }
 
+    /// Calculates and returns verification information for the database.
+    ///
+    /// This is an optimized verifier which returns no useful information other
+    /// than error diagnostics.  It does not save any parsed proof data.
     pub fn verify_result(&mut self) -> &Arc<VerifyResult> {
         if self.verify.is_none() {
             self.name_result();
@@ -500,6 +514,14 @@ impl Database {
         self.verify.as_ref().unwrap()
     }
 
+    /// Runs one or more passes and collects all errors they generate.
+    ///
+    /// Passes are identified by the `types` argument and are not inclusive; if
+    /// you ask for Verify, you will not get Parse unless you specifically ask
+    /// for that as well.
+    ///
+    /// Currently there is no way to incrementally fetch diagnostics, so this
+    /// will be a bit slow if there are thousands of errors.
     pub fn diag_notations(&mut self, types: Vec<DiagnosticClass>) -> Vec<Notation> {
         let mut diags = Vec::new();
         if types.contains(&DiagnosticClass::Parse) {

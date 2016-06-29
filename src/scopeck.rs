@@ -695,10 +695,13 @@ pub struct SegmentScopeResult {
     frames_out: Vec<Frame>,
 }
 
-pub fn scope_check_single(names: &Nameset, seg: SegmentRef) -> SegmentScopeResult {
+pub fn scope_check_single(sset: &SegmentSet,
+                          names: &Nameset,
+                          seg: SegmentRef)
+                          -> SegmentScopeResult {
     let mut state = ScopeState {
         diagnostics: new_map(),
-        order: &names.order,
+        order: &sset.order,
         nameset: names,
         gnames: NameReader::new(names),
         local_vars: new_map(),
@@ -789,7 +792,7 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
                     println!("scopeck({:?})",
                              parser::guess_buffer_name(&sref.segment.buffer));
                 }
-                Some(Arc::new(scope_check_single(&names, sref)))
+                Some(Arc::new(scope_check_single(&segments2, &names, sref)))
             }));
         }
     }

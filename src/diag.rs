@@ -1,3 +1,9 @@
+//! Datatypes to represent diagnostics emitted by smetamath analysis passes.
+//!
+//! This includes an enum-based representation suited for programmatic
+//! interpretation and testing, as well as a mostly-text representation which
+//! can be used for various human-readable outputs.
+
 use parser::{Comparer, Span, StatementIndex, StatementAddress, StatementRef, Token, TokenIndex,
              TokenAddress};
 use segment_set::SegmentSet;
@@ -6,14 +12,29 @@ use std::fmt::Display;
 use std::mem;
 use std::sync::Arc;
 
+/// List of passes that generate diagnostics, for use with the
+/// `Database::diag_notations` filter.
 #[derive(Copy,Clone,Eq,PartialEq,Debug)]
 pub enum DiagnosticClass {
+    /// Parse errors, which can be observed from a single statement in
+    /// isolation.
     Parse,
+    /// Scope errors are mostly inter-statement consistency checks which
+    /// invalidate the logical interpretation of a statement.
     Scope,
+    /// Verify errors do not invalidate the interpretation of statements, but
+    /// affect only proofs.
     Verify,
 }
 
+/// List of all diagnostic codes.  For a description of each, see the source of
+/// `to_annotations`.
+///
+/// Each diagnostic applies to precisely one statement.  Some diagnostics
+/// reference statements other than the one they are attached to; the fanout is
+/// handled by to_annotations.
 #[derive(Debug,Clone,Eq,PartialEq)]
+#[allow(missing_docs)]
 pub enum Diagnostic {
     BadCharacter(usize, u8),
     BadCommentEnd(Span, Span),
@@ -74,22 +95,42 @@ pub enum Diagnostic {
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
 }
 
+/// An indication of the severity of a notation.
 #[derive(Copy,Clone,Debug)]
 pub enum Level {
+    /// Notes indicate other statements relevant to an error which is primarily
+    /// elsewhere.
     Note,
+    /// Warnings indicate constructs which are defined by the spec but also
+    /// forbidden by the spec, as well as issues with non-spec extensions.
     Warning,
+    /// Errors are forbidden by the spec and invalidate the logical content of
+    /// the database.
     Error,
 }
 use self::Level::*;
 
+/// A notation is a human-readable description of a diagnostic, with a single
+/// structure, named fields, and identifying a single source location.
 pub struct Notation {
+    /// Reference to source data, including the filename and text which could be
+    /// used to calculate line numbers or print an invalid excerpt.
     pub source: Arc<SourceInfo>,
+    /// A message for the diagnostic, which may contain `{placeholders}`.  The
+    /// message will be in English but, being not dynamically generated, it is
+    /// suitable for remapping with a resource file.
     pub message: &'static str,
+    /// The location of the error (byte offset within the SourceInfo; _this is
+    /// not the same as the byte offset in the file_).
     pub span: Span,
+    /// Severity level of the message
     pub level: Level,
+    /// Values to substitute for the `{placeholders}` in the message.  `String`
+    /// could be replaced with a richer enum.
     pub args: Vec<(&'static str, String)>,
 }
 
+/// Converts a collection of raw diagnostics to a notation list before output.
 pub fn to_annotations(sset: &SegmentSet,
                       mut diags: Vec<(StatementAddress, Diagnostic)>)
                       -> Vec<Notation> {

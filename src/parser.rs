@@ -1,3 +1,19 @@
+//! Implementation of the low-level statement parser for Metamath databases.
+//!
+//! The parser identifies the boundaries between statements, extracts their math
+//! strings and proofs, does basic validity checking within statements, and
+//! extracts a list of definitions which can be indexed by nameck.  This module
+//! also defines the core datatypes used to represent source positions and
+//! parsed statements, which are used by other analysis passes.
+//!
+//! Analysis passes are not a stable interface; use `Database` instead.
+//!
+//! The input of the parser is a byte string, which will typically consist of a
+//! file except when the preparser is used; see the `database` module
+//! documentation.  The output is one or more segments; the parser is
+//! responsible for detecting includes and splitting statements appropriately,
+//! although responsibility for following includes rests on the `segment_set`.
+
 use diag::Diagnostic;
 use std::cmp;
 use std::cmp::Ordering;
@@ -6,19 +22,48 @@ use std::slice;
 use std::str;
 use std::sync::Arc;
 
+/// Shared reference to a buffer which will be parsed.
+///
+/// We use `u8` throughout the parser because Metamath databases are limited to
+/// US-ASCII by the spec.  Since math symbols are used as tokens, if we wanted
+/// to allow UTF-8 in the future it would be best to continue using `u8`,
+/// although there would need to be a validity check (valid UTF-8 encodings are
+/// always canonical) in `Scanner::get_raw` and the eighth-bit hack in
+/// `scan_expression` would need to be reverted.
 pub type BufferRef = Arc<Vec<u8>>;
-/// change me if you want to parse files > 4GB
-pub type FilePos = u32;
-pub type StatementIndex = i32;
-pub const NO_STATEMENT: StatementIndex = -1; // TODO: evaluate just using Option
 
+/// Semantic type for positions in files.
+///
+/// Due to the use of half-open ranges, input files are limited to 4 GiB - 1.
+pub type FilePos = u32;
+
+/// Semantic type for statement indices.
+///
+/// Since the shortest possible statement is three bytes, this cannot overflow
+/// before `FilePos` does.
+///
+/// smetamath3 uses SMM2 statement numbering semantics, and counts all
+/// statements from the spec (including group open and group close), as well as
+/// counting comments as their own statements.
+pub type StatementIndex = i32;
+
+/// Constant used in valid ranges to indicate the logical end of the database.
+pub const NO_STATEMENT: StatementIndex = -1;
+
+/// Semantic type for file-position ranges.
+///
+/// Spans will generally not be empty.  An empty span at position 0 is called a
+/// null span used as a sentinel value by several functions.
 #[derive(Copy,Clone,Eq,PartialEq,Debug,Default)]
 pub struct Span {
+    /// Index of first character of the range.
     pub start: FilePos,
+    /// Index one past last character of the range.
     pub end: FilePos,
 }
 
 impl Span {
+    /// Coercion from array index pairs.
     pub fn new(start: usize, end: usize) -> Span {
         Span {
             start: start as FilePos,
@@ -33,25 +78,53 @@ impl Span {
         }
     }
 
+    /// Returns the null span.
     pub fn null() -> Span {
         Span::new(0, 0)
     }
 
+    /// Checks for the null span, i.e. zero length at offset zero.
     pub fn is_null(self) -> bool {
         self.end == 0
     }
 
+    /// Given a position span, extract the corresponding characters from a
+    /// buffer.
     pub fn as_ref(self, buf: &[u8]) -> &[u8] {
         &buf[self.start as usize..self.end as usize]
     }
 }
 
+/// Semantic type for segment identifiers, as an opacified integer.
+///
+/// Since segment identifiers are reused between incremental runs, and new
+/// segments can be inserted between any two existing segments, the internal
+/// numeric order of segment identifiers need not mean anything at all and is
+/// not exposed.  If you need to compare segment identifiers for order, get a
+/// reference to the database's `SegmentOrder` object.
 #[derive(Copy,Clone,Debug,Eq,PartialEq,Hash,Default)]
 pub struct SegmentId(pub u32);
+
+/// Semantic type for the index of a token in a statement.
+///
+/// Each token consumes at least two characters, plus a three-byte keyword and
+/// space to introduce the math string at the beginning of the file, so this
+/// cannot overflow for files of valid length.
 pub type TokenIndex = i32;
 
-// This is an example of an "order-maintenance data structure", actually a very simple one.
-// We can plug in the Dietz & Sleator 1987 algorithm if this gets too slow.
+/// Data structure which tracks the logical order of segment IDs, since they are
+/// not intrinsically ordered.
+///
+/// This is an example of an "order-maintenance data structure", actually a very
+/// simple one. We can plug in the Dietz & Sleator 1987 algorithm if this gets
+/// too slow.
+///
+/// IDs are never reused after being released from the order, so they can be
+/// used safely as part of change-tracking structures.
+///
+/// SegmentOrder implements the `Comparer` trait, allowing it to be used
+/// polymorphically with the `cmp` method to order lists of segments,
+/// statements, or tokens.
 #[derive(Clone,Debug,Default)]
 pub struct SegmentOrder {
     high_water: u32,
@@ -60,6 +133,7 @@ pub struct SegmentOrder {
 }
 
 impl SegmentOrder {
+    /// Creates a new empty segment ordering.
     pub fn new() -> Self {
         let mut n = SegmentOrder {
             high_water: 1,
@@ -72,6 +146,8 @@ impl SegmentOrder {
         n
     }
 
+    /// Each segment ordering has a single ID which will not be used otherwise;
+    /// pass this to `new_before` to get an ID larger than all created IDs.
     pub fn start(&self) -> SegmentId {
         SegmentId(1)
     }
@@ -90,6 +166,10 @@ impl SegmentOrder {
         }
     }
 
+    /// Indicates that an ID will no longer be used, allowing some memory to be
+    /// freed.
+    ///
+    /// The ID itself will not be reissued.
     pub fn free_id(&mut self, id: SegmentId) {
         self.order.remove(self.reverse[id.0 as usize] as usize);
         self.reindex();
@@ -102,6 +182,8 @@ impl SegmentOrder {
     //     id
     // }
 
+    /// Gets a new ID, and adds it to the order before the named ID, or at the
+    /// end if you pass `start()`.
     pub fn new_before(&mut self, after: SegmentId) -> SegmentId {
         let id = self.alloc_id();
         self.order.insert(self.reverse[after.0 as usize] as usize, id);
@@ -110,7 +192,10 @@ impl SegmentOrder {
     }
 }
 
+/// A trait for objects which can be used to order other datatypes.
 pub trait Comparer<T> {
+    /// Compares two objects, like `Ord::cmp`, but with additional state data
+    /// from the comparer that can be used for the ordering.
     fn cmp(&self, left: &T, right: &T) -> Ordering;
 }
 
@@ -140,13 +225,17 @@ impl<'a, T, C: Comparer<T>> Comparer<T> for &'a C {
     }
 }
 
+/// A statement is located by giving its segment and index within the segment.
 #[derive(Copy,Clone,Eq,PartialEq,Hash,Debug,Default)]
 pub struct StatementAddress {
+    /// Segment which contains the statement.
     pub segment_id: SegmentId,
+    /// Zero-based index of the statement.
     pub index: StatementIndex,
 }
 
 impl StatementAddress {
+    /// Constructs a statement address from its parts.
     pub fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
         StatementAddress {
             segment_id: segment_id,
@@ -156,6 +245,8 @@ impl StatementAddress {
 }
 
 impl StatementAddress {
+    /// Convert a statement address into a statement range from here to the
+    /// logical end of the database.
     pub fn unbounded_range(self) -> GlobalRange {
         GlobalRange {
             start: self,
@@ -164,13 +255,21 @@ impl StatementAddress {
     }
 }
 
+/// A token is located within a $c or $v by giving the address of the declaring
+/// statement and the zero-based index within the math string.
+///
+/// In most cases you will use `Atom` instead, so the size of this struct, while
+/// a bit silly, doesn't matter so much.
 #[derive(Copy,Clone,Eq,PartialEq,Debug,Default)]
 pub struct TokenAddress {
+    /// Address of the statement in which the token is defined.
     pub statement: StatementAddress,
+    /// Index of the token within the defining statement's math string.
     pub token_index: TokenIndex,
 }
 
 impl TokenAddress {
+    /// Constructs a token address from parts.
     pub fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
         TokenAddress {
             statement: StatementAddress::new(segment_id, index),
@@ -1048,8 +1147,11 @@ fn is_valid_label(label: &[u8]) -> bool {
     true
 }
 
-// this is a kinda set.mm specific hack, but ok
-// look for the first indented line in the first 500 bytes
+/// Slightly set.mm specific hack to extract a section name from a byte buffer.
+///
+/// This is run before parsing so it can't take advantage of comment extraction;
+/// instead we look for the first indented line, within a heuristic limit of 500
+/// bytes.
 pub fn guess_buffer_name(buffer: &[u8]) -> &str {
     let buffer = &buffer[0..cmp::min(500, buffer.len())];
     let mut index = 0;
@@ -1114,6 +1216,10 @@ pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
     }
 }
 
+/// Creates a new empty segment as a container for an I/O error.
+///
+/// Every error must be associated with a statement in our design, so associate
+/// it with the EOF statement of a zero-length segment.
 pub fn dummy_segment(diag: Diagnostic) -> Arc<Segment> {
     let mut seg = parse_segments(&Arc::new(Vec::new())).pop().unwrap();
     Arc::get_mut(&mut seg).unwrap().diagnostics.push((0, diag));
