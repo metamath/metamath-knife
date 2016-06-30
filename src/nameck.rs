@@ -18,17 +18,27 @@
 //! The nameset is also responsible for maintaining the `Atom` table.
 
 use database::DbOptions;
+use parser::Comparer;
+use parser::copy_token;
+use parser::Segment;
+use parser::SegmentId;
+use parser::SegmentOrder;
+use parser::SegmentRef;
+use parser::StatementAddress;
+use parser::SymbolType;
+use parser::Token;
+use parser::TokenAddress;
+use parser::TokenPtr;
+use segment_set::SegmentSet;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::u32;
-use parser::{Comparer, copy_token, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress,
-             SymbolType, Token, TokenAddress, TokenPtr};
-use segment_set::SegmentSet;
 use util;
 use util::HashMap;
 use util::HashSet;
 use util::new_set;
+
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 

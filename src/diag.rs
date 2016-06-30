@@ -4,8 +4,14 @@
 //! interpretation and testing, as well as a mostly-text representation which
 //! can be used for various human-readable outputs.
 
-use parser::{Comparer, Span, StatementIndex, StatementAddress, StatementRef, Token, TokenIndex,
-             TokenAddress};
+use parser::Comparer;
+use parser::Span;
+use parser::StatementAddress;
+use parser::StatementIndex;
+use parser::StatementRef;
+use parser::Token;
+use parser::TokenAddress;
+use parser::TokenIndex;
 use segment_set::SegmentSet;
 use segment_set::SourceInfo;
 use std::fmt::Display;
