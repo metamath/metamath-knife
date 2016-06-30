@@ -74,17 +74,14 @@ fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: A) {
     slot.retain(|x| x.0 != address);
 }
 
-fn autoviv<K, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V
-    where K: Hash + Eq
-{
+fn autoviv<K: Hash + Eq, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V {
     map.entry(key).or_insert_with(Default::default)
 }
 
 fn deviv<K, Q: ?Sized, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
     where F: FnOnce(&mut V),
-          K: Borrow<Q>,
+          K: Borrow<Q> + Hash + Eq,
           Q: Hash + Eq,
-          K: Hash + Eq,
           V: Default + Eq
 {
     let kill = match map.get_mut(key) {
@@ -127,10 +124,9 @@ struct AtomTable {
 fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
     let next = Atom(table.table.len() as u32 + 1);
     assert!(next.0 < u32::max_value(), "atom table overflowed");
-    match table.table.get(tok) {
-        None => {}
-        Some(atom) => return *atom,
-    };
+    if let Some(atom) = table.table.get(tok) {
+        return *atom;
+    }
     table.table.insert(copy_token(tok), next);
     if table.reverse.len() == 0 {
         table.reverse.push(Token::default());
@@ -177,12 +173,9 @@ impl Nameset {
 
         let mut keys_to_remove = Vec::new();
         for (&seg_id, &ref seg) in &self.segments {
-            let stale = match segs.segments.get(&seg_id) {
-                None => true,
-                Some(&(ref seg_new, _)) => !util::ptr_eq::<Segment>(&seg_new, seg),
-            };
-
-            if stale {
+            if segs.segments.get(&seg_id).map_or(true, |&(ref seg_new, _)| {
+                !util::ptr_eq::<Segment>(&seg_new, seg)
+            }) {
                 keys_to_remove.push(seg_id);
             }
         }
@@ -311,7 +304,7 @@ impl Nameset {
     ///
     /// If you don't know about the name, use lookup_symbol instead.
     pub fn get_atom(&self, name: TokenPtr) -> Atom {
-        self.atom_table.table.get(name).cloned().expect("please only use get_atom for local $v")
+        self.atom_table.table.get(name).expect("please only use get_atom for local $v").clone()
     }
 
     /// Map atoms back to names.

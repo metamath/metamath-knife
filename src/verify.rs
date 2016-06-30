@@ -14,9 +14,9 @@ use parser::StatementAddress;
 use parser::StatementRef;
 use parser::StatementType;
 use parser::TokenPtr;
+use scopeck;
 use scopeck::ExprFragment;
 use scopeck::Frame;
-use scopeck::Hyp;
 use scopeck::ScopeReader;
 use scopeck::ScopeResult;
 use scopeck::ScopeUsage;
@@ -40,6 +40,7 @@ enum PreparedStep<'a> {
     Hyp(Bitset, Atom, Range<usize>),
     Assert(&'a Frame),
 }
+use self::PreparedStep::*;
 
 struct StackSlot {
     vars: Bitset,
@@ -70,7 +71,7 @@ fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
 }
 
 // the initial hypotheses are accessed directly to avoid having to look up their names
-fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
+fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a scopeck::Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
 
@@ -93,7 +94,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a Hyp) {
     }
 
     let ntos = state.stack_buffer.len();
-    state.prepared.push(PreparedStep::Hyp(vars, hyp.expr.typecode, tos..ntos));
+    state.prepared.push(Hyp(vars, hyp.expr.typecode, tos..ntos));
 }
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the frame
@@ -133,7 +134,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
     }
 
     if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
-        state.prepared.push(PreparedStep::Assert(frame));
+        state.prepared.push(Assert(frame));
     } else {
         let mut vars = Bitset::new();
 
@@ -145,7 +146,7 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
         fast_extend(&mut state.stack_buffer, &frame.stub_expr);
         let ntos = state.stack_buffer.len();
         state.prepared
-            .push(PreparedStep::Hyp(vars, frame.target.typecode, tos..ntos));
+            .push(Hyp(vars, frame.target.typecode, tos..ntos));
     }
 
     return Ok(());
@@ -219,7 +220,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
     }
 
     let fref = match state.prepared[index] {
-        PreparedStep::Hyp(ref vars, code, ref expr) => {
+        Hyp(ref vars, code, ref expr) => {
             state.stack.push(StackSlot {
                 vars: vars.clone(),
                 code: code,
@@ -227,7 +228,7 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
             });
             return Ok(());
         }
-        PreparedStep::Assert(fref) => fref,
+        Assert(fref) => fref,
     };
 
     if state.stack.len() < fref.hypotheses.len() {
@@ -322,7 +323,7 @@ fn finalize_step(state: &mut VerifyState) -> Result<()> {
 
 fn save_step(state: &mut VerifyState) {
     let top = state.stack.last().expect("can_save should prevent getting here");
-    state.prepared.push(PreparedStep::Hyp(top.vars.clone(), top.code, top.expr.clone()));
+    state.prepared.push(Hyp(top.vars.clone(), top.code, top.expr.clone()));
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error

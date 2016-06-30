@@ -22,11 +22,6 @@ fn bits_per_word() -> usize {
     usize::max_value().count_ones() as usize
 }
 
-#[inline(never)]
-fn clone_slow(arg: &Box<Vec<usize>>) -> Box<Vec<usize>> {
-    arg.clone()
-}
-
 impl Clone for Bitset {
     #[inline]
     fn clone(&self) -> Bitset {
@@ -34,7 +29,7 @@ impl Clone for Bitset {
             head: self.head,
             tail: match self.tail {
                 None => None,
-                Some(ref tail) => Some(clone_slow(&tail)),
+                Some(ref tail) => Some(tail.clone()),
             },
         }
     }
@@ -85,11 +80,7 @@ impl Bitset {
         } else {
             let word = bit / bits_per_word() - 1;
             let tail = self.tail();
-            if word >= tail.len() {
-                false
-            } else {
-                (tail[word] & (1 << (bit & (bits_per_word() - 1)))) != 0
-            }
+            word < tail.len() && (tail[word] & (1 << (bit & (bits_per_word() - 1)))) != 0
         }
     }
 }
@@ -97,8 +88,8 @@ impl Bitset {
 impl<'a> BitOrAssign<&'a Bitset> for Bitset {
     fn bitor_assign(&mut self, rhs: &'a Bitset) {
         self.head |= rhs.head;
-        if !rhs.tail().is_empty() {
-            let rtail = rhs.tail();
+        let rtail = rhs.tail();
+        if !rtail.is_empty() {
             let stail = self.tail_mut();
             if rtail.len() > stail.len() {
                 stail.resize(rtail.len(), 0);

@@ -35,12 +35,10 @@ pub fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
 }
 
 unsafe fn short_copy<T>(src: *const T, dst: *mut T, count: usize) {
-    if count == 2 {
-        ptr::write(dst as *mut [T; 2], ptr::read(src as *const [T; 2]));
-    } else if count == 1 {
-        ptr::write(dst, ptr::read(src));
-    } else {
-        ptr::copy_nonoverlapping(src, dst, count);
+    match count {
+        1 => ptr::write(dst, ptr::read(src)),
+        2 => ptr::write(dst as *mut [T; 2], ptr::read(src as *const [T; 2])),
+        _ => ptr::copy_nonoverlapping(src, dst, count),
     }
 }
 
@@ -134,17 +132,15 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
 
     let mut offset = 0;
     loop {
-        match hunt(buffer) {
-            None => return None,
-            Some(mix) => {
-                match is_real(buffer, mix) {
-                    Some(chap) => return Some(chap + offset),
-                    None => {
-                        buffer = &buffer[mix + 1..];
-                        offset += mix + 1;
-                    }
-                }
+        if let Some(mix) = hunt(buffer) {
+            if let Some(chap) = is_real(buffer, mix) {
+                return Some(chap + offset);
+            } else {
+                buffer = &buffer[mix + 1..];
+                offset += mix + 1;
             }
+        } else {
+            return None;
         }
     }
 }

@@ -135,15 +135,20 @@ pub struct SegmentOrder {
 impl SegmentOrder {
     /// Creates a new empty segment ordering.
     pub fn new() -> Self {
-        let mut n = SegmentOrder {
-            high_water: 1,
-            order: Vec::new(),
-            reverse: Vec::new(),
-        };
-        n.alloc_id();
-        n.order.push(SegmentId(1));
-        n.reindex();
-        n
+        // let mut n = SegmentOrder {
+        //     high_water: 1,
+        //     order: Vec::new(),
+        //     reverse: Vec::new(),
+        // };
+        // n.alloc_id();
+        // n.order.push(SegmentId(1));
+        // n.reindex();
+        // n
+        SegmentOrder {
+            high_water: 2,
+            order: vec![SegmentId(1)],
+            reverse: vec![0; 2],
+        }
     }
 
     /// Each segment ordering has a single ID which will not be used otherwise;
