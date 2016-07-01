@@ -615,8 +615,7 @@ impl<'a> Scanner<'a> {
         #[cold]
         fn badchar(slf: &mut Scanner, ix: usize) -> Span {
             let ch = slf.buffer[ix];
-            let diag = Diagnostic::BadCharacter(ix, ch);
-            slf.diagnostics.push((slf.statement_index, diag));
+            slf.diag(Diagnostic::BadCharacter(ix, ch));
             return slf.get_raw();
         }
 
@@ -967,9 +966,7 @@ impl<'a> Scanner<'a> {
 
         let math_len = self.statement_proof_start - self.statement_math_start;
         match stype {
-            FileInclude => {
-                label = self.get_file_include();
-            }
+            FileInclude => label = self.get_file_include(),
             Disjoint => {
                 // math.len = 1 was caught above
                 if math_len == 1 {
@@ -978,15 +975,14 @@ impl<'a> Scanner<'a> {
                 }
             }
             Floating => {
+                // math_len = 0 was already marked EmptyMathString
                 if math_len != 0 && math_len != 2 {
                     self.diag(Diagnostic::BadFloating);
                     self.invalidated = true;
                 }
             }
-            Invalid => {
-                // eat tokens to the next keyword rather than treating them as labels
-                self.eat_invalid();
-            }
+            // eat tokens to the next keyword rather than treating them as labels
+            Invalid => self.eat_invalid(),
             _ => {}
         }
 
@@ -1023,12 +1019,10 @@ impl<'a> Scanner<'a> {
 
             // TODO record name usage
             match seg.statements[index as usize].stype {
-                OpenGroup => {
-                    top_group = index;
-                }
+                OpenGroup => top_group = index,
                 CloseGroup => {
                     if top_group == NO_STATEMENT {
-                        self.diagnostics.push((index, Diagnostic::UnmatchedCloseGroup));
+                        self.diag(Diagnostic::UnmatchedCloseGroup);
                     } else {
                         seg.statements[top_group as usize].group_end = index;
                         top_group = seg.statements[top_group as usize].group;
@@ -1036,12 +1030,12 @@ impl<'a> Scanner<'a> {
                 }
                 Constant => {
                     if top_group != NO_STATEMENT {
-                        self.diagnostics.push((index, Diagnostic::ConstantNotTopLevel));
+                        self.diag(Diagnostic::ConstantNotTopLevel);
                     }
                 }
                 Essential => {
                     if top_group == NO_STATEMENT {
-                        self.diagnostics.push((index, Diagnostic::EssentialAtTopLevel));
+                        self.diag(Diagnostic::EssentialAtTopLevel);
                     }
                 }
                 FileInclude => {

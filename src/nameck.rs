@@ -495,17 +495,9 @@ impl<'a> NameReader<'a> {
     }
 
     /// Looks up the list of all global $d statements.
-    pub fn lookup_global_dv(&mut self) -> Vec<LookupGlobalDv> {
-        self.nameset
-            .dv_info
-            .iter()
-            .map(|&(addr, ref vars)| {
-                LookupGlobalDv {
-                    address: addr,
-                    vars: &vars,
-                }
-            })
-            .collect()
+    #[inline]
+    pub fn lookup_global_dv(&self) -> &Vec<(StatementAddress, Vec<Atom>)> {
+        &self.nameset.dv_info
     }
 }
 

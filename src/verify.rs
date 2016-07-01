@@ -17,6 +17,7 @@ use parser::TokenPtr;
 use scopeck;
 use scopeck::ExprFragment;
 use scopeck::Frame;
+use scopeck::Hyp::*;
 use scopeck::ScopeReader;
 use scopeck::ScopeResult;
 use scopeck::ScopeUsage;
@@ -84,39 +85,41 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a scopeck::Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
 
-    if hyp.is_float() {
-        fast_extend(&mut state.stack_buffer,
-                    state.nameset.atom_name(state.cur_frame.var_list[hyp.variable_index]));
-        *state.stack_buffer.last_mut().unwrap() |= 0x80;
-        vars.set_bit(hyp.variable_index); // and we have prior knowledge it's identity mapped
-    } else {
-        for part in &*hyp.expr.tail {
+    match hyp {
+        &Floating(_addr, var_index, _typecode) => {
             fast_extend(&mut state.stack_buffer,
-                        &state.cur_frame.const_pool[part.prefix.clone()]);
-            fast_extend(&mut state.stack_buffer,
-                        state.nameset.atom_name(state.cur_frame.var_list[part.var]));
+                        state.nameset.atom_name(state.cur_frame.var_list[var_index]));
             *state.stack_buffer.last_mut().unwrap() |= 0x80;
-            vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
+            vars.set_bit(var_index); // and we have prior knowledge it's identity mapped
         }
-        fast_extend(&mut state.stack_buffer,
-                    &state.cur_frame.const_pool[hyp.expr.rump.clone()]);
+        &Essential(_addr, ref expr) => {
+            for part in &*expr.tail {
+                fast_extend(&mut state.stack_buffer,
+                            &state.cur_frame.const_pool[part.prefix.clone()]);
+                fast_extend(&mut state.stack_buffer,
+                            state.nameset.atom_name(state.cur_frame.var_list[part.var]));
+                *state.stack_buffer.last_mut().unwrap() |= 0x80;
+                vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
+            }
+            fast_extend(&mut state.stack_buffer,
+                        &state.cur_frame.const_pool[expr.rump.clone()]);
+        }
     }
 
     let ntos = state.stack_buffer.len();
-    state.prepared.push(Hyp(vars, hyp.expr.typecode, tos..ntos));
+    state.prepared.push(Hyp(vars, hyp.typecode(), tos..ntos));
 }
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the frame
 /// array due to infrequent use, so other measures are needed.
 fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
     for hyp in &*state.cur_frame.hypotheses {
-        if hyp.is_float() {
-            continue;
-        }
-        assert!(hyp.address.segment_id == state.this_seg.id);
-        if state.this_seg.statement(hyp.address.index).label() == label {
-            prepare_hypothesis(state, hyp);
-            return Ok(());
+        if let &Essential(addr, _) = hyp {
+            assert!(addr.segment_id == state.this_seg.id);
+            if state.this_seg.statement(addr.index).label() == label {
+                prepare_hypothesis(state, hyp);
+                return Ok(());
+            }
         }
     }
     return Err(Diagnostic::StepMissing(copy_token(label)));
@@ -253,22 +256,20 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
         let slot = &state.stack[sbase + ix];
 
         // schedule a memory ref and nice predicable branch before the ugly branch
-        try_assert!(slot.code == hyp.expr.typecode,
-                    if hyp.is_float() {
-                        Diagnostic::StepFloatWrongType
-                    } else {
-                        Diagnostic::StepEssenWrongType
-                    });
-
-        if hyp.is_float() {
-            state.subst_info[hyp.variable_index] = (slot.expr.clone(), slot.vars.clone());
-        } else {
-            try_assert!(do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
-                                         fref,
-                                         &hyp.expr,
-                                         &state.subst_info,
-                                         &state.stack_buffer),
-                        Diagnostic::StepEssenWrong);
+        match hyp {
+            &Floating(_addr, var_index, typecode) => {
+                try_assert!(slot.code == typecode, Diagnostic::StepFloatWrongType);
+                state.subst_info[var_index] = (slot.expr.clone(), slot.vars.clone());
+            }
+            &Essential(_addr, ref expr) => {
+                try_assert!(slot.code == expr.typecode, Diagnostic::StepEssenWrongType);
+                try_assert!(do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
+                                             fref,
+                                             &expr,
+                                             &state.subst_info,
+                                             &state.stack_buffer),
+                            Diagnostic::StepEssenWrong);
+            }
         }
     }
 

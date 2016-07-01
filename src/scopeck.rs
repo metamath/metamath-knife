@@ -71,6 +71,7 @@ enum CheckedToken<'a> {
     Const(TokenPtr<'a>, Atom),
     Var(TokenPtr<'a>, Atom, LocalFloatInfo),
 }
+use self::CheckedToken::*;
 
 #[derive(Clone,Debug)]
 struct LocalDvInfo {
@@ -111,15 +112,24 @@ impl Default for VerifyExpr {
 }
 
 #[derive(Clone,Debug)]
-pub struct Hyp {
-    pub address: StatementAddress,
-    pub variable_index: VarIndex,
-    pub expr: VerifyExpr,
+pub enum Hyp {
+    Essential(StatementAddress, VerifyExpr),
+    Floating(StatementAddress, VarIndex, Atom),
 }
 
 impl Hyp {
-    pub fn is_float(&self) -> bool {
-        self.variable_index != !0
+    pub fn address(&self) -> StatementAddress {
+        match *self {
+            Hyp::Essential(addr, _) => addr,
+            Hyp::Floating(addr, _, _) => addr,
+        }
+    }
+
+    pub fn typecode(&self) -> Atom {
+        match self {
+            &Hyp::Essential(_, ref expr) => expr.typecode,
+            &Hyp::Floating(_, _, typecode) => typecode,
+        }
     }
 }
 
@@ -187,7 +197,7 @@ fn check_math_symbol(state: &mut ScopeState,
     }
 
     push_diagnostic(state, sref.index, Diagnostic::NotActiveSymbol(tref.index()));
-    return None;
+    None
 }
 
 fn lookup_float<'a>(state: &mut ScopeState<'a>,
@@ -214,9 +224,9 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
     None
 }
 
-fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
-                     sref: StatementRef<'a>)
-                     -> Option<Vec<CheckedToken<'a>>> {
+fn check_eap<'a>(state: &mut ScopeState<'a>,
+                 sref: StatementRef<'a>)
+                 -> Option<Vec<CheckedToken<'a>>> {
     // does the math string consist of active tokens, where the first is a constant
     // and all variables have typecodes in scope?
     let mut bad = false;
@@ -226,7 +236,7 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
         match check_math_symbol(state, sref, tref) {
             None => bad = true,
             Some((SymbolType::Constant, atom)) => {
-                out.push(CheckedToken::Const(tref.slice, atom));
+                out.push(Const(tref.slice, atom));
             }
             Some((SymbolType::Variable, atom)) => {
                 if tref.index() == 0 {
@@ -240,7 +250,7 @@ fn check_eap<'a, 'b>(state: &'b mut ScopeState<'a>,
                                             Diagnostic::VariableMissingFloat(tref.index()));
                             bad = true;
                         }
-                        Some(lfi) => out.push(CheckedToken::Var(tref.slice, atom, lfi)),
+                        Some(lfi) => out.push(Var(tref.slice, atom, lfi)),
                     }
                 }
             }
@@ -262,19 +272,19 @@ fn construct_stub_frame(state: &mut ScopeState,
     // are referenced by proofs using a frame-like structure
     let mut iter = expr.iter();
     let typecode = match iter.next().expect("parser checks $eap token count") {
-        &CheckedToken::Const(_, typecode) => typecode,
+        &Const(_, typecode) => typecode,
         _ => unreachable!(),
     };
     let mut mvars = Vec::new();
     let mut conststr = Vec::new();
 
-    while let Some(ctok) = iter.next() {
-        match *ctok {
-            CheckedToken::Const(tref, _) => {
+    for &ctok in iter {
+        match ctok {
+            Const(tref, _) => {
                 conststr.extend_from_slice(tref);
                 *conststr.last_mut().unwrap() |= 0x80;
             }
-            CheckedToken::Var(tref, atom, _) => {
+            Var(tref, atom, _) => {
                 conststr.extend_from_slice(tref);
                 *conststr.last_mut().unwrap() |= 0x80;
                 mvars.push(atom);
@@ -310,10 +320,10 @@ struct InchoateFrame {
     const_pool: Vec<u8>,
 }
 
-fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) -> VerifyExpr {
+fn scan_expression(iframe: &mut InchoateFrame, expr: &[CheckedToken]) -> VerifyExpr {
     let mut iter = expr.iter();
     let head = match iter.next().expect("parser checks $eap token count") {
-        &CheckedToken::Const(_, head) => head,
+        &Const(_, head) => head,
         _ => unreachable!(),
     };
     let mut open_const = iframe.const_pool.len();
@@ -321,11 +331,11 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
 
     for &ctok in iter {
         match ctok {
-            CheckedToken::Const(tref, _) => {
+            Const(tref, _) => {
                 fast_extend(&mut iframe.const_pool, tref);
                 *iframe.const_pool.last_mut().unwrap() |= 0x80;
             }
-            CheckedToken::Var(_, atom, lfi) => {
+            Var(_, atom, lfi) => {
                 let index = iframe.variables.get(&atom).map(|&(x, _)| x).unwrap_or_else(|| {
                     let index = iframe.variables.len();
                     iframe.var_list.push(atom);
@@ -349,7 +359,7 @@ fn scan_expression<'a>(iframe: &mut InchoateFrame, expr: &[CheckedToken<'a>]) ->
     }
 }
 
-fn scan_dv<'a>(iframe: &mut InchoateFrame, var_set: &[Atom]) {
+fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
     // any variable encountered for the first time in a dv is an optional
     // variable, but we already checked validity in scope_check_dv
     let mut var_ids = Vec::with_capacity(var_set.len());
@@ -401,33 +411,21 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
 
     for ess in &state.local_essen {
         let scanned = scan_expression(&mut iframe, &ess.string);
-        hyps.push(Hyp {
-            address: ess.valid.start,
-            variable_index: !0,
-            expr: scanned,
-        });
+        hyps.push(Hyp::Essential(ess.valid.start, scanned));
     }
 
     let scan_res = scan_expression(&mut iframe, expr);
 
     // include any mandatory $f hyps
     for &(index, ref lfi) in iframe.variables.values() {
-        hyps.push(Hyp {
-            address: lfi.valid.start,
-            variable_index: index,
-            expr: VerifyExpr {
-                typecode: lfi.typecode,
-                rump: 0..0,
-                tail: Box::default(),
-            },
-        })
+        hyps.push(Hyp::Floating(lfi.valid.start, index, lfi.typecode));
     }
 
-    hyps.sort_by(|h1, h2| state.order.cmp(&h1.address, &h2.address));
+    hyps.sort_by(|h1, h2| state.order.cmp(&h1.address(), &h2.address()));
     iframe.mandatory_count = iframe.var_list.len();
 
-    for dv in state.gnames.lookup_global_dv() {
-        scan_dv(&mut iframe, &dv.vars)
+    for &(_, ref vars) in state.gnames.lookup_global_dv() {
+        scan_dv(&mut iframe, &vars)
     }
 
     for dv in &state.local_dv {
@@ -449,7 +447,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     });
 }
 
-fn scope_check_axiom<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
+fn scope_check_assert<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if let Some(latom) = check_label_dup(state, sref) {
         if let Some(expr) = check_eap(state, sref) {
             construct_full_frame(state, sref, latom, &expr);
@@ -487,9 +485,7 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 
     for tref in sref.math_iter() {
         match check_math_symbol(state, sref, tref) {
-            None => {
-                bad = true;
-            }
+            None => bad = true,
             Some((SymbolType::Constant, _)) => {
                 push_diagnostic(state, sref.index, Diagnostic::DjNotVariable(tref.index()));
                 bad = true;
@@ -588,8 +584,8 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             });
     }
 
-    let expr = [CheckedToken::Const(const_tok.slice, const_at),
-                CheckedToken::Var(var_tok.slice, var_at, LocalFloatInfo::default())];
+    let expr = [Const(const_tok.slice, const_at),
+                Var(var_tok.slice, var_at, LocalFloatInfo::default())];
     construct_stub_frame(state, sref, latom, &expr);
 }
 
@@ -616,14 +612,6 @@ fn maybe_add_local_var(state: &mut ScopeState,
         atom: state.nameset.get_atom(tokref.slice),
     });
     None
-}
-
-fn scope_check_provable<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    if let Some(latom) = check_label_dup(state, sref) {
-        if let Some(expr) = check_eap(state, sref) {
-            construct_full_frame(state, sref, latom, &expr);
-        }
-    }
 }
 
 fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
@@ -696,12 +684,12 @@ pub fn scope_check_single(sset: &SegmentSet,
 
     for sref in seg.statement_iter() {
         match sref.statement.stype {
-            StatementType::Axiom => scope_check_axiom(&mut state, sref),
+            StatementType::Axiom => scope_check_assert(&mut state, sref),
             StatementType::Constant => scope_check_constant(&mut state, sref),
             StatementType::Disjoint => scope_check_dv(&mut state, sref),
             StatementType::Essential => scope_check_essential(&mut state, sref),
             StatementType::Floating => scope_check_float(&mut state, sref),
-            StatementType::Provable => scope_check_provable(&mut state, sref),
+            StatementType::Provable => scope_check_assert(&mut state, sref),
             StatementType::Variable => scope_check_variable(&mut state, sref),
             _ => {}
         }
