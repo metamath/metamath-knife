@@ -110,8 +110,7 @@ impl Bitset {
 impl<'a> BitOrAssign<&'a Bitset> for Bitset {
     fn bitor_assign(&mut self, rhs: &'a Bitset) {
         self.head |= rhs.head;
-        let rtail = rhs.tail();
-        if !rtail.is_empty() {
+        if let Some(ref rtail) = rhs.tail {
             let stail = self.tail_mut();
             if rtail.len() > stail.len() {
                 stail.resize(rtail.len(), 0);
