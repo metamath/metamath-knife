@@ -83,6 +83,28 @@ impl Bitset {
             word < tail.len() && (tail[word] & (1 << (bit & (bits_per_word() - 1)))) != 0
         }
     }
+
+    /// Adds a single bit to a set, and returns the old value.  Equivalent to
+    /// `{ let old = bitset.has_bit(bit); bitset.set_bit(bit); old }`.
+    pub fn replace_bit(&mut self, bit: usize) -> bool {
+        if bit < bits_per_word() {
+            let old = (self.head & (1 << bit)) != 0;
+            self.head |= 1 << bit;
+            old
+        } else {
+            let word = bit / bits_per_word() - 1;
+            let tail = self.tail_mut();
+            let mask = 1 << (bit & (bits_per_word() - 1));
+            let old = if word >= tail.len() {
+                tail.resize(word + 1, 0);
+                false
+            } else {
+                (tail[word] & mask) != 0
+            };
+            tail[word] |= mask;
+            old
+        }
+    }
 }
 
 impl<'a> BitOrAssign<&'a Bitset> for Bitset {

@@ -134,8 +134,8 @@ struct AtomTable {
 fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
     let next = Atom(table.table.len() as u32 + 1);
     assert!(next.0 < u32::max_value(), "atom table overflowed");
-    if let Some(atom) = table.table.get(tok) {
-        return *atom;
+    if let Some(&atom) = table.table.get(tok) {
+        return atom;
     }
     table.table.insert(copy_token(tok), next);
     if table.reverse.len() == 0 {
@@ -182,9 +182,9 @@ impl Nameset {
         // being temporarily 2x
 
         let mut keys_to_remove = Vec::new();
-        for (&seg_id, &ref seg) in &self.segments {
+        for (&seg_id, seg) in &self.segments {
             if segs.segments.get(&seg_id).map_or(true, |&(ref seg_new, _)| {
-                !util::ptr_eq::<Segment>(&seg_new, seg)
+                !util::ptr_eq::<Segment>(&seg_new, &seg)
             }) {
                 keys_to_remove.push(seg_id);
             }
@@ -213,7 +213,7 @@ impl Nameset {
             id: id,
         };
 
-        for &ref symdef in &seg.symbols {
+        for symdef in &seg.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
             slot.generation = self.generation;
             if slot.atom == Atom::default() {

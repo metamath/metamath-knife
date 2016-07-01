@@ -370,8 +370,7 @@ fn scan_dv<'a>(iframe: &mut InchoateFrame, var_set: &[Atom]) {
 
     for (leftpos, &leftid) in var_ids.iter().enumerate() {
         for &rightid in &var_ids[leftpos + 1..] {
-            if !iframe.optional_dv[leftid].has_bit(rightid) {
-                iframe.optional_dv[leftid].set_bit(rightid);
+            if !iframe.optional_dv[leftid].replace_bit(rightid) {
                 iframe.optional_dv[rightid].set_bit(leftid);
                 if leftid < iframe.mandatory_count && rightid < iframe.mandatory_count {
                     iframe.mandatory_dv.push((leftid, rightid));
@@ -525,16 +524,14 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 }
 
 fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    let latom = check_label_dup(state, sref);
-    if latom.is_none() {
-        return;
-    }
-    if let Some(expr) = check_eap(state, sref) {
-        state.local_essen.push(LocalEssentialInfo {
-            valid: sref.scope_range(),
-            label: sref.label(),
-            string: expr,
-        });
+    if check_label_dup(state, sref).is_some() {
+        if let Some(expr) = check_eap(state, sref) {
+            state.local_essen.push(LocalEssentialInfo {
+                valid: sref.scope_range(),
+                label: sref.label(),
+                string: expr,
+            });
+        }
     }
 }
 
