@@ -183,8 +183,8 @@ impl Nameset {
 
         let mut keys_to_remove = Vec::new();
         for (&seg_id, seg) in &self.segments {
-            if segs.segments.get(&seg_id).map_or(true, |&(ref seg_new, _)| {
-                !util::ptr_eq::<Segment>(&seg_new, &seg)
+            if segs.segment_opt(seg_id).map_or(true, |sref| {
+                !util::ptr_eq::<Segment>(&sref.segment, &seg)
             }) {
                 keys_to_remove.push(seg_id);
             }
@@ -194,8 +194,8 @@ impl Nameset {
             self.remove_segment(seg_id);
         }
 
-        for (&seg_id, &(ref seg, _)) in &segs.segments {
-            self.add_segment(seg_id, seg.clone());
+        for sref in segs.segments() {
+            self.add_segment(sref.id, sref.segment.clone());
         }
     }
 

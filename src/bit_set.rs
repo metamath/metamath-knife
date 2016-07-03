@@ -16,6 +16,11 @@ use std::slice;
 #[derive(Default,Debug)]
 pub struct Bitset {
     head: usize,
+    // You can take out the Box here and it will still compile (and, with more
+    // effort, the Option too); the point of this is to optimize the common case
+    // of small bitsets at the expense of large ones, as Option<Box> only
+    // consumes one word of storage if empty, while Vec and Option<Vec> take
+    // three.
     tail: Option<Box<Vec<usize>>>,
 }
 

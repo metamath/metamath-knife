@@ -166,12 +166,7 @@ pub struct SegmentOrder {
 impl SegmentOrder {
     /// Creates a new empty segment ordering.
     pub fn new() -> Self {
-        // let mut n = SegmentOrder {
-        //     high_water: 1,
-        //     order: Vec::new(),
-        //     reverse: Vec::new(),
-        // };
-        // n.alloc_id(); n.order.push(SegmentId(1)); n.reindex(); n
+        // pre-assign 1 as "start".  (think "cyclic order")
         SegmentOrder {
             high_water: 2,
             order: vec![SegmentId(1)],
@@ -207,13 +202,6 @@ impl SegmentOrder {
         self.order.remove(self.reverse[id.0 as usize] as usize);
         self.reindex();
     }
-
-    // pub fn new_after(&mut self, after: SegmentId) -> SegmentId {
-    //     let id = self.alloc_id();
-    //     self.order.insert(self.reverse[after.0 as usize] as usize + 1, id);
-    //     self.reindex();
-    //     id
-    // }
 
     /// Gets a new ID, and adds it to the order before the named ID, or at the
     /// end if you pass `start()`.
