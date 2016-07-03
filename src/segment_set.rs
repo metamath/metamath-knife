@@ -195,9 +195,11 @@ impl SegmentSet {
 
     /// Fetch a handle to a loaded segment given a possibly stale ID.
     pub fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef> {
-        self.segments.get(&seg_id).map(|&(ref seg, ref _srcinfo)| SegmentRef {
-            id: seg_id,
-            segment: &seg,
+        self.segments.get(&seg_id).map(|&(ref seg, ref _srcinfo)| {
+            SegmentRef {
+                id: seg_id,
+                segment: &seg,
+            }
         })
     }
 
