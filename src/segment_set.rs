@@ -361,22 +361,18 @@ impl SegmentSet {
             match state.preload.get(&path).cloned() {
                 None => {
                     // read from FS
-                    match canonicalize_and_read(state, path.clone()) {
-                        Err(cerr) => {
-                            // read failed, insert a bogus segment so we have a
-                            // place to hang the errors
-                            let sinfo = SourceInfo {
-                                name: path.clone(),
-                                text: Arc::new(Vec::new()),
-                                span: Span::null(),
-                            };
-                            let svec = vec![parser::dummy_segment(Diagnostic::IoError(format!("{}",
-                                                                                       cerr)))];
-                            // cache keys are None so this won't pollute any caches
-                            Promise::new(FileSR(None, vec![SliceSR(None, svec, Arc::new(sinfo))]))
-                        }
-                        Ok(segments) => segments,
-                    }
+                    canonicalize_and_read(state, path.clone()).unwrap_or_else(|cerr| {
+                        // read failed, insert a bogus segment so we have a
+                        // place to hang the errors
+                        let sinfo = SourceInfo {
+                            name: path.clone(),
+                            text: Arc::new(Vec::new()),
+                            span: Span::null(),
+                        };
+                        let seg = parser::dummy_segment(Diagnostic::IoError(format!("{}", cerr)));
+                        // cache keys are None so this won't pollute any caches
+                        Promise::new(FileSR(None, vec![SliceSR(None, vec![seg], Arc::new(sinfo))]))
+                    })
                 }
                 Some(data) => split_and_parse(state, path, None, data),
             }

@@ -202,8 +202,8 @@ impl Executor {
     /// to allow different `Executor`s to share a thread pool, and use per-job
     /// concurrency limits.
     pub fn new(concurrency: usize) -> Executor {
-        let mutex: Arc<Mutex<BinaryHeap<Job>>> = Arc::new(Mutex::new(BinaryHeap::new()));
-        let cv: Arc<Condvar> = Arc::new(Condvar::new());
+        let mutex = Arc::new(Mutex::new(BinaryHeap::new()));
+        let cv = Arc::new(Condvar::new());
 
         if concurrency > 1 {
             for _ in 0..concurrency {
@@ -211,7 +211,7 @@ impl Executor {
                 let cv = cv.clone();
                 thread::spawn(move || {
                     loop {
-                        let mut task = {
+                        let mut task: Job = {
                             let mut mutexg = mutex.lock().unwrap();
                             while mutexg.is_empty() {
                                 mutexg = cv.wait(mutexg).unwrap();
@@ -312,14 +312,13 @@ impl<T> Promise<T> {
     {
         Promise::new_once(move || fun(self.wait()))
     }
-}
 
-impl<T: 'static> Promise<Vec<T>> {
     /// Convert a collection of promises into a single promise, which waits for
     /// all of its parts.
-    pub fn join(promises: Vec<Promise<T>>) -> Promise<Vec<T>> {
-        let mut pcell = Some(promises);
-        Promise(Box::new(move || pcell.take().unwrap().into_iter().map(|x| x.wait()).collect()))
+    pub fn join(promises: Vec<Promise<T>>) -> Promise<Vec<T>>
+        where T: 'static
+    {
+        Promise::new_once(move || promises.into_iter().map(|x| x.wait()).collect())
     }
 }
 
