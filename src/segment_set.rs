@@ -216,9 +216,9 @@ impl SegmentSet {
     /// Reports any parse errors associated with loaded segments.
     pub fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
-        for sgref in self.segments() {
-            for &(ix, ref d) in &sgref.segment.diagnostics {
-                out.push((StatementAddress::new(sgref.id, ix), d.clone()));
+        for sref in self.segments() {
+            for &(ix, ref d) in &sref.diagnostics {
+                out.push((StatementAddress::new(sref.id, ix), d.clone()));
             }
         }
         out

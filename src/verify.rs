@@ -583,7 +583,7 @@ fn verify_segment(sset: &SegmentSet,
         }
     }
     VerifySegment {
-        source: sref.segment.clone(),
+        source: (*sref).clone(),
         diagnostics: diagnostics,
         scope_usage: state.scoper.into_usage(),
     }
@@ -606,13 +606,12 @@ pub fn verify(result: &mut VerifyResult,
             let sref = segments2.segment(id);
             if let Some(old_res) = old_res_o {
                 if old_res.scope_usage.valid(&nset, &scope) &&
-                   ptr_eq::<Segment>(&old_res.source, sref.segment) {
+                   ptr_eq::<Segment>(&old_res.source, &sref) {
                     return (id, old_res.clone());
                 }
             }
             if segments2.options.trace_recalc {
-                println!("verify({:?})",
-                         parser::guess_buffer_name(&sref.segment.buffer));
+                println!("verify({:?})", parser::guess_buffer_name(&sref.buffer));
             }
             (id, Arc::new(verify_segment(&segments2, &nset, &scope, id)))
         }))

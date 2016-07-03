@@ -49,6 +49,7 @@ use diag::Diagnostic;
 use std::cmp;
 use std::cmp::Ordering;
 use std::mem;
+use std::ops::Deref;
 use std::slice;
 use std::str;
 use std::sync::Arc;
@@ -443,6 +444,15 @@ pub struct SegmentRef<'a> {
     pub id: SegmentId,
 }
 
+impl<'a> Deref for SegmentRef<'a> {
+    type Target = Arc<Segment>;
+
+    #[inline]
+    fn deref(&self) -> &Arc<Segment> {
+        self.segment
+    }
+}
+
 impl<'a> SegmentRef<'a> {
     /// Fetch a single statement from this segment by its local index.
     pub fn statement(self, index: StatementIndex) -> StatementRef<'a> {
@@ -456,7 +466,7 @@ impl<'a> SegmentRef<'a> {
     /// Returns the source size of the segment, a proxy for computational
     /// difficulty which drives the `database::Executor` bin-packing heuristics.
     pub fn bytes(self) -> usize {
-        self.segment.buffer.len()
+        self.buffer.len()
     }
 }
 
@@ -663,13 +673,13 @@ impl<'a> StatementRef<'a> {
     /// Given an index into this statement's math string, find a textual span
     /// into the segment buffer.
     pub fn math_span(&self, ix: TokenIndex) -> Span {
-        self.segment.segment.span_pool[self.statement.math_start + ix as usize]
+        self.segment.span_pool[self.statement.math_start + ix as usize]
     }
 
     /// Given an index into this statement's proof string, find a textual span
     /// into the segment buffer.
     pub fn proof_span(&self, ix: TokenIndex) -> Span {
-        self.segment.segment.span_pool[self.statement.proof_start + ix as usize]
+        self.segment.span_pool[self.statement.proof_start + ix as usize]
     }
 
     /// Given an index into this statement's math string, get a reference to the
@@ -733,6 +743,15 @@ pub struct TokenRef<'a> {
     pub slice: TokenPtr<'a>,
     /// 3-component address of the token.
     pub address: TokenAddress,
+}
+
+impl<'a> Deref for TokenRef<'a> {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        self.slice
+    }
 }
 
 impl<'a> TokenRef<'a> {
