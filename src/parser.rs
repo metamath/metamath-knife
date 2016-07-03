@@ -557,8 +557,8 @@ impl StatementType {
 struct Statement {
     /// Statement type, either a spec-defined type or one of the pseudo-types.
     stype: StatementType,
-    /// Total span of the statement, not including surrounding whitespace or
-    /// comments.
+    /// Total span of the statement, not including trailing whitespace or
+    /// surrounding comments.
     span: Span,
     /// Span of the statement label.
     ///
@@ -650,7 +650,9 @@ impl<'a> StatementRef<'a> {
 
     /// The textual span of this statement within the segment's buffer.
     ///
-    /// Does not include surrounding white space or comments.
+    /// Does not include trailing white space or surrounding comments; will
+    /// include leading white space, so a concatenation of spans for all
+    /// statements will reconstruct the segment source.
     pub fn span(&self) -> Span {
         self.statement.span
     }
@@ -765,30 +767,58 @@ impl<'a> Iterator for TokenIter<'a> {
     }
 }
 
+/// State used by the scanning process
 #[derive(Default)]
 struct Scanner<'a> {
+    /// Text being parsed.
     buffer: &'a [u8],
+    /// Arc of text which can be linked into new Segments.
     buffer_ref: BufferRef,
+    /// Current parsing position; will generally point immediately after a
+    /// token, at whitespace.
     position: FilePos,
+    /// Accumulated errors for this segment.  Reset on new segment.
     diagnostics: Vec<(StatementIndex, Diagnostic)>,
+    /// Accumulated spans for this segment.
     span_pool: Vec<Span>,
+    /// A span which was encountered, but needs to be processed again.
+    ///
+    /// This is used for error recovery if you leave off the `$.` which ends a
+    /// math string, the parser will encounter the next keyword and needs to
+    /// save that token to process it as a keyword.
     unget: Span,
+    /// Labels accumulated for the current statement.
     labels: Vec<Span>,
+    /// End of the previous statement
     statement_start: FilePos,
+    /// Current write index into statement list
     statement_index: StatementIndex,
+    /// Write indexes into span pools
     statement_math_start: usize,
     statement_proof_start: usize,
-    has_bad_labels: bool,
+    /// Flag which can be set at any time during statement parse to cause the
+    /// type to be overwritten with `Invalid`, if the statement would otherwise
+    /// be too broken to continue with.
     invalidated: bool,
 }
 
+/// Bitmask of allowed whitespace characters.
+///
+/// A Metamath database is required to consist of graphic characters, SP, HT,
+/// NL, FF, and CR.
 const MM_VALID_SPACES: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) |
                              (1u64 << 32);
 
+/// Check if a character which is known to be <= 32 is a valid Metamath
+/// whitespace.  May panic if out of range.
 fn is_mm_space_c0(byte: u8) -> bool {
     (MM_VALID_SPACES & (1u64 << byte)) != 0
 }
 
+/// Check if a character is valid Metamath whitespace.
+///
+/// We generally accept any C0 control as whitespace, with a diagnostic; this
+/// function only tests for fully legal whitespace though.
 fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
@@ -802,16 +832,32 @@ enum CommentType {
 }
 
 impl<'a> Scanner<'a> {
+    /// Record a diagnostic against the nascent statement
     fn diag(&mut self, diag: Diagnostic) {
         self.diagnostics.push((self.statement_index, diag));
     }
 
+    /// Get a single whitespace-delimited token from the source text without
+    /// checking for comments or the unget area.
+    ///
+    /// This function accepts any C0 character as whitespace, with a diagnostic.
+    /// DEL and non-7bit characters invalidate the current token and cause it to
+    /// be omitted from the returned string.  `Span::null()` is returned when
+    /// the end of the buffer is reached.
+    ///
+    /// This is _very_ hot, mostly due to the unpredicable branches in the
+    /// whitespace testing.  It might be possible to write a version which is
+    /// branch-free in typical cases, but it would be extremely fiddly and has
+    /// not been attempted.
     fn get_raw(&mut self) -> Span {
         #[inline(never)]
         #[cold]
         fn badchar(slf: &mut Scanner, ix: usize) -> Span {
             let ch = slf.buffer[ix];
             slf.diag(Diagnostic::BadCharacter(ix, ch));
+            // Restart the function from the beginning to reload self.buffer;
+            // doing it this way lets it be kept in a register in the common
+            // case
             return slf.get_raw();
         }
 
@@ -856,6 +902,11 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// Assuming that a `$(` token has just been read, read and skip a comment.
+    ///
+    /// If the comment appears to be special, notice that.  This currently
+    /// detects `$j` and `$t` comments, it will later be responsible for
+    /// detecting outline comments.
     fn get_comment(&mut self, opener: Span, mid_statement: bool) -> CommentType {
         let mut ctype = CommentType::Normal;
         let mut first = true;
@@ -897,6 +948,8 @@ impl<'a> Scanner<'a> {
         ctype
     }
 
+    /// Fetches a single normal token from the buffer, skipping over comments
+    /// and handling unget.
     fn get(&mut self) -> Span {
         if !self.unget.is_null() {
             return mem::replace(&mut self.unget, Span::null());
@@ -916,6 +969,8 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// This is where statements are constructed, factored out between comment
+    /// statements and non-comment.
     fn out_statement(&mut self, stype: StatementType, label: Span) -> Statement {
         Statement {
             stype: stype,
@@ -930,6 +985,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// Check for and parse a comment statement at the current position.
     fn get_comment_statement(&mut self) -> Option<Statement> {
         let ftok = if self.unget.is_null() {
             self.get_raw()
@@ -953,8 +1009,11 @@ impl<'a> Scanner<'a> {
         None
     }
 
+    /// Reads zero or more labels from the input stream.
+    ///
+    /// We haven't seen the statement-starting keyword yet, so we don't know if
+    /// labels are actually expected; just read, validate and store them.
     fn read_labels(&mut self) {
-        self.has_bad_labels = false;
         self.labels.clear();
         loop {
             let ltok = self.get();
@@ -967,13 +1026,13 @@ impl<'a> Scanner<'a> {
                 break;
             } else if !is_valid_label(lref) {
                 self.diag(Diagnostic::BadLabel(ltok));
-                self.has_bad_labels = true;
             } else {
                 self.labels.push(ltok);
             }
         }
     }
 
+    /// We now know we shouldn't have labels.  Issue errors if we do anyway.
     fn get_no_label(&mut self) {
         // none of these are invalidations...
         for &lspan in &self.labels {
@@ -981,6 +1040,8 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// We now know we need exactly one label.  Error and invalidate if we don't
+    /// have it.
     fn get_label(&mut self) -> Span {
         match self.labels.len() {
             1 => self.labels[0],
@@ -1002,6 +1063,14 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// Handles parsing for math and proof strings.
+    ///
+    /// Set `is_proof` to parse a proof, else we are parsing a math string.
+    /// Returns true if there is a proof following and generates diagnostics as
+    /// appropriate depending on `expect_proof`.
+    ///
+    /// Directly populates the span pool; record the span pool offset before and
+    /// after calling to get at the string.
     fn get_string(&mut self, expect_proof: bool, is_proof: bool) -> bool {
         loop {
             let tokn = self.get();
@@ -1040,6 +1109,8 @@ impl<'a> Scanner<'a> {
         return false;
     }
 
+    /// Parses math and proof strings for the current statement and records the
+    /// offsets appropriately.
     fn get_strings(&mut self, want_proof: bool) {
         let has_proof = self.get_string(want_proof, false);
         self.statement_proof_start = self.span_pool.len();
@@ -1061,6 +1132,8 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// When we see an invalid statement keyword, eat tokens until we see
+    /// another keyword or a statement end marker.
     fn eat_invalid(&mut self) {
         loop {
             let tok = self.get();
@@ -1081,6 +1154,9 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// Handles parsing the filename after a `$[` keyword has been seen.
+    ///
+    /// Per the spec, filenames are restricted to the syntax of math tokens.
     fn get_file_include(&mut self) -> Span {
         let mut res = Span::null();
         let mut count = 0;
@@ -1113,15 +1189,18 @@ impl<'a> Scanner<'a> {
         return res;
     }
 
+    /// Main function called to read a complete statement from the input buffer.
     fn get_statement(&mut self) -> Statement {
         self.statement_start = self.position;
         self.statement_math_start = self.span_pool.len();
         self.statement_proof_start = self.span_pool.len();
 
+        // is there a freestanding comment?
         if let Some(stmt) = self.get_comment_statement() {
             return stmt;
         }
 
+        // look for labels before the keyword
         self.read_labels();
 
         let mut stype = Eof;
@@ -1151,6 +1230,7 @@ impl<'a> Scanner<'a> {
         }
         self.invalidated = false;
 
+        // handle any labels recorded earlier appropriately
         let mut label = if stype.takes_label() {
             self.get_label()
         } else {
@@ -1158,10 +1238,13 @@ impl<'a> Scanner<'a> {
             Span::null()
         };
 
+        // keyword is followed by strings; this also errors if the string is
+        // empty
         if stype.takes_math() {
             self.get_strings(stype == Provable);
         }
 
+        // $d and $f statements require at least two tokens, check that now
         let math_len = self.statement_proof_start - self.statement_math_start;
         match stype {
             FileInclude => label = self.get_file_include(),
@@ -1192,6 +1275,11 @@ impl<'a> Scanner<'a> {
         self.out_statement(stype, label)
     }
 
+    /// Reads statements until EOF or an include statement, which breaks logical
+    /// order and requires a new segment.
+    ///
+    /// Also does extractions for the benefit of nameck.  Second return value is
+    /// true if we are at EOF.
     fn get_segment(&mut self) -> (Segment, bool) {
         let mut seg = Segment {
             statements: Vec::new(),
@@ -1216,7 +1304,9 @@ impl<'a> Scanner<'a> {
             stmt.group = top_group;
             seg.statements.push(stmt);
 
-            // TODO record name usage
+            // This manages the group stack, and sets `group` on all statements
+            // to the `OpenGroup` of the innermost enclosing group (or the
+            // matching opener, for `CloseGroup`).
             match seg.statements[index as usize].stype {
                 OpenGroup => top_group = index,
                 CloseGroup => {
@@ -1238,6 +1328,7 @@ impl<'a> Scanner<'a> {
                     }
                 }
                 FileInclude => {
+                    // snag this _now_
                     seg.next_file = seg.statements[index as usize].label;
                     end_diag = Diagnostic::UnclosedBeforeInclude(index);
                     is_end = false;
@@ -1252,12 +1343,16 @@ impl<'a> Scanner<'a> {
             }
         }
 
+        // make sure they're not trying to continue an open group past EOF or a
+        // file include
         while top_group != NO_STATEMENT {
             seg.statements[top_group as usize].group_end = seg.statements.len() as StatementIndex;
             self.diagnostics.push((top_group, end_diag.clone()));
             top_group = seg.statements[top_group as usize].group;
         }
 
+        // populate `group_end` for statements in groups; was set for
+        // `OpenGroup` in the loop above, and we don't want to overwrite it
         for index in 0..seg.statements.len() {
             if seg.statements[index].group != NO_STATEMENT &&
                seg.statements[index].stype != OpenGroup {
@@ -1275,6 +1370,8 @@ impl<'a> Scanner<'a> {
     }
 }
 
+/// Extracts certain types of statement from the segment so that nameck doesn't
+/// need statement-specific intelligence.
 fn collect_definitions(seg: &mut Segment) {
     let buf: &[u8] = &seg.buffer;
     for (index, &ref stmt) in seg.statements.iter().enumerate() {
@@ -1338,6 +1435,7 @@ fn collect_definitions(seg: &mut Segment) {
     }
 }
 
+/// Metamath spec valid label characters are `[-._a-zA-Z0-9]`
 fn is_valid_label(label: &[u8]) -> bool {
     label.iter().all(|&c| {
         c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') ||
@@ -1354,18 +1452,22 @@ pub fn guess_buffer_name(buffer: &[u8]) -> &str {
     let buffer = &buffer[0..cmp::min(500, buffer.len())];
     let mut index = 0;
     while index < buffer.len() {
+        // is this line indented?
         if buffer[index] == b' ' {
             break;
         }
+        // skip this line
         while index < buffer.len() && buffer[index] != b'\n' {
             index += 1;
         }
+        // skip the newline, too
         if index < buffer.len() {
             index += 1;
         }
     }
     // index points at the beginning of an indented line, or EOF
 
+    // trim horizontal whitespace
     while index < buffer.len() && buffer[index] == b' ' {
         index += 1;
     }
@@ -1378,6 +1480,7 @@ pub fn guess_buffer_name(buffer: &[u8]) -> &str {
         eol -= 1;
     }
 
+    // fail gracefully, this is a debugging aid only
     if eol == index {
         "<no section name found>"
     } else {

@@ -280,7 +280,9 @@ fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic)
     state.diagnostics.entry(ix).or_insert(Vec::new()).push(diag);
 }
 
-// atom will be meaningless in non-incremental mode
+/// Verifies that this is the true (first) use of a label.  The returned atom
+/// will be meaningful only in incremental mode, but the `is_some` state is
+/// always usable.
 fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> Option<Atom> {
     // is the label unique in the database?
     if let Some(def) = state.gnames.lookup_label(sref.label()) {
@@ -293,6 +295,7 @@ fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> Option<Atom> {
     unreachable!()
 }
 
+/// Find the definition of a math symbol and verify that it is in scope.
 fn check_math_symbol(state: &mut ScopeState,
                      sref: StatementRef,
                      tref: TokenRef)
@@ -317,6 +320,7 @@ fn check_math_symbol(state: &mut ScopeState,
     None
 }
 
+/// Find the active typecode for a variable.
 fn lookup_float<'a>(state: &mut ScopeState<'a>,
                     sref: StatementRef<'a>,
                     tref: TokenRef<'a>)
@@ -341,11 +345,11 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
     None
 }
 
+/// Given a math string, verify that all tokens are active, all variables have
+/// typecodes, and the head is a constant.
 fn check_eap<'a>(state: &mut ScopeState<'a>,
                  sref: StatementRef<'a>)
                  -> Option<Vec<CheckedToken<'a>>> {
-    // does the math string consist of active tokens, where the first is a
-    // constant and all variables have typecodes in scope?
     let mut bad = false;
     let mut out = Vec::with_capacity(sref.math_len() as usize);
 
@@ -381,12 +385,12 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
     }
 }
 
+/// Constructs the psuedo-frames which are required by the verifier for optional
+/// `$f` hypotheses.
 fn construct_stub_frame(state: &mut ScopeState,
                         sref: StatementRef,
                         latom: Atom,
                         expr: &[CheckedToken]) {
-    // gets data for $e and $f statements; these are not frames but they are
-    // referenced by proofs using a frame-like structure
     let mut iter = expr.iter();
     let typecode = match iter.next().expect("parser checks $eap token count") {
         &Const(_, typecode) => typecode,
@@ -449,6 +453,11 @@ struct InchoateFrame {
     const_pool: Vec<u8>,
 }
 
+/// Given a math string previously processed by `check_eap`, generate the
+/// substitution program for the verifier.
+///
+/// Also responsible for building the list of mandatory variables for the
+/// inchoate frame.
 fn scan_expression(iframe: &mut InchoateFrame, expr: &[CheckedToken]) -> VerifyExpr {
     let mut iter = expr.iter();
     let head = match iter.next().expect("parser checks $eap token count") {
@@ -462,16 +471,21 @@ fn scan_expression(iframe: &mut InchoateFrame, expr: &[CheckedToken]) -> VerifyE
         match ctok {
             Const(tref, _) => {
                 fast_extend(&mut iframe.const_pool, tref);
+                // since we restrict tokens to 7-bit, this can be used as a delimiter
                 *iframe.const_pool.last_mut().unwrap() |= 0x80;
             }
             Var(_, atom, lfi) => {
+                // check if the variable is in use
                 let index = iframe.variables.get(&atom).map(|&(x, _)| x).unwrap_or_else(|| {
+                    // it's not!  record it in the frame, and save the $f info for later
                     let index = iframe.variables.len();
                     iframe.var_list.push(atom);
+                    // make room in the dv-list
                     iframe.optional_dv.push(Bitset::new());
                     iframe.variables.insert(atom, (index, lfi));
                     index
                 });
+                // the tail is broken at each variable, so start a new segment
                 tail.push(ExprFragment {
                     prefix: open_const..iframe.const_pool.len(),
                     var: index,
@@ -488,6 +502,7 @@ fn scan_expression(iframe: &mut InchoateFrame, expr: &[CheckedToken]) -> VerifyE
     }
 }
 
+/// Adds a compound disjoint variable hypothesis to the frame being built.
 fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
     // any variable encountered for the first time in a dv is an optional
     // variable, but we already checked validity in scope_check_dv
@@ -497,6 +512,8 @@ fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
         let index = match iframe.variables.get(&varatom).map(|&(x, _)| x) {
             Some(mvarindex) => mvarindex,
             None => {
+                // it's not a mandatory variable and so we don't need $f info,
+                // but it still needs to be indexed.
                 let index = iframe.variables.len();
                 iframe.var_list.push(varatom);
                 iframe.optional_dv.push(Bitset::new());
@@ -507,6 +524,8 @@ fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
         var_ids.push(index);
     }
 
+    // we've been extending optional_dv every time we add a new variable, so the
+    // indexing is safe here
     for (leftpos, &leftid) in var_ids.iter().enumerate() {
         for &rightid in &var_ids[leftpos + 1..] {
             if !iframe.optional_dv[leftid].replace_bit(rightid) {
@@ -519,6 +538,7 @@ fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
     }
 }
 
+/// Actually constructs frame programs for `$a`/`$p` statements.
 fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
                             sref: StatementRef<'a>,
                             label_atom: Atom,
@@ -544,6 +564,9 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     }
 
     let scan_res = scan_expression(&mut iframe, expr);
+    // we now have all $e hyps and all mandatory variables, with $f data.  note
+    // that the $e hyps are not in their final positions because the $f have not
+    // been inserted
 
     // include any mandatory $f hyps
     for &(index, ref lfi) in iframe.variables.values() {
@@ -551,6 +574,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     }
 
     hyps.sort_by(|h1, h2| state.order.cmp(&h1.address(), &h2.address()));
+    // any variables added for DV are not mandatory
     iframe.mandatory_count = iframe.var_list.len();
 
     for &(_, ref vars) in state.gnames.lookup_global_dv() {
@@ -586,6 +610,9 @@ fn scope_check_assert<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 
 fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
     if sref.in_group() {
+        // nested $c are ignored by smetamath3, the parser generates a
+        // diagnostic
+
         // assert!(sref.statement.diagnostics.len() > 0);
         return;
     }
@@ -639,9 +666,14 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     }
 
     if !sref.in_group() {
+        // we need to do validity checking on global $d _somewhere_, and that
+        // happens to be here, but the knowledge of the $d is handled by nameck
+        // in that case and we need to not duplicate it
         return;
     }
 
+    // record the $d in our local storage, will be deleted in
+    // construct_full_frame when it's no longer in scope
     state.local_dv.push(LocalDvInfo {
         valid: sref.scope_range(),
         vars: vars,
@@ -651,6 +683,8 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
 fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if check_label_dup(state, sref).is_some() {
         if let Some(expr) = check_eap(state, sref) {
+            // record the $e in our local storage, will be deleted in
+            // construct_full_frame when it's no longer in scope
             state.local_essen.push(LocalEssentialInfo {
                 valid: sref.scope_range(),
                 label: sref.label(),
@@ -662,6 +696,7 @@ fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>)
 
 fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let mut bad = false;
+    // length checked by the parser with an invalidation
     assert!(sref.math_len() == 2);
     let const_tok = sref.math_at(0);
     let var_tok = sref.math_at(1);
@@ -671,6 +706,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         Some(a) => a,
     };
 
+    // $f must be one constant and one variable - parser can't check this
     let mut const_at = Atom::default();
     match check_math_symbol(state, sref, const_tok) {
         None => bad = true,
@@ -702,7 +738,8 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         return;
     }
 
-    // record the $f
+    // record the $f; global $f are tracked by nameck but must still be verified
+    // here
     if sref.in_group() {
         state.local_floats
             .entry(copy_token(var_tok.slice))
@@ -778,6 +815,7 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
                 }
             }
 
+            // recorded in local state here
             if let Some(prev_addr) = maybe_add_local_var(state, sref, tokref) {
                 // local/local conflict
                 push_diagnostic(state,
@@ -902,6 +940,7 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
         }
     }
 
+    // now update the hashtable
     let mut stale_ids = new_set();
     let mut to_add = Vec::new();
 
