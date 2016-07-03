@@ -444,15 +444,6 @@ pub struct SegmentRef<'a> {
 }
 
 impl<'a> SegmentRef<'a> {
-    /// An iterator over the statements in this segment.
-    pub fn statement_iter(self) -> StatementIter<'a> {
-        StatementIter {
-            slice_iter: self.segment.statements.iter(),
-            segment: self,
-            index: 0,
-        }
-    }
-
     /// Fetch a single statement from this segment by its local index.
     pub fn statement(self, index: StatementIndex) -> StatementRef<'a> {
         StatementRef {
@@ -466,6 +457,20 @@ impl<'a> SegmentRef<'a> {
     /// difficulty which drives the `database::Executor` bin-packing heuristics.
     pub fn bytes(self) -> usize {
         self.segment.buffer.len()
+    }
+}
+
+impl<'a> IntoIterator for SegmentRef<'a> {
+    type Item = StatementRef<'a>;
+    type IntoIter = StatementIter<'a>;
+
+    /// An iterator over the statements in this segment.
+    fn into_iter(self) -> Self::IntoIter {
+        StatementIter {
+            slice_iter: self.segment.statements.iter(),
+            segment: self,
+            index: 0,
+        }
     }
 }
 

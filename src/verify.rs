@@ -577,7 +577,7 @@ fn verify_segment(sset: &SegmentSet,
         dv_map: &dummy_frame.optional_dv,
     };
     // use the _same_ VerifyState so that memory can be reused
-    for stmt in sref.statement_iter() {
+    for stmt in sref {
         if let Err(diag) = verify_proof(&mut state, stmt) {
             diagnostics.insert(stmt.address(), diag);
         }
