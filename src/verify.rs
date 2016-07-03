@@ -455,7 +455,7 @@ fn verify_segment(sset: &SegmentSet,
         var2bit: new_map(),
         dv_map: &dummy_frame.optional_dv,
     };
-    for stmt in sref.statement_iter() {
+    for stmt in sref {
         if let Err(diag) = verify_proof(&mut state, stmt) {
             diagnostics.insert(stmt.address(), diag);
         }

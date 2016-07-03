@@ -849,7 +849,7 @@ fn scope_check_single(sset: &SegmentSet, names: &Nameset, seg: SegmentRef) -> Se
         frames_out: Vec::new(),
     };
 
-    for sref in seg.statement_iter() {
+    for sref in seg {
         match sref.statement_type() {
             StatementType::Axiom => scope_check_assert(&mut state, sref),
             StatementType::Constant => scope_check_constant(&mut state, sref),
