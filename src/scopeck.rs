@@ -308,7 +308,7 @@ fn check_math_symbol(state: &mut ScopeState,
     }
 
     // active local definition?
-    if let Some(local_slot) = state.local_vars.get(&tref).and_then(|slot| slot.last()) {
+    if let Some(local_slot) = state.local_vars.get(tref.slice).and_then(|slot| slot.last()) {
         if check_endpoint(sref.index(), local_slot.end) {
             return Some((SymbolType::Variable, local_slot.atom));
         }
@@ -336,7 +336,7 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
     }
 
     // active local definition?
-    if let Some(&local_slot) = state.local_floats.get(&tref).and_then(|slot| slot.last()) {
+    if let Some(&local_slot) = state.local_floats.get(tref.slice).and_then(|slot| slot.last()) {
         if check_endpoint(sref.index(), local_slot.valid.end) {
             return Some(local_slot);
         }
@@ -357,7 +357,7 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
         match check_math_symbol(state, sref, tref) {
             None => bad = true,
             Some((SymbolType::Constant, atom)) => {
-                out.push(Const(&tref, atom));
+                out.push(Const(tref.slice, atom));
             }
             Some((SymbolType::Variable, atom)) => {
                 if tref.index() == 0 {
@@ -371,7 +371,7 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
                                             Diagnostic::VariableMissingFloat(tref.index()));
                             bad = true;
                         }
-                        Some(lfi) => out.push(Var(&tref, atom, lfi)),
+                        Some(lfi) => out.push(Var(tref.slice, atom, lfi)),
                     }
                 }
             }
