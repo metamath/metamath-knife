@@ -166,7 +166,7 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             span = info.stmt.span();
         }
         info.notes.push(Notation {
-            source: info.sset.source_info(info.stmt.segment.id).clone(),
+            source: info.sset.source_info(info.stmt.segment().id).clone(),
             message: info.s,
             span: span,
             level: info.level,
@@ -435,7 +435,7 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         UnclosedBeforeInclude(index) => {
             info.s = "${ group must be closed with a $} before another file can be included";
             ann(&mut info, stmt.span());
-            info.stmt = stmt.segment.statement(index);
+            info.stmt = stmt.segment().statement(index);
             info.s = "Include statement is here";
             info.level = Note;
             ann(&mut info, Span::null());

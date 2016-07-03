@@ -324,7 +324,7 @@ fn save_step(state: &mut VerifyState) {
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
 fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Result<()> {
     // only intend to check $p statements
-    if stmt.statement.stype != StatementType::Provable {
+    if stmt.statement_type() != StatementType::Provable {
         return Ok(());
     }
 

@@ -13,6 +13,37 @@
 //! documentation.  The output is one or more segments; the parser is
 //! responsible for detecting includes and splitting statements appropriately,
 //! although responsibility for following includes rests on the `segment_set`.
+//!
+//! ## Addresses, indices, and references
+//!
+//! To identify a statement uniquely, you need to know the segment ID, and the
+//! offset of the statement within the segment.  This is two numbers; global
+//! statement numbers can be computed, but are not widely used because they
+//! change too frequently in an incremental setting.  Those two numbers together
+//! can be handled as a `StatementAddress` structure.
+//!
+//! Within the parser itself, the segment ID is not known yet; they are assigned
+//! after all file inclusions have been resolved, which can only be done after
+//! the parsing phase is complete.  Fortunately, the parsing process always
+//! works with one segment at a time, so it is sufficient to use the local
+//! offset alone; the type `StatementIndex` is provided to make intent clear.
+//! `StatementIndex` can also be used in other analysis passes if, for wahtever
+//! reason, the segment ID is known from context.
+//!
+//! If you want to fetch actual data for a statement, you will need pointers
+//! into the segment data structures which store statement data.  A
+//! `StatementRef` structure encapsulates a statement address and all necessary
+//! pointers to fetch data; it can be used to fetch any parse-time information,
+//! but it is larger than a `StatementAddress`, and because it contains borrowed
+//! pointers it cannot be stored in long-lived data structures in any event.
+//!
+//! `TokenAddress`, `TokenIndex`, and `TokenRef` are provided for the same use
+//! cases as applied to tokens in math strings.  A `TokenAddress` contains three
+//! numbers; you will often want to use the `Atom`s provided by scopeck instead,
+//! as they are smaller and can be compared directly.
+//!
+//! `SegmentId` and `SegmentRef` cover the same use cases for segments, although
+//! it makes no sense to have a segment-local segment reference.
 
 use diag::Diagnostic;
 use std::cmp;
@@ -140,10 +171,7 @@ impl SegmentOrder {
         //     order: Vec::new(),
         //     reverse: Vec::new(),
         // };
-        // n.alloc_id();
-        // n.order.push(SegmentId(1));
-        // n.reindex();
-        // n
+        // n.alloc_id(); n.order.push(SegmentId(1)); n.reindex(); n
         SegmentOrder {
             high_water: 2,
             order: vec![SegmentId(1)],
@@ -283,79 +311,152 @@ impl TokenAddress {
     }
 }
 
+/// Expresses a valid range for a statement or token.
 #[derive(Copy,Clone,Debug,Default)]
 pub struct GlobalRange {
+    /// The starting position of the range, which is also the definition site.
     pub start: StatementAddress,
-    pub end: StatementIndex, // or NO_STATEMENT
+    /// The exclusive endpoint of the range.
+    ///
+    /// Since scope braces are not allowed to span segments, if a range ends at
+    /// all it must be in the same segment where it started, so this can be a
+    /// bare `StatementIndex`.  If the range extends to the logical end of the
+    /// database, that is represented with the NO_STATEMENT constant.
+    ///
+    /// Since the endpoint always points at a `CloseGroup` statement (or, in
+    /// erroneous cases, `Eof` or `FileInclude`) which has no label nor math
+    /// string, inclusivity versus exclusivity rarely comes up.
+    pub end: StatementIndex,
 }
 
+/// Semantic type for tokens which have been copied onto the heap.
+///
+/// Tokens are generally expected to be non-empty and consist of ASCII graphic
+/// characters.  Notably, the construction of compressed math strings in the
+/// verifier depends on tokens containing bytes less than 128.
 pub type Token = Box<[u8]>;
+
+/// Semantic type for tokens which have not been copied.
 pub type TokenPtr<'a> = &'a [u8];
 
+/// Copies a non-owned token onto the heap.
 pub fn copy_token(ptr: TokenPtr) -> Token {
     ptr.to_owned().into_boxed_slice()
 }
 
-// TODO this is rather meh.  I'd kind of like a consoldiated struct and I'd rather avoid the Strings
+/// Extracted data for a top-level `$d` statement in a segment.
 #[derive(Debug)]
 pub struct GlobalDv {
+    /// The location of the statement.
     pub start: StatementIndex,
+    /// The variables used in the statement.
     pub vars: Vec<Token>,
 }
 
+/// Types of math symbols in declarations.
 #[derive(Eq,PartialEq,Copy,Clone,Debug)]
 pub enum SymbolType {
+    /// `$v`
     Variable,
+    /// `$c`
     Constant,
 }
 
+/// Extracted information for a statement label in a segment.
 #[derive(Debug)]
 pub struct LabelDef {
+    /// The location of the labelled statement.
     pub index: StatementIndex,
 }
 
+/// Extracted information for a math symbol defined in a segment.
 #[derive(Debug)]
 pub struct SymbolDef {
+    /// The character sequence representing the symbol.
     pub name: Token,
+    /// The type of the statement which introduces the symbol.
     pub stype: SymbolType,
+    /// The location of the statement which introduces the symbol.
     pub start: StatementIndex,
+    /// Index of the symbol within its introducing statement.
     pub ordinal: TokenIndex,
 }
 
+/// Extracted information for a global `$f` statement in a segment.
 #[derive(Debug)]
 pub struct FloatDef {
+    /// Location of the statement.
     pub start: StatementIndex,
+    /// The math symbol which is the subject of the statement.
     pub name: Token,
+    /// The label of the `$f` statement.
     pub label: Token,
+    /// The typecode which is assigned to the symbol.
     pub typecode: Token,
 }
 
+/// Extracted information for a _non-global_ `$v` statement.
+///
+/// These are used to populate the atom table in nameck.
 #[derive(Debug)]
 pub struct LocalVarDef {
+    /// Local index of the variable-declaring statement.
     pub index: StatementIndex,
+    /// Index of variable within the statement.
     pub ordinal: TokenIndex,
 }
 
-/// This is a "dense" segment, which must be fully rebuilt in order to make any change.  We may in
-/// the future have an "unpacked" segment which is used for active editing, as well as a "lazy" or
-/// "mmap" segment type for fast incremental startup.
+/// A parsed segment, containing parsed statement data and some extractions.
+///
+/// This is the main result of the parse which is provided to `segment_set`,
+/// although most users will want to use a `SegmentRef` instead.
+///
+/// This is a "dense" segment, which must be fully rebuilt in order to make any
+/// change.  We may in the future have an "unpacked" segment which is used for
+/// active editing, as well as a "lazy" or "mmap" segment type for fast
+/// incremental startup.
 #[derive(Debug)]
 pub struct Segment {
+    /// The original string used to construct this segment.
+    ///
+    /// Don't assume the segment is wholly determined by this string.
     pub buffer: BufferRef,
-    // straight outputs
-    pub statements: Vec<Statement>,
+    /// List of statements in this segment; can be indexed with any
+    /// `StatementIndex`.
+    statements: Vec<Statement>,
+    /// All math strings and proof strings in this segment, concatenated for
+    /// fewer allocations.
     span_pool: Vec<Span>,
+    /// Any errors detected while parsing this segment.
     pub diagnostics: Vec<(StatementIndex, Diagnostic)>,
+    /// The file, if any, which is included at the end of this segment, as a
+    /// reference into the buffer.
     pub next_file: Span,
-    // crossed outputs
+    /// Global `$d` statements extracted for nameck.
     pub global_dvs: Vec<GlobalDv>,
+    /// Global `$v` and `$c` statements extracted for nameck.
     pub symbols: Vec<SymbolDef>,
+    /// Local `$v` statements extracted for nameck.
     pub local_vars: Vec<LocalVarDef>,
+    /// Global labelled statements extracted for nameck.
     pub labels: Vec<LabelDef>,
+    /// Global `$f` statements extracted for nameck.
     pub floats: Vec<FloatDef>,
 }
 
+/// A pointer to a segment which knows its identity.
+///
+/// `SegmentRef` objects are constructed from outside by the `segment_set`.
+#[derive(Copy,Clone)]
+pub struct SegmentRef<'a> {
+    /// The underlying segment from the parser.
+    pub segment: &'a Arc<Segment>,
+    /// The global ID which has been assigned to the segment.
+    pub id: SegmentId,
+}
+
 impl<'a> SegmentRef<'a> {
+    /// An iterator over the statements in this segment.
     pub fn statement_iter(self) -> StatementIter<'a> {
         StatementIter {
             slice_iter: self.segment.statements.iter(),
@@ -364,6 +465,7 @@ impl<'a> SegmentRef<'a> {
         }
     }
 
+    /// Fetch a single statement from this segment by its local index.
     pub fn statement(self, index: StatementIndex) -> StatementRef<'a> {
         StatementRef {
             segment: self,
@@ -372,28 +474,51 @@ impl<'a> SegmentRef<'a> {
         }
     }
 
+    /// Returns the source size of the segment, a proxy for computational
+    /// difficulty which drives the `database::Executor` bin-packing heuristics.
     pub fn bytes(self) -> usize {
         self.segment.buffer.len()
     }
 }
 
+/// An enumeration of statement types, most of which correspond to statements as
+/// defined in the Metamath spec.
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
 pub enum StatementType {
-    /// Psuedo statement used only to record end-of-file whitespace
+    /// Psuedo statement used only to record end-of-file whitespace.
     Eof,
-    /// Statement is damaged enough that there's no sense passing it to later stages
+    /// Statement which is damaged enough that there's no sense passing it to
+    /// later stages.
     Invalid,
+    /// Comments between statements are recorded as statements in their own
+    /// right to facilitate handling of date comments and other metadata.
     Comment,
+    /// A comment which starts with a `$t` token and must be interpreted
+    /// specially by the HTML generator.
     TypesettingComment,
+    /// A `$[` directive; we process these as statements, and disallow them
+    /// inside other statements, which violates the published Metamath spec but
+    /// is allowed behavior as an erratum.
+    ///
+    /// Such statements always end the current segment.
     FileInclude,
+    /// A spec `$a` statement.
     Axiom,
+    /// A spec `$p` statement.
     Provable,
+    /// A spec `$e` statement.
     Essential,
+    /// A spec `$f` statement.
     Floating,
+    /// A spec `$d` statement.
     Disjoint,
+    /// A spec `${` statement.
     OpenGroup,
+    /// A spec `$}` statement.
     CloseGroup,
+    /// A spec `$c` statement.
     Constant,
+    /// A spec `$v` statement.
     Variable,
 }
 use self::StatementType::*;
@@ -420,51 +545,99 @@ impl StatementType {
     }
 }
 
+/// Data stored inline in the segment for each statement.
+///
+/// Tokens and labels are not copied, but kept as references into the segment's
+/// buffer; we do calculate and store the length, because recalculating it on
+/// the fly would blow the branch miss budget.
+///
+/// The spans comprising the math and proof strings, and the parse errors if
+/// any, are stored in separate arrays within the segment.
 #[derive(Copy,Clone,Debug)]
-pub struct Statement {
-    pub stype: StatementType,
+struct Statement {
+    /// Statement type, either a spec-defined type or one of the pseudo-types.
+    stype: StatementType,
+    /// Total span of the statement, not including surrounding whitespace or
+    /// comments.
     span: Span,
+    /// Span of the statement label.
+    ///
+    /// This will be non-null iff the type requires a label; missing labels for
+    /// types which use them cause an immediate rewrite to `Invalid`.
     label: Span,
-    pub group: StatementIndex,
-    pub group_end: StatementIndex,
-    // indices into span_pool
+    /// Start of the most deeply nested group for this statment, or
+    /// NO_STATEMENT.
+    group: StatementIndex,
+    /// End of the most deeply nested group for this statment, or NO_STATEMENT.
+    group_end: StatementIndex,
+    /// Index into span_pool of the first math token.
     math_start: usize,
+    /// Index into span_pool of the first proof token / after the last math
+    /// token.
     proof_start: usize,
+    /// Index into span_pool one after the last proof token.
     proof_end: usize,
 }
 
-#[derive(Copy,Clone)]
-pub struct SegmentRef<'a> {
-    pub segment: &'a Arc<Segment>,
-    pub id: SegmentId,
-}
-
+/// A reference to a statement which knows its address and can be used to fetch
+/// statement information.
 #[derive(Copy,Clone)]
 pub struct StatementRef<'a> {
-    pub segment: SegmentRef<'a>,
-    pub statement: &'a Statement,
-    pub index: StatementIndex,
+    segment: SegmentRef<'a>,
+    statement: &'a Statement,
+    index: StatementIndex,
 }
 
 impl<'a> StatementRef<'a> {
-    pub fn address(&self) -> StatementAddress {
+    /// Fetch the segment-local index of this statement.
+    pub fn index(self) -> StatementIndex {
+        self.index
+    }
+
+    /// Back up from a statement reference to a segment reference.
+    pub fn segment(self) -> SegmentRef<'a> {
+        self.segment
+    }
+
+    /// Gets the type of this statement.  May be a pseudo-type.
+    pub fn statement_type(self) -> StatementType {
+        self.statement.stype
+    }
+
+    /// Obtain a globally-meaningful address for this statement.
+    pub fn address(self) -> StatementAddress {
         StatementAddress {
             segment_id: self.segment.id,
             index: self.index,
         }
     }
 
-    pub fn scope_range(&self) -> GlobalRange {
+    /// Constructs a range from this statement to the end of the database or
+    /// innermost enclosing scope construct.
+    ///
+    /// This is the end range of a hypothesis or variable defined in this
+    /// statement.
+    pub fn scope_range(self) -> GlobalRange {
         GlobalRange {
             start: self.address(),
             end: self.statement.group_end,
         }
     }
 
+    /// True if there is a `${ $}` group wrapping this statement.
+    pub fn in_group(self) -> bool {
+        self.statement.group_end != NO_STATEMENT
+    }
+
+    /// Obtain the statment label.
+    ///
+    /// This will be non-null iff the type requires a label; missing labels for
+    /// types which use them cause an immediate rewrite to `Invalid`.
     pub fn label(&self) -> &'a [u8] {
         self.statement.label.as_ref(&self.segment.segment.buffer)
     }
 
+    /// An iterator for the symbols in a statement's math string.
     pub fn math_iter(&self) -> TokenIter<'a> {
         let range = self.statement.math_start..self.statement.proof_start;
         TokenIter {
@@ -475,26 +648,37 @@ impl<'a> StatementRef<'a> {
         }
     }
 
+    /// The textual span of this statement within the segment's buffer.
+    ///
+    /// Does not include surrounding white space or comments.
     pub fn span(&self) -> Span {
         self.statement.span
     }
 
+    /// Count of symbols in this statement's math string.
     pub fn math_len(&self) -> TokenIndex {
         (self.statement.proof_start - self.statement.math_start) as TokenIndex
     }
 
+    /// Count of tokens in this statement's proof string.
     pub fn proof_len(&self) -> TokenIndex {
         (self.statement.proof_end - self.statement.proof_start) as TokenIndex
     }
 
+    /// Given an index into this statement's math string, find a textual span
+    /// into the segment buffer.
     pub fn math_span(&self, ix: TokenIndex) -> Span {
         self.segment.segment.span_pool[self.statement.math_start + ix as usize]
     }
 
+    /// Given an index into this statement's proof string, find a textual span
+    /// into the segment buffer.
     pub fn proof_span(&self, ix: TokenIndex) -> Span {
         self.segment.segment.span_pool[self.statement.proof_start + ix as usize]
     }
 
+    /// Given an index into this statement's math string, get a reference to the
+    /// math token.
     pub fn math_at(&self, ix: TokenIndex) -> TokenRef<'a> {
         TokenRef {
             slice: self.math_span(ix).as_ref(&self.segment.segment.buffer),
@@ -505,11 +689,16 @@ impl<'a> StatementRef<'a> {
         }
     }
 
+    /// Obtains textual proof data by token index.
     pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
         self.proof_span(ix).as_ref(&self.segment.segment.buffer)
     }
 }
 
+/// An iterator over the statements in a segment.
+///
+/// This iterator knows the segment's global ID and can thus return proper
+/// `StatementRef`s.
 pub struct StatementIter<'a> {
     slice_iter: slice::Iter<'a, Statement>,
     segment: SegmentRef<'a>,
@@ -532,6 +721,7 @@ impl<'a> Iterator for StatementIter<'a> {
     }
 }
 
+/// An iterator over symbols in the math string of a statement.
 pub struct TokenIter<'a> {
     slice_iter: slice::Iter<'a, Span>,
     buffer: &'a [u8],
@@ -539,13 +729,19 @@ pub struct TokenIter<'a> {
     index: TokenIndex,
 }
 
+/// A reference to a token within a math string that knows its address.
+///
+/// Primarily used for iteration.
 #[derive(Copy,Clone)]
 pub struct TokenRef<'a> {
-    pub slice: &'a [u8],
+    /// Textual content of the token.
+    pub slice: TokenPtr<'a>,
+    /// 3-component address of the token.
     pub address: TokenAddress,
 }
 
 impl<'a> TokenRef<'a> {
+    /// Get the local index of the token within the statement under iteration.
     pub fn index(self) -> TokenIndex {
         self.address.token_index
     }
@@ -623,8 +819,8 @@ impl<'a> Scanner<'a> {
         let mut ix = self.position as usize;
 
         while ix < len && self.buffer[ix] <= 32 {
-            // For the purpose of error recovery, we consider C0 control characters to be
-            // whitespace (following SMM2)
+            // For the purpose of error recovery, we consider C0 control
+            // characters to be whitespace (following SMM2)
             if !is_mm_space_c0(self.buffer[ix]) {
                 self.position = (ix + 1) as FilePos;
                 return badchar(self, ix);
@@ -855,11 +1051,13 @@ impl<'a> Scanner<'a> {
         }
 
         if has_proof {
-            // diagnostic already generated if unwanted, but we still need to eat the proof
+            // diagnostic already generated if unwanted, but we still need to
+            // eat the proof
             self.get_string(false, true);
         } else {
-            // diagnostic already generated if unwanted.  this is NOT an invalidation as $p
-            // statements don't need proofs (I mean you should have a ? but we know what you mean)
+            // diagnostic already generated if unwanted.  this is NOT an
+            // invalidation as $p statements don't need proofs (I mean you
+            // should have a ? but we know what you mean)
         }
     }
 
@@ -981,7 +1179,8 @@ impl<'a> Scanner<'a> {
                     self.invalidated = true;
                 }
             }
-            // eat tokens to the next keyword rather than treating them as labels
+            // eat tokens to the next keyword rather than treating them as
+            // labels
             Invalid => self.eat_invalid(),
             _ => {}
         }
@@ -1186,16 +1385,18 @@ pub fn guess_buffer_name(buffer: &[u8]) -> &str {
     }
 }
 
-/// This function implements parsing stage 1, which breaks down the metalanguage grammar, finding
-/// all identifier definitions and inclusion statements.
+/// This function implements parsing stage 1, which breaks down the metalanguage
+/// grammar, finding all identifier definitions and inclusion statements.
 ///
-/// There is an argument to be made that we shouldn't tokenize or store the math strings and proofs
-/// at this stage, since they're bulky and can easily be generated on demand.
+/// There is an argument to be made that we shouldn't tokenize or store the math
+/// strings and proofs at this stage, since they're bulky and can easily be
+/// generated on demand.
 ///
-/// The current Metamath spec defines comments and file inclusions at the token level.  It is
-/// useful for our purposes to parse comments that are strictly between statements as if they were
-/// statements (SMM2 did this too; may revisit) and we require file inclusions to be between
-/// statements at the top nesting level (this has been approved by Norman Megill).
+/// The current Metamath spec defines comments and file inclusions at the token
+/// level.  It is useful for our purposes to parse comments that are strictly
+/// between statements as if they were statements (SMM2 did this too; may
+/// revisit) and we require file inclusions to be between statements at the top
+/// nesting level (this has been approved by Norman Megill).
 pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner {
@@ -1207,7 +1408,8 @@ pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
 
     loop {
         let (seg, last) = scanner.get_segment();
-        // we can almost use seg.next_file == Span::null here, but for the error case
+        // we can almost use seg.next_file == Span::null here, but for the error
+        // case
         closed_spans.push(Arc::new(seg));
         if last {
             return closed_spans;
