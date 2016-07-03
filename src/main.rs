@@ -20,6 +20,7 @@ pub mod scopeck;
 pub mod segment_set;
 pub mod util;
 pub mod verify;
+pub mod line_cache;
 
 use clap::Arg;
 use clap::App;
@@ -27,6 +28,7 @@ use database::Database;
 use database::DbOptions;
 use diag::DiagnosticClass;
 use diag::Notation;
+use line_cache::LineCache;
 use std::io;
 use std::mem;
 use std::str::FromStr;
@@ -97,8 +99,9 @@ fn main() {
             types.push(DiagnosticClass::Verify);
         }
 
+        let mut lc = LineCache::default();
         for notation in db.diag_notations(types) {
-            print_annotation(notation);
+            print_annotation(&mut lc, notation);
         }
 
         if matches.is_present("repeat") {
@@ -116,15 +119,17 @@ fn main() {
     }
 }
 
-fn print_annotation(ann: Notation) {
+fn print_annotation(lc: &mut LineCache, ann: Notation) {
     let mut args = String::new();
     for (id, val) in ann.args {
         args.push_str(&format!(" {}={}", id, val));
     }
-    println!("{}:{}-{}:{:?}:{}{}",
+    let (row, col) = lc.from_offset(&ann.source.text,
+                                    (ann.span.start + ann.source.span.start) as usize);
+    println!("{}:{}:{}:{:?}:{}{}",
              ann.source.name,
-             ann.span.start + ann.source.span.start,
-             ann.span.end + ann.source.span.start,
+             row,
+             col,
              ann.level,
              ann.message,
              args);
