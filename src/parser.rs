@@ -135,15 +135,20 @@ pub struct SegmentOrder {
 impl SegmentOrder {
     /// Creates a new empty segment ordering.
     pub fn new() -> Self {
-        let mut n = SegmentOrder {
-            high_water: 1,
-            order: Vec::new(),
-            reverse: Vec::new(),
-        };
-        n.alloc_id();
-        n.order.push(SegmentId(1));
-        n.reindex();
-        n
+        // let mut n = SegmentOrder {
+        //     high_water: 1,
+        //     order: Vec::new(),
+        //     reverse: Vec::new(),
+        // };
+        // n.alloc_id();
+        // n.order.push(SegmentId(1));
+        // n.reindex();
+        // n
+        SegmentOrder {
+            high_water: 2,
+            order: vec![SegmentId(1)],
+            reverse: vec![0; 2],
+        }
     }
 
     /// Each segment ordering has a single ID which will not be used otherwise;
@@ -610,8 +615,7 @@ impl<'a> Scanner<'a> {
         #[cold]
         fn badchar(slf: &mut Scanner, ix: usize) -> Span {
             let ch = slf.buffer[ix];
-            let diag = Diagnostic::BadCharacter(ix, ch);
-            slf.diagnostics.push((slf.statement_index, diag));
+            slf.diag(Diagnostic::BadCharacter(ix, ch));
             return slf.get_raw();
         }
 
@@ -673,10 +677,10 @@ impl<'a> Scanner<'a> {
                 } else if mid_statement {
                     self.diag(Diagnostic::MidStatementCommentMarker(tok))
                 } else {
-                    if tok_ref == b"$j" {
-                        ctype = CommentType::Extra;
+                    ctype = if tok_ref == b"$j" {
+                        CommentType::Extra
                     } else {
-                        ctype = CommentType::Typesetting;
+                        CommentType::Typesetting
                     }
                 }
             } else if tok_ref.contains(&b'$') {
@@ -731,10 +735,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_comment_statement(&mut self) -> Option<Statement> {
-        let ftok = if !self.unget.is_null() {
-            mem::replace(&mut self.unget, Span::null())
-        } else {
+        let ftok = if self.unget.is_null() {
             self.get_raw()
+        } else {
+            mem::replace(&mut self.unget, Span::null())
         };
         if ftok != Span::null() {
             let ftok_ref = ftok.as_ref(self.buffer);
@@ -782,20 +786,23 @@ impl<'a> Scanner<'a> {
     }
 
     fn get_label(&mut self) -> Span {
-        if self.labels.len() == 1 {
-            self.labels[0]
-        } else if self.labels.len() == 0 {
-            self.diag(Diagnostic::MissingLabel);
-            self.invalidated = true;
-            Span::null()
-        } else {
-            for &addl in self.labels.iter().skip(1) {
-                self.diagnostics
-                    .push((self.statement_index, Diagnostic::RepeatedLabel(addl, self.labels[0])));
+        match self.labels.len() {
+            1 => self.labels[0],
+            0 => {
+                self.diag(Diagnostic::MissingLabel);
+                self.invalidated = true;
+                Span::null()
             }
-            // have to invalidate because we don't know which to use
-            self.invalidated = true;
-            Span::null()
+            _ => {
+                for &addl in self.labels.iter().skip(1) {
+                    self.diagnostics
+                        .push((self.statement_index,
+                               Diagnostic::RepeatedLabel(addl, self.labels[0])));
+                }
+                // have to invalidate because we don't know which to use
+                self.invalidated = true;
+                Span::null()
+            }
         }
     }
 
@@ -959,9 +966,7 @@ impl<'a> Scanner<'a> {
 
         let math_len = self.statement_proof_start - self.statement_math_start;
         match stype {
-            FileInclude => {
-                label = self.get_file_include();
-            }
+            FileInclude => label = self.get_file_include(),
             Disjoint => {
                 // math.len = 1 was caught above
                 if math_len == 1 {
@@ -970,15 +975,14 @@ impl<'a> Scanner<'a> {
                 }
             }
             Floating => {
+                // math_len = 0 was already marked EmptyMathString
                 if math_len != 0 && math_len != 2 {
                     self.diag(Diagnostic::BadFloating);
                     self.invalidated = true;
                 }
             }
-            Invalid => {
-                // eat tokens to the next keyword rather than treating them as labels
-                self.eat_invalid();
-            }
+            // eat tokens to the next keyword rather than treating them as labels
+            Invalid => self.eat_invalid(),
             _ => {}
         }
 
@@ -1015,12 +1019,10 @@ impl<'a> Scanner<'a> {
 
             // TODO record name usage
             match seg.statements[index as usize].stype {
-                OpenGroup => {
-                    top_group = index;
-                }
+                OpenGroup => top_group = index,
                 CloseGroup => {
                     if top_group == NO_STATEMENT {
-                        self.diagnostics.push((index, Diagnostic::UnmatchedCloseGroup));
+                        self.diag(Diagnostic::UnmatchedCloseGroup);
                     } else {
                         seg.statements[top_group as usize].group_end = index;
                         top_group = seg.statements[top_group as usize].group;
@@ -1028,12 +1030,12 @@ impl<'a> Scanner<'a> {
                 }
                 Constant => {
                     if top_group != NO_STATEMENT {
-                        self.diagnostics.push((index, Diagnostic::ConstantNotTopLevel));
+                        self.diag(Diagnostic::ConstantNotTopLevel);
                     }
                 }
                 Essential => {
                     if top_group == NO_STATEMENT {
-                        self.diagnostics.push((index, Diagnostic::EssentialAtTopLevel));
+                        self.diag(Diagnostic::EssentialAtTopLevel);
                     }
                 }
                 FileInclude => {
@@ -1138,13 +1140,10 @@ fn collect_definitions(seg: &mut Segment) {
 }
 
 fn is_valid_label(label: &[u8]) -> bool {
-    for &c in label {
-        if !(c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') ||
-             (c >= b'0' && c <= b'9') || (c >= b'A' && c <= b'Z')) {
-            return false;
-        }
-    }
-    true
+    label.iter().all(|&c| {
+        c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') ||
+        (c >= b'0' && c <= b'9') || (c >= b'A' && c <= b'Z')
+    })
 }
 
 /// Slightly set.mm specific hack to extract a section name from a byte buffer.

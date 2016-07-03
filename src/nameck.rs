@@ -18,17 +18,27 @@
 //! The nameset is also responsible for maintaining the `Atom` table.
 
 use database::DbOptions;
+use parser::Comparer;
+use parser::copy_token;
+use parser::Segment;
+use parser::SegmentId;
+use parser::SegmentOrder;
+use parser::SegmentRef;
+use parser::StatementAddress;
+use parser::SymbolType;
+use parser::Token;
+use parser::TokenAddress;
+use parser::TokenPtr;
+use segment_set::SegmentSet;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::u32;
-use parser::{Comparer, copy_token, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress,
-             SymbolType, Token, TokenAddress, TokenPtr};
-use segment_set::SegmentSet;
 use util;
 use util::HashMap;
 use util::HashSet;
 use util::new_set;
+
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
 
@@ -74,17 +84,14 @@ fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: A) {
     slot.retain(|x| x.0 != address);
 }
 
-fn autoviv<K, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V
-    where K: Hash + Eq
-{
+fn autoviv<K: Hash + Eq, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V {
     map.entry(key).or_insert_with(Default::default)
 }
 
 fn deviv<K, Q: ?Sized, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
     where F: FnOnce(&mut V),
-          K: Borrow<Q>,
+          K: Borrow<Q> + Hash + Eq,
           Q: Hash + Eq,
-          K: Hash + Eq,
           V: Default + Eq
 {
     let kill = match map.get_mut(key) {
@@ -127,10 +134,9 @@ struct AtomTable {
 fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
     let next = Atom(table.table.len() as u32 + 1);
     assert!(next.0 < u32::max_value(), "atom table overflowed");
-    match table.table.get(tok) {
-        None => {}
-        Some(atom) => return *atom,
-    };
+    if let Some(&atom) = table.table.get(tok) {
+        return atom;
+    }
     table.table.insert(copy_token(tok), next);
     if table.reverse.len() == 0 {
         table.reverse.push(Token::default());
@@ -176,13 +182,10 @@ impl Nameset {
         // being temporarily 2x
 
         let mut keys_to_remove = Vec::new();
-        for (&seg_id, &ref seg) in &self.segments {
-            let stale = match segs.segments.get(&seg_id) {
-                None => true,
-                Some(&(ref seg_new, _)) => !util::ptr_eq::<Segment>(&seg_new, seg),
-            };
-
-            if stale {
+        for (&seg_id, seg) in &self.segments {
+            if segs.segments.get(&seg_id).map_or(true, |&(ref seg_new, _)| {
+                !util::ptr_eq::<Segment>(&seg_new, &seg)
+            }) {
                 keys_to_remove.push(seg_id);
             }
         }
@@ -210,7 +213,7 @@ impl Nameset {
             id: id,
         };
 
-        for &ref symdef in &seg.symbols {
+        for symdef in &seg.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
             slot.generation = self.generation;
             if slot.atom == Atom::default() {
@@ -311,7 +314,7 @@ impl Nameset {
     ///
     /// If you don't know about the name, use lookup_symbol instead.
     pub fn get_atom(&self, name: TokenPtr) -> Atom {
-        self.atom_table.table.get(name).cloned().expect("please only use get_atom for local $v")
+        self.atom_table.table.get(name).expect("please only use get_atom for local $v").clone()
     }
 
     /// Map atoms back to names.
@@ -492,17 +495,9 @@ impl<'a> NameReader<'a> {
     }
 
     /// Looks up the list of all global $d statements.
-    pub fn lookup_global_dv(&mut self) -> Vec<LookupGlobalDv> {
-        self.nameset
-            .dv_info
-            .iter()
-            .map(|&(addr, ref vars)| {
-                LookupGlobalDv {
-                    address: addr,
-                    vars: &vars,
-                }
-            })
-            .collect()
+    #[inline]
+    pub fn lookup_global_dv(&self) -> &Vec<(StatementAddress, Vec<Atom>)> {
+        &self.nameset.dv_info
     }
 }
 
