@@ -565,8 +565,8 @@ struct Statement {
     span: Span,
     /// Span of the statement label.
     ///
-    /// This will be non-null iff the type requires a label; missing labels for
-    /// types which use them cause an immediate rewrite to `Invalid`.
+    /// If the type does not require a label, this will be a length-zero span
+    /// at the beginning of the keyword.
     label: Span,
     /// Start of the most deeply nested group for this statment, or
     /// NO_STATEMENT.
@@ -656,8 +656,15 @@ impl<'a> StatementRef<'a> {
     /// Does not include trailing white space or surrounding comments; will
     /// include leading white space, so a concatenation of spans for all
     /// statements will reconstruct the segment source.
-    pub fn span(&self) -> Span {
+    pub fn span_full(&self) -> Span {
         self.statement.span
+    }
+
+    /// The textual span of this statement within the segment's buffer.
+    ///
+    /// Does not include surrounding white space or comments, unlike `span_full()`.
+    pub fn span(&self) -> Span {
+        Span::new2(self.statement.label.start, self.span_full().end)
     }
 
     /// Count of symbols in this statement's math string.
@@ -1045,11 +1052,15 @@ impl<'a> Scanner<'a> {
     }
 
     /// We now know we shouldn't have labels.  Issue errors if we do anyway.
-    fn get_no_label(&mut self) {
+    fn get_no_label(&mut self, kwtok: Span) -> Span {
         // none of these are invalidations...
         for &lspan in &self.labels {
             self.diagnostics.push((self.statement_index, Diagnostic::SpuriousLabel(lspan)));
         }
+
+        // If this is a valid no-label statement, kwtok will have the keyword.
+        // Otherwise it may be Span(0,0) = null, in which case we also return Span(0,0).
+        Span::new2(kwtok.start, kwtok.start)
     }
 
     /// We now know we need exactly one label.  Error and invalidate if we don't
@@ -1247,8 +1258,7 @@ impl<'a> Scanner<'a> {
         let mut label = if stype.takes_label() {
             self.get_label()
         } else {
-            self.get_no_label();
-            Span::null()
+            self.get_no_label(kwtok)
         };
 
         // keyword is followed by strings; this also errors if the string is
