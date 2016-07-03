@@ -227,7 +227,7 @@ impl Nameset {
         }
 
         for &ref lsymdef in &seg.local_vars {
-            let name = sref.statement(lsymdef.index).math_at(lsymdef.ordinal).slice;
+            let name = &sref.statement(lsymdef.index).math_at(lsymdef.ordinal);
             intern(&mut self.atom_table, name);
         }
 

@@ -301,14 +301,14 @@ fn check_math_symbol(state: &mut ScopeState,
                      tref: TokenRef)
                      -> Option<(SymbolType, Atom)> {
     // active global definition?
-    if let Some(sdef) = state.gnames.lookup_symbol(tref.slice) {
+    if let Some(sdef) = state.gnames.lookup_symbol(&tref) {
         if state.order.cmp(&sdef.address, &tref.address) == Ordering::Less {
             return Some((sdef.stype, sdef.atom));
         }
     }
 
     // active local definition?
-    if let Some(local_slot) = state.local_vars.get(tref.slice).and_then(|slot| slot.last()) {
+    if let Some(local_slot) = state.local_vars.get(&tref).and_then(|slot| slot.last()) {
         if check_endpoint(sref.index(), local_slot.end) {
             return Some((SymbolType::Variable, local_slot.atom));
         }
@@ -326,7 +326,7 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
                     tref: TokenRef<'a>)
                     -> Option<LocalFloatInfo> {
     // active global definition?
-    if let Some(fdef) = state.gnames.lookup_float(tref.slice) {
+    if let Some(fdef) = state.gnames.lookup_float(&tref) {
         if state.order.cmp(&fdef.address, &sref.address()) == Ordering::Less {
             return Some(LocalFloatInfo {
                 valid: fdef.address.unbounded_range(),
@@ -336,7 +336,7 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
     }
 
     // active local definition?
-    if let Some(&local_slot) = state.local_floats.get(tref.slice).and_then(|slot| slot.last()) {
+    if let Some(&local_slot) = state.local_floats.get(&tref).and_then(|slot| slot.last()) {
         if check_endpoint(sref.index(), local_slot.valid.end) {
             return Some(local_slot);
         }
@@ -357,7 +357,7 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
         match check_math_symbol(state, sref, tref) {
             None => bad = true,
             Some((SymbolType::Constant, atom)) => {
-                out.push(Const(tref.slice, atom));
+                out.push(Const(&tref, atom));
             }
             Some((SymbolType::Variable, atom)) => {
                 if tref.index() == 0 {
@@ -371,7 +371,7 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
                                             Diagnostic::VariableMissingFloat(tref.index()));
                             bad = true;
                         }
-                        Some(lfi) => out.push(Var(tref.slice, atom, lfi)),
+                        Some(lfi) => out.push(Var(&tref, atom, lfi)),
                     }
                 }
             }
@@ -617,18 +617,18 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
         return;
     }
 
-    for tokref in sref.math_iter() {
-        if let Some(ldef) = state.gnames.lookup_label(tokref.slice) {
+    for tref in sref.math_iter() {
+        if let Some(ldef) = state.gnames.lookup_label(&tref) {
             push_diagnostic(state,
                             sref.index(),
-                            Diagnostic::SymbolDuplicatesLabel(tokref.index(), ldef.address));
+                            Diagnostic::SymbolDuplicatesLabel(tref.index(), ldef.address));
         }
 
-        if let Some(cdef) = state.gnames.lookup_symbol(tokref.slice) {
-            if cdef.address != tokref.address {
+        if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
+            if cdef.address != tref.address {
                 push_diagnostic(state,
                                 sref.index(),
-                                Diagnostic::SymbolRedeclared(tokref.index(), cdef.address));
+                                Diagnostic::SymbolRedeclared(tref.index(), cdef.address));
             }
         }
     }
@@ -742,7 +742,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     // here
     if sref.in_group() {
         state.local_floats
-            .entry(copy_token(var_tok.slice))
+            .entry(copy_token(&var_tok))
             .or_insert(Vec::new())
             .push(LocalFloatInfo {
                 typecode: const_at,
@@ -750,8 +750,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             });
     }
 
-    let expr = [Const(const_tok.slice, const_at),
-                Var(var_tok.slice, var_at, LocalFloatInfo::default())];
+    let expr = [Const(&const_tok, const_at), Var(&var_tok, var_at, LocalFloatInfo::default())];
     construct_stub_frame(state, sref, latom, &expr);
 }
 
@@ -762,9 +761,9 @@ fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
 // factored out to make a useful borrow scope
 fn maybe_add_local_var(state: &mut ScopeState,
                        sref: StatementRef,
-                       tokref: TokenRef)
+                       tref: TokenRef)
                        -> Option<TokenAddress> {
-    let lv_slot = state.local_vars.entry(copy_token(tokref.slice)).or_insert(Vec::new());
+    let lv_slot = state.local_vars.entry(copy_token(&tref)).or_insert(Vec::new());
 
     if let Some(lv_most_recent) = lv_slot.last() {
         if check_endpoint(sref.index(), lv_most_recent.end) {
@@ -773,54 +772,54 @@ fn maybe_add_local_var(state: &mut ScopeState,
     }
 
     lv_slot.push(LocalVarInfo {
-        start: tokref.address,
+        start: tref.address,
         end: sref.scope_range().end,
-        atom: state.nameset.get_atom(tokref.slice),
+        atom: state.nameset.get_atom(&tref),
     });
     None
 }
 
 fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
-    for tokref in sref.math_iter() {
-        if let Some(ldef) = state.gnames.lookup_label(tokref.slice) {
+    for tref in sref.math_iter() {
+        if let Some(ldef) = state.gnames.lookup_label(&tref) {
             push_diagnostic(state,
                             sref.index(),
-                            Diagnostic::SymbolDuplicatesLabel(tokref.index(), ldef.address));
+                            Diagnostic::SymbolDuplicatesLabel(tref.index(), ldef.address));
         }
 
         if !sref.in_group() {
             // top level $v, may conflict with a prior $c
-            if let Some(cdef) = state.gnames.lookup_symbol(tokref.slice) {
-                if cdef.address != tokref.address {
+            if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
+                if cdef.address != tref.address {
                     push_diagnostic(state,
                                     sref.index(),
-                                    Diagnostic::SymbolRedeclared(tokref.index(), cdef.address));
+                                    Diagnostic::SymbolRedeclared(tref.index(), cdef.address));
                 }
             }
         } else {
             // nested $v, may conflict with an outer scope $v, top level $v/$c,
             // or a _later_ $c
-            if let Some(cdef) = state.gnames.lookup_symbol(tokref.slice) {
-                if state.order.cmp(&cdef.address, &tokref.address) == Ordering::Less {
+            if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
+                if state.order.cmp(&cdef.address, &tref.address) == Ordering::Less {
                     push_diagnostic(state,
                                     sref.index(),
-                                    Diagnostic::SymbolRedeclared(tokref.index(), cdef.address));
+                                    Diagnostic::SymbolRedeclared(tref.index(), cdef.address));
                     continue;
                 } else if cdef.stype == SymbolType::Constant {
                     push_diagnostic(state,
                                     sref.index(),
-                                    Diagnostic::VariableRedeclaredAsConstant(tokref.index(),
+                                    Diagnostic::VariableRedeclaredAsConstant(tref.index(),
                                                                              cdef.address));
                     continue;
                 }
             }
 
             // recorded in local state here
-            if let Some(prev_addr) = maybe_add_local_var(state, sref, tokref) {
+            if let Some(prev_addr) = maybe_add_local_var(state, sref, tref) {
                 // local/local conflict
                 push_diagnostic(state,
                                 sref.index(),
-                                Diagnostic::SymbolRedeclared(tokref.index(), prev_addr));
+                                Diagnostic::SymbolRedeclared(tref.index(), prev_addr));
             }
         }
     }
@@ -866,7 +865,7 @@ fn scope_check_single(sset: &SegmentSet, names: &Nameset, seg: SegmentRef) -> Se
 
     SegmentScopeResult {
         id: seg.id,
-        source: seg.segment.clone(),
+        source: (*seg).clone(),
         name_usage: state.gnames.into_usage(),
         diagnostics: state.diagnostics,
         frames_out: state.frames_out,
@@ -927,13 +926,12 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
                 let sref = segments2.segment(id);
                 if let Some(old_res) = osr {
                     if old_res.name_usage.valid(&names) &&
-                       ptr_eq::<Segment>(&old_res.source, sref.segment) {
+                       ptr_eq::<Segment>(&old_res.source, &sref) {
                         return None;
                     }
                 }
                 if segments2.options.trace_recalc {
-                    println!("scopeck({:?})",
-                             parser::guess_buffer_name(&sref.segment.buffer));
+                    println!("scopeck({:?})", parser::guess_buffer_name(&sref.buffer));
                 }
                 Some(Arc::new(scope_check_single(&segments2, &names, sref)))
             }));
