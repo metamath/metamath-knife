@@ -1215,11 +1215,12 @@ impl<'a> Scanner<'a> {
         // look for labels before the keyword
         self.read_labels();
 
-        let mut stype = Eof;
         let kwtok = self.get();
-        if !kwtok.is_null() {
+        let stype = if kwtok.is_null() {
+            Eof
+        } else {
             let kwtok_ref = kwtok.as_ref(self.buffer);
-            stype = if kwtok_ref.len() == 2 && kwtok_ref[0] == b'$' {
+            if kwtok_ref.len() == 2 && kwtok_ref[0] == b'$' {
                 match kwtok_ref[1] {
                     b'[' => FileInclude,
                     b'a' => Axiom,
@@ -1235,10 +1236,10 @@ impl<'a> Scanner<'a> {
                 }
             } else {
                 Invalid
-            };
-            if stype == Invalid {
-                self.diag(Diagnostic::UnknownKeyword(kwtok));
             }
+        };
+        if stype == Invalid {
+            self.diag(Diagnostic::UnknownKeyword(kwtok));
         }
         self.invalidated = false;
 
@@ -1280,9 +1281,11 @@ impl<'a> Scanner<'a> {
             _ => {}
         }
 
-        if self.invalidated {
-            stype = Invalid;
-        }
+        let stype = if self.invalidated {
+            Invalid
+        } else {
+            stype
+        };
 
         self.out_statement(stype, label)
     }
