@@ -50,7 +50,7 @@ fn make_index(mut buf: &[u8]) -> Vec<u32> {
     out
 }
 
-// find the lowest offset for which offset_to_line would give the target.
+// find the lowest offset for which from_offset would give the target.
 // Panics if line number out of range.
 fn line_to_offset(buf: &[u8], index: &[u32], line: u32) -> usize {
     let page = index.binary_search_by(|&ll| if ll < line {
@@ -108,5 +108,17 @@ impl LineCache {
         // now for the column
         let colno = offset - line_to_offset(buf, index, lineno);
         (lineno + 1, colno as u32 + 1)
+    }
+
+    
+    /// Find the offset just after the end of the line (usually the
+    /// location of a '\n', unless we are at the end of the file).
+    pub fn line_end(buf: &[u8], offset: usize) -> usize {
+        for pos in offset..buf.len() {
+            if buf[pos] == b'\n' {
+                return pos;
+            }
+        }
+        buf.len()
     }
 }
