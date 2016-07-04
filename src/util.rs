@@ -100,8 +100,7 @@ fn aligned_part(buffer: &[u8]) -> (usize, &[u32]) {
     let mut sptr = buffer.as_ptr() as usize;
     let mut eptr = sptr + buffer.len();
 
-    if sptr > !3 {
-        // pointer into the last 32-bit word of the address space?  wat
+    if buffer.len() < 4 {
         return (0, Default::default());
     }
 
