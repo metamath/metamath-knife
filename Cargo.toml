@@ -24,3 +24,6 @@ debug = true
 [profile.dev]
 opt-level = 1
 codegen-units = 4
+
+[profile.test]
+codegen-units = 4

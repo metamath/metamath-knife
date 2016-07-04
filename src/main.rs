@@ -21,6 +21,8 @@ pub mod segment_set;
 pub mod util;
 pub mod verify;
 pub mod line_cache;
+#[cfg(test)]
+mod util_tests;
 
 use clap::Arg;
 use clap::App;
