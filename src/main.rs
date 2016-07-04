@@ -129,8 +129,8 @@ fn print_annotation(lc: &mut LineCache, ann: Notation) {
     for (id, val) in ann.args {
         args.push_str(&format!(" {}={}", id, val));
     }
-    let (row, col) = lc.from_offset(&ann.source.text,
-                                    (ann.span.start + ann.source.span.start) as usize);
+    let offs = (ann.span.start + ann.source.span.start) as usize;
+    let (row, col) = lc.from_offset(&ann.source.text, offs);
     println!("{}:{}:{}:{:?}:{}{}",
              ann.source.name,
              row,
@@ -138,4 +138,18 @@ fn print_annotation(lc: &mut LineCache, ann: Notation) {
              ann.level,
              ann.message,
              args);
+
+    let line_end = LineCache::line_end(&ann.source.text, offs);
+    let eoffs = (ann.span.end + ann.source.span.start) as usize;
+    let line_start = offs - (col-1) as usize;
+    if eoffs <= line_end {
+        println!("|{}»{}«{}",
+                 String::from_utf8_lossy(&ann.source.text[line_start..offs]),
+                 String::from_utf8_lossy(&ann.source.text[offs..eoffs]),
+                 String::from_utf8_lossy(&ann.source.text[eoffs..line_end]));
+    } else {
+        println!("|{}»{}",
+                 String::from_utf8_lossy(&ann.source.text[line_start..offs]),
+                 String::from_utf8_lossy(&ann.source.text[offs..line_end]));
+    }
 }
