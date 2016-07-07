@@ -705,6 +705,20 @@ impl<'a> StatementRef<'a> {
     pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
         self.proof_span(ix).as_ref(&self.segment.segment.buffer)
     }
+
+    /// Get the "documentation" comment immediately preceding a $a $p
+    /// statement, if it exists.
+    pub fn associated_comment(&self) -> Option<StatementRef<'a>> {
+        if self.index == 0 {
+            return None;
+        }
+        let sref = self.segment.statement(self.index - 1);
+        if sref.statement_type() == Comment {
+            Some(sref)
+        } else {
+            None
+        }
+    }
 }
 
 /// An iterator over the statements in a segment.
@@ -1020,7 +1034,7 @@ impl<'a> Scanner<'a> {
                 } else {
                     Comment
                 };
-                return Some(self.out_statement(stype, Span::null()));
+                return Some(self.out_statement(stype, Span::new2(ftok.start, ftok.start)));
             } else {
                 self.unget = ftok;
             }

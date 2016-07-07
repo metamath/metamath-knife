@@ -15,6 +15,7 @@ use parser::TokenIndex;
 use segment_set::SegmentSet;
 use segment_set::SourceInfo;
 use std::fmt::Display;
+use std::io;
 use std::mem;
 use std::sync::Arc;
 
@@ -100,6 +101,13 @@ pub enum Diagnostic {
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
 }
+use self::Diagnostic::*;
+
+impl From<io::Error> for Diagnostic {
+    fn from(err: io::Error) -> Diagnostic {
+        IoError(format!("{}", err))
+    }
+}
 
 /// An indication of the severity of a notation.
 #[derive(Copy,Clone,Debug)]
@@ -174,7 +182,6 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         })
     }
 
-    use self::Diagnostic::*;
     fn d<V: Display>(v: V) -> String {
         format!("{}", v)
     }

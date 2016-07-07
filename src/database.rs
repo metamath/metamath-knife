@@ -100,13 +100,16 @@
 use diag;
 use diag::DiagnosticClass;
 use diag::Notation;
+use export;
 use nameck::Nameset;
+use nameck::NameReader;
 use scopeck;
 use scopeck::ScopeResult;
 use segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt;
+use std::fs::File;
 use std::panic;
 use std::sync::Arc;
 use std::sync::Condvar;
@@ -511,6 +514,32 @@ impl Database {
             });
         }
         self.verify.as_ref().unwrap()
+    }
+
+    /// Export an mmp file for a given statement.
+    pub fn export(&mut self, stmt: String) -> Vec<Notation> {
+        self.name_result();
+        self.scope_result();
+        let mut addr_opt = None;
+        time(&self.options.clone(), "export", || {
+                let parse = self.parse_result().clone();
+                let scope = self.scope_result().clone();
+                let name = self.name_result().clone();
+                let addr = NameReader::new(&name)
+                    .lookup_label(stmt.as_bytes())
+                    .expect(format!("Label {} did not correspond to an existing statement",
+                                    &stmt)
+                        .as_ref())
+                    .address;
+                addr_opt = Some(addr);
+
+                let mut file = try!(File::create(format!("{}.mmp", stmt.clone())));
+                export::export_mmp(&parse, &name, &scope, parse.statement(addr), &mut file)
+            })
+            .map(|()| vec![])
+            .unwrap_or_else(|diag| {
+                diag::to_annotations(self.parse_result(), vec![(addr_opt.unwrap(), diag)])
+            })
     }
 
     /// Runs one or more passes and collects all errors they generate.

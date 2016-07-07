@@ -7,6 +7,7 @@
 extern crate clap;
 extern crate filetime;
 extern crate fnv;
+extern crate regex;
 
 #[cfg(feature = "sysalloc")]
 extern crate alloc_system;
@@ -14,13 +15,15 @@ extern crate alloc_system;
 pub mod bit_set;
 pub mod database;
 pub mod diag;
+pub mod export;
+pub mod line_cache;
 pub mod nameck;
 pub mod parser;
+pub mod proof;
 pub mod scopeck;
 pub mod segment_set;
 pub mod util;
 pub mod verify;
-pub mod line_cache;
 
 #[cfg(test)]
 mod util_tests;
@@ -65,6 +68,12 @@ fn main() {
             .short("j")
             .takes_value(true)
             .validator(positive_integer))
+        .arg(Arg::with_name("export")
+            .help("Output a proof file")
+            .long("export")
+            .short("e")
+            .multiple(true)
+            .takes_value(true))
         .arg(Arg::with_name("TEXT")
             .long("text")
             .help("Provide raw database content on the command line")
@@ -109,6 +118,14 @@ fn main() {
             print_annotation(&mut lc, notation);
         }
 
+        if let Some(exps) = matches.values_of_lossy("export") {
+            for file in exps {
+                for notation in db.export(file) {
+                    print_annotation(&mut lc, notation);
+                }
+            }
+        }
+
         if matches.is_present("repeat") {
             let mut input = String::new();
             if io::stdin().read_line(&mut input).unwrap() == 0 {
@@ -141,7 +158,7 @@ fn print_annotation(lc: &mut LineCache, ann: Notation) {
 
     let line_end = LineCache::line_end(&ann.source.text, offs);
     let eoffs = (ann.span.end + ann.source.span.start) as usize;
-    let line_start = offs - (col-1) as usize;
+    let line_start = offs - (col - 1) as usize;
     if eoffs <= line_end {
         println!("|{}»{}«{}",
                  String::from_utf8_lossy(&ann.source.text[line_start..offs]),

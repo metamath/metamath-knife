@@ -369,7 +369,7 @@ impl SegmentSet {
                             text: Arc::new(Vec::new()),
                             span: Span::null(),
                         };
-                        let seg = parser::dummy_segment(Diagnostic::IoError(format!("{}", cerr)));
+                        let seg = parser::dummy_segment(From::from(cerr));
                         // cache keys are None so this won't pollute any caches
                         Promise::new(FileSR(None, vec![SliceSR(None, vec![seg], Arc::new(sinfo))]))
                     })
