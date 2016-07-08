@@ -77,9 +77,9 @@ macro_rules! try_assert {
 /// compressed proof.  Compressed steps are either saved prior
 /// results/hypotheses, which are copied directly onto the stack, or previously
 /// proved assertions which require substitution before use.
-enum PreparedStep<'a> {
-    Hyp(Bitset, Atom, Range<usize>),
-    Assert(&'a Frame),
+enum PreparedStep<'a, D> {
+    Hyp(Bitset, Atom, Range<usize>, D),
+    Assert(StatementAddress, &'a Frame),
 }
 use self::PreparedStep::*;
 
@@ -89,15 +89,35 @@ use self::PreparedStep::*;
 ///
 /// This type would be Copy except for the fact that the bitset can require
 /// overflow storage :(.
-struct StackSlot {
+#[derive(Clone)]
+pub struct StackSlot {
     vars: Bitset,
     code: Atom,
     expr: Range<usize>,
 }
 
+/// A constructor trait for plugging in to the verifier, to collect extra data during the
+/// verification pass
+pub trait ProofBuilder {
+    /// The data type being generated
+    type Item: Clone;
+
+    /// Create a proof data node from a statement, the data for the hypotheses, and the compressed constant string
+    fn build(&mut self, addr: StatementAddress, hyps: Vec<Self::Item>, expr: &[u8]) -> Self::Item;
+}
+
+/// The "null" proof builder, which creates no extra data. This
+/// is used for one-shot verification, where no extra data beyond the stack
+/// information is needed.
+impl ProofBuilder for () {
+    type Item = ();
+
+    fn build(&mut self, _: StatementAddress, _: Vec<()>, _: &[u8]) -> () {}
+}
+
 /// Working memory used by the verifier on a segment.  This expands for the
 /// first few proofs and the rest can be handled without allocation.
-struct VerifyState<'a> {
+struct VerifyState<'a, P: 'a + ProofBuilder> {
     /// Segment we are working on
     this_seg: SegmentRef<'a>,
     /// Segment order oracle
@@ -106,12 +126,14 @@ struct VerifyState<'a> {
     nameset: &'a Nameset,
     /// Used to access previously proved assertions
     scoper: ScopeReader<'a>,
+    /// Used to produce proof trees as a side effect of verification
+    builder: &'a mut P,
     /// The extended frame we are working on
     cur_frame: &'a Frame,
     /// Steps which can be invoked in the current proof, grows on every Z
-    prepared: Vec<PreparedStep<'a>>,
+    prepared: Vec<PreparedStep<'a, P::Item>>,
     /// Stack of active subtrees
-    stack: Vec<StackSlot>,
+    stack: Vec<(P::Item, StackSlot)>,
     /// Buffer for math strings of subtrees and hypotheses; shared to reduce
     /// actual copying when a hypothesis or saved step is recalled
     stack_buffer: Vec<u8>,
@@ -134,7 +156,7 @@ type Result<T> = result::Result<T, Diagnostic>;
 /// discovered until we get here, and a number needs to be assigned to it.
 /// Unfortunately this does mean that it'll be outside the valid range of dv_map
 /// and dv_map checks need to guard against that.
-fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
+fn map_var<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>, token: Atom) -> usize {
     let nbit = state.var2bit.len();
     // actually, it _might not_ break anything to have a single variable index
     // allocated by scopeck for all non-$d-ed variables.  after all, they aren't
@@ -145,10 +167,9 @@ fn map_var<'a>(state: &mut VerifyState<'a>, token: Atom) -> usize {
 // the initial hypotheses are accessed directly from the initial extended frame
 // to avoid having to look up their pseudo-frames by name; also, $e statements
 // no longer have pseudo-frames, so this is the only way to prepare an $e
-fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a scopeck::Hyp) {
+fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<P>, hyp: &'a scopeck::Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
-
     match hyp {
         &Floating(_addr, var_index, _typecode) => {
             fast_extend(&mut state.stack_buffer,
@@ -170,10 +191,15 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a scopeck::Hyp) {
             fast_extend(&mut state.stack_buffer,
                         &state.cur_frame.const_pool[expr.rump.clone()]);
         }
-    }
+    };
 
     let ntos = state.stack_buffer.len();
-    state.prepared.push(Hyp(vars, hyp.typecode(), tos..ntos));
+
+    state.prepared
+        .push(Hyp(vars,
+                  hyp.typecode(),
+                  tos..ntos,
+                  state.builder.build(hyp.address(), vec![], &state.stack_buffer[tos..ntos])));
 }
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the
@@ -182,7 +208,7 @@ fn prepare_hypothesis<'a>(state: &mut VerifyState, hyp: &'a scopeck::Hyp) {
 ///
 /// This is used as a fallback when looking up a $e in the assertion hashtable
 /// fails.
-fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
+fn prepare_named_hyp<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) -> Result<()> {
     for hyp in &*state.cur_frame.hypotheses {
         if let &Essential(addr, _) = hyp {
             assert!(addr.segment_id == state.this_seg.id);
@@ -203,15 +229,13 @@ fn prepare_named_hyp(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
 /// Used for named step references.  For NORMAL proofs this is immediately
 /// before execute_step, but for COMPRESSED proofs all used steps are prepared
 /// ahead of time, and assigned sequential numbers for later use.
-fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
+fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) -> Result<()> {
     // it's either an assertion or a hypothesis.  $f hyps have pseudo-frames
     // which this function can use, $e don't and need to be looked up in the
     // local hyp list after the frame lookup fails
     let frame = match state.scoper.get(label) {
         Some(fp) => fp,
-        None => {
-            return prepare_named_hyp(state, label);
-        }
+        None => return prepare_named_hyp(state, label),
     };
 
     // disallow circular reasoning
@@ -224,8 +248,10 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
                 pos.segment_id == valid.start.segment_id && pos.index < valid.end,
                 Diagnostic::StepUsedAfterScope(copy_token(label)));
 
+    let addr = state.nameset.lookup_label(label).unwrap().address;
+
     if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
-        state.prepared.push(Assert(frame));
+        state.prepared.push(Assert(addr, frame));
     } else {
         let mut vars = Bitset::new();
 
@@ -237,10 +263,13 @@ fn prepare_step(state: &mut VerifyState, label: TokenPtr) -> Result<()> {
         fast_extend(&mut state.stack_buffer, &frame.stub_expr);
         let ntos = state.stack_buffer.len();
         state.prepared
-            .push(Hyp(vars, frame.target.typecode, tos..ntos));
+            .push(Hyp(vars,
+                      frame.target.typecode,
+                      tos..ntos,
+                      state.builder.build(addr, vec![],&state.stack_buffer[tos..ntos])));
     }
 
-    return Ok(());
+    Ok(())
 }
 
 // perform a substitution after it has been built in `vars`, appending to
@@ -313,21 +342,22 @@ fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) ->
 
 /// This is the main "VM" function, and responsible for ~30% of CPU time during
 /// a one-shot verify operation.
-fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
+fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Result<()> {
     try_assert!(index < state.prepared.len(), Diagnostic::StepOutOfRange);
 
-    let fref = match state.prepared[index] {
-        Hyp(ref vars, code, ref expr) => {
+    let (addr, fref) = match state.prepared[index] {
+        Hyp(ref vars, code, ref expr, ref data) => {
             // hypotheses/saved steps are the easy case.  unfortunately, this is
             // also a very unpredictable branch
-            state.stack.push(StackSlot {
+            state.stack.push((data.clone(),
+                              StackSlot {
                 vars: vars.clone(),
                 code: code,
                 expr: expr.clone(),
-            });
+            }));
             return Ok(());
         }
-        Assert(fref) => fref,
+        Assert(addr, fref) => (addr, fref),
     };
 
     let sbase = try!(state.stack
@@ -341,6 +371,8 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
         state.subst_info.push((0..0, Bitset::new()));
     }
 
+    let mut datavec = Vec::with_capacity(fref.hypotheses.len());
+
     // process the hypotheses of the assertion we're about to apply.  $f hyps
     // allow the caller to define a replacement for a variable; $e hyps are
     // logical hypotheses that must have been proved; the result is then
@@ -350,8 +382,8 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
     // else we'll ignore the $e), and that logical file order is reflected in
     // the stack order of the hypotheses, we can do this in one pass
     for (ix, hyp) in fref.hypotheses.iter().enumerate() {
-        let slot = &state.stack[sbase + ix];
-
+        let (ref data, ref slot) = state.stack[sbase + ix];
+        datavec.push(data.clone());
         match hyp {
             &Floating(_addr, var_index, typecode) => {
                 try_assert!(slot.code == typecode, Diagnostic::StepFloatWrongType);
@@ -382,11 +414,12 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
     let ntos = state.stack_buffer.len();
 
     state.stack.truncate(sbase);
-    state.stack.push(StackSlot {
+    state.stack.push((state.builder.build(addr, datavec, &state.stack_buffer[tos..ntos]),
+                      StackSlot {
         code: fref.target.typecode,
         vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
         expr: tos..ntos,
-    });
+    }));
 
     // check $d constraints on the used assertion now that the dust has settled.
     // Remember that we might have variable indexes allocated during the proof
@@ -400,13 +433,13 @@ fn execute_step(state: &mut VerifyState, index: usize) -> Result<()> {
         }
     }
 
-    return Ok(());
+    Ok(())
 }
 
-fn finalize_step(state: &mut VerifyState) -> Result<()> {
+fn finalize_step<P: ProofBuilder>(state: &mut VerifyState<P>) -> Result<P::Item> {
     // if we get here, it's a valid proof, but was it the _right_ valid proof?
     try_assert!(state.stack.len() <= 1, Diagnostic::ProofExcessEnd);
-    let tos = try!(state.stack.last().ok_or(Diagnostic::ProofNoSteps));
+    let &(ref data, ref tos) = try!(state.stack.last().ok_or(Diagnostic::ProofNoSteps));
 
     try_assert!(tos.code == state.cur_frame.target.typecode,
                 Diagnostic::ProofWrongTypeEnd);
@@ -417,42 +450,31 @@ fn finalize_step(state: &mut VerifyState) -> Result<()> {
     try_assert!(state.stack_buffer[tos.expr.clone()] == state.temp_buffer[..],
                 Diagnostic::ProofWrongExprEnd);
 
-    Ok(())
+    Ok(data.clone())
 }
 
-fn save_step(state: &mut VerifyState) {
-    let top = state.stack.last().expect("can_save should prevent getting here");
-    state.prepared.push(Hyp(top.vars.clone(), top.code, top.expr.clone()));
+fn save_step<P: ProofBuilder>(state: &mut VerifyState<P>) {
+    let &(ref data, ref top) = state.stack.last().expect("can_save should prevent getting here");
+    state.prepared.push(Hyp(top.vars.clone(), top.code, top.expr.clone(), data.clone()));
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
-fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Result<()> {
-    // only intend to check $p statements
-    if stmt.statement_type() != StatementType::Provable {
-        return Ok(());
-    }
-
-    // no valid frame -> no use checking
-    // may wish to record a secondary error?
-    let cur_frame = match state.scoper.get(stmt.label()) {
-        None => return Ok(()),
-        Some(x) => x,
-    };
-
+fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
+                                     stmt: StatementRef<'a>)
+                                     -> Result<P::Item> {
     // clear, but do not free memory
-    state.cur_frame = cur_frame;
     state.stack.clear();
     fast_clear(&mut state.stack_buffer);
     state.prepared.clear();
     state.var2bit.clear();
-    state.dv_map = &cur_frame.optional_dv;
+    state.dv_map = &state.cur_frame.optional_dv;
     // temp_buffer is cleared before use; subst_info should be overwritten
     // before use if scopeck is working correctly
 
     // use scopeck-assigned numbers for mandatory variables and optional
     // variables with active $d constraints.  optional variables without active
     // $d constraints are numbered on demand by map_var
-    for (index, &tokr) in cur_frame.var_list.iter().enumerate() {
+    for (index, &tokr) in state.cur_frame.var_list.iter().enumerate() {
         state.var2bit.insert(tokr, index);
     }
 
@@ -462,7 +484,7 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Resu
 
         // compressed proofs preload the hypotheses so they don't need to (but
         // are not forbidden to) reference them by name
-        for hyp in &*cur_frame.hypotheses {
+        for hyp in &*state.cur_frame.hypotheses {
             prepare_hypothesis(state, hyp);
         }
 
@@ -522,9 +544,7 @@ fn verify_proof<'a>(state: &mut VerifyState<'a>, stmt: StatementRef<'a>) -> Resu
         }
     }
 
-    try!(finalize_step(state));
-
-    return Ok(());
+    finalize_step(state)
 }
 
 /// Stored result of running the verifier on a segment.
@@ -566,6 +586,7 @@ fn verify_segment(sset: &SegmentSet,
         this_seg: sref,
         scoper: ScopeReader::new(scopes),
         nameset: nset,
+        builder: &mut (),
         order: &sset.order,
         cur_frame: &dummy_frame,
         stack: Vec::new(),
@@ -578,8 +599,16 @@ fn verify_segment(sset: &SegmentSet,
     };
     // use the _same_ VerifyState so that memory can be reused
     for stmt in sref {
-        if let Err(diag) = verify_proof(&mut state, stmt) {
-            diagnostics.insert(stmt.address(), diag);
+        // only intend to check $p statements
+        if stmt.statement_type() == StatementType::Provable {
+            // no valid frame -> no use checking
+            // may wish to record a secondary error?
+            if let Some(frame) = state.scoper.get(stmt.label()) {
+                state.cur_frame = frame;
+                if let Err(diag) = verify_proof(&mut state, stmt) {
+                    diagnostics.insert(stmt.address(), diag);
+                }
+            }
         }
     }
     VerifySegment {
@@ -622,4 +651,35 @@ pub fn verify(result: &mut VerifyResult,
         let (id, arc) = promise.wait();
         result.segments.insert(id, arc);
     }
+}
+
+/// Parse a single $p statement, returning the result of the given
+/// proof builder, or an error if the proof is faulty
+pub fn verify_one<P: ProofBuilder>(sset: &SegmentSet,
+                                   nset: &Nameset,
+                                   scopes: &ScopeResult,
+                                   builder: &mut P,
+                                   stmt: StatementRef)
+                                   -> result::Result<P::Item, Diagnostic> {
+    let dummy_frame = Frame::default();
+    let mut state = VerifyState {
+        this_seg: stmt.segment(),
+        scoper: ScopeReader::new(scopes),
+        nameset: nset,
+        builder: builder,
+        order: &sset.order,
+        cur_frame: &dummy_frame,
+        stack: Vec::new(),
+        stack_buffer: Vec::new(),
+        prepared: Vec::new(),
+        temp_buffer: Vec::new(),
+        subst_info: Vec::new(),
+        var2bit: new_map(),
+        dv_map: &dummy_frame.optional_dv,
+    };
+
+    assert!(stmt.statement_type() == StatementType::Provable);
+    let frame = state.scoper.get(stmt.label()).unwrap();
+    state.cur_frame = frame;
+    verify_proof(&mut state, stmt)
 }
