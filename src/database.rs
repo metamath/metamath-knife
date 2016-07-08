@@ -102,7 +102,7 @@ use diag::DiagnosticClass;
 use diag::Notation;
 use export;
 use nameck::Nameset;
-use nameck::NameReader;
+use parser::StatementRef;
 use scopeck;
 use scopeck::ScopeResult;
 use segment_set::SegmentSet;
@@ -516,30 +516,29 @@ impl Database {
         self.verify.as_ref().unwrap()
     }
 
-    /// Export an mmp file for a given statement.
-    pub fn export(&mut self, stmt: String) -> Vec<Notation> {
-        self.name_result();
-        self.scope_result();
-        let mut addr_opt = None;
-        time(&self.options.clone(), "export", || {
-                let parse = self.parse_result().clone();
-                let scope = self.scope_result().clone();
-                let name = self.name_result().clone();
-                let addr = NameReader::new(&name)
-                    .lookup_label(stmt.as_bytes())
-                    .expect(format!("Label {} did not correspond to an existing statement",
-                                    &stmt)
-                        .as_ref())
-                    .address;
-                addr_opt = Some(addr);
+    /// Get a statement by label.
+    pub fn statement(&mut self, name: &str) -> Option<StatementRef> {
+        match self.name_result().lookup_label(name.as_bytes()) {
+            None => None,
+            Some(lookup) => Some(self.parse_result().statement(lookup.address)),
+        }
+    }
 
-                let mut file = try!(File::create(format!("{}.mmp", stmt.clone())));
-                export::export_mmp(&parse, &name, &scope, parse.statement(addr), &mut file)
-            })
-            .map(|()| vec![])
-            .unwrap_or_else(|diag| {
-                diag::to_annotations(self.parse_result(), vec![(addr_opt.unwrap(), diag)])
-            })
+    /// Export an mmp file for a given statement.
+    pub fn export(&mut self, stmt: String) {
+        time(&self.options.clone(), "export", || {
+            let parse = self.parse_result().clone();
+            let scope = self.scope_result().clone();
+            let name = self.name_result().clone();
+            let sref = self.statement(&stmt)
+                .expect(format!("Label {} did not correspond to an existing statement",
+                                &stmt)
+                    .as_ref());
+
+            File::create(format!("{}.mmp", stmt.clone())).map_err(export::ExportError::Io)
+                .and_then(|mut file| export::export_mmp(&parse, &name, &scope, sref, &mut file))
+                .unwrap()
+        })
     }
 
     /// Runs one or more passes and collects all errors they generate.

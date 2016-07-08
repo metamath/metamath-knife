@@ -120,9 +120,7 @@ fn main() {
 
         if let Some(exps) = matches.values_of_lossy("export") {
             for file in exps {
-                for notation in db.export(file) {
-                    print_annotation(&mut lc, notation);
-                }
+                db.export(file);
             }
         }
 
