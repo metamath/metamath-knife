@@ -897,6 +897,13 @@ impl ScopeResult {
         }
         out
     }
+
+    /// Fetch a frame.
+    pub fn get(&self, name: TokenPtr) -> Option<&Frame> {
+        self.frame_index.get(name).map(|&(_gen, segid, frix)| {
+            &self.segments[segid].as_ref().unwrap().frames_out[frix]
+        })
+    }
 }
 
 /// Extracts scope data for a database.
@@ -1017,21 +1024,15 @@ impl<'a> ScopeReader<'a> {
 
     /// Fetch a frame, recording usage for later change tracking.
     pub fn get(&mut self, name: TokenPtr) -> Option<&'a Frame> {
-        match self.result.frame_index.get(name) {
-            None => {
-                if self.incremental {
-                    self.not_found.insert(copy_token(name));
-                }
-                None
-            }
-            Some(&(_gen, segid, frix)) => {
-                let framep = &self.result.segments[segid].as_ref().unwrap().frames_out[frix];
-                if self.incremental {
-                    self.found.insert(framep.label_atom);
-                }
-                Some(framep)
+        let out = self.result.get(name);
+        if self.incremental {
+            if let Some(frame) = out {
+                self.found.insert(frame.label_atom);
+            } else {
+                self.not_found.insert(copy_token(name));
             }
         }
+        out
     }
 }
 

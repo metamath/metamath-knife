@@ -324,6 +324,33 @@ impl Nameset {
     pub fn atom_name(&self, atom: Atom) -> TokenPtr {
         &self.atom_table.reverse[atom.0 as usize]
     }
+
+    /// Looks up the address and atom for a statement label.
+    pub fn lookup_label(&self, label: TokenPtr) -> Option<LookupLabel> {
+        self.labels.get(label).and_then(|&ref lslot| {
+            lslot.labels.first().map(|&(addr, _)| {
+                LookupLabel {
+                    atom: lslot.atom,
+                    address: addr,
+                }
+            })
+        })
+    }
+
+    /// Looks up the address and type for a math symbol.
+    pub fn lookup_symbol(&self, symbol: TokenPtr) -> Option<LookupSymbol> {
+        self.symbols.get(symbol).and_then(|&ref syminfo| {
+            syminfo.all.first().map(|&(addr, stype)| {
+                LookupSymbol {
+                    stype: stype,
+                    atom: syminfo.atom,
+                    address: addr,
+                    const_address: syminfo.constant.first().map(|&(addr, _)| addr),
+                }
+            })
+        })
+
+    }
 }
 
 /// A reference to a nameset which can read name mappings while tracking
@@ -421,50 +448,28 @@ impl<'a> NameReader<'a> {
 
     /// Looks up the address and atom for a statement label.
     pub fn lookup_label(&mut self, label: TokenPtr) -> Option<LookupLabel> {
-        match self.nameset.labels.get(label) {
-            Some(&ref lslot) => {
-                if self.incremental {
-                    self.found_label.insert(lslot.atom);
-                }
-                lslot.labels.first().map(|&(addr, _)| {
-                    LookupLabel {
-                        atom: lslot.atom,
-                        address: addr,
-                    }
-                })
-            }
-            None => {
-                if self.incremental {
-                    self.not_found_label.insert(copy_token(label));
-                }
-                None
+        let out = self.nameset.lookup_label(label);
+        if self.incremental {
+            if let Some(ref lookup) = out {
+                self.found_label.insert(lookup.atom);
+            } else {
+                self.not_found_label.insert(copy_token(label));
             }
         }
+        out
     }
 
     /// Looks up the address and type for a math symbol.
     pub fn lookup_symbol(&mut self, symbol: TokenPtr) -> Option<LookupSymbol> {
-        match self.nameset.symbols.get(symbol) {
-            Some(&ref syminfo) => {
-                if self.incremental {
-                    self.found_symbol.insert(syminfo.atom);
-                }
-                syminfo.all.first().map(|&(addr, stype)| {
-                    LookupSymbol {
-                        stype: stype,
-                        atom: syminfo.atom,
-                        address: addr,
-                        const_address: syminfo.constant.first().map(|&(addr, _)| addr),
-                    }
-                })
-            }
-            None => {
-                if self.incremental {
-                    self.not_found_symbol.insert(copy_token(symbol));
-                }
-                None
+        let out = self.nameset.lookup_symbol(symbol);
+        if self.incremental {
+            if let Some(ref lookup) = out {
+                self.found_symbol.insert(lookup.atom);
+            } else {
+                self.not_found_symbol.insert(copy_token(symbol));
             }
         }
+        out
     }
 
     // TODO: consider merging this with lookup_symbol
