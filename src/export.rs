@@ -134,8 +134,8 @@ pub fn export_mmp<W: Write>(sset: &SegmentSet,
                 }
             };
             let mut delim = ':';
-            for hyp in &tree.children {
-                let hix = logical_steps[arr.index(hyp).unwrap()];
+            for &hyp in &tree.children {
+                let hix = logical_steps[hyp];
                 if hix != 0 {
                     line.push(delim);
                     delim = ',';
@@ -216,9 +216,9 @@ fn calc_indent(arr: &ProofTreeArray, qed: usize) -> Vec<u16> {
 
         // For each node we can reach, see if we can find a way with
         // a lower cost going through this node
-        for hyp in &arr.trees[index].children {
+        for &hix in &arr.trees[index].children {
             let next = IndentNode {
-                index: arr.index(hyp).unwrap(),
+                index: hix,
                 cost: cost + 1,
             };
 
