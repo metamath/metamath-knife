@@ -79,7 +79,7 @@ macro_rules! try_assert {
 /// proved assertions which require substitution before use.
 enum PreparedStep<'a, D> {
     Hyp(Bitset, Atom, Range<usize>, D),
-    Assert(StatementAddress, &'a Frame),
+    Assert(&'a Frame),
 }
 use self::PreparedStep::*;
 
@@ -258,10 +258,8 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
                 pos.segment_id == valid.start.segment_id && pos.index < valid.end,
                 Diagnostic::StepUsedAfterScope(copy_token(label)));
 
-    let addr = valid.start;
-
     if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
-        state.prepared.push(Assert(addr, frame));
+        state.prepared.push(Assert(frame));
     } else {
         let mut vars = Bitset::new();
 
@@ -276,7 +274,9 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
             .push(Hyp(vars,
                       frame.target.typecode,
                       tos..ntos,
-                      state.builder.build(addr, Default::default(), &state.stack_buffer[tos..ntos])));
+                      state.builder.build(valid.start,
+                                          Default::default(),
+                                          &state.stack_buffer[tos..ntos])));
     }
 
     Ok(())
@@ -355,7 +355,7 @@ fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) ->
 fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Result<()> {
     try_assert!(index < state.prepared.len(), Diagnostic::StepOutOfRange);
 
-    let (addr, fref) = match state.prepared[index] {
+    let fref = match state.prepared[index] {
         Hyp(ref vars, code, ref expr, ref data) => {
             // hypotheses/saved steps are the easy case.  unfortunately, this is
             // also a very unpredictable branch
@@ -367,7 +367,7 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
             }));
             return Ok(());
         }
-        Assert(addr, fref) => (addr, fref),
+        Assert(fref) => fref,
     };
 
     let sbase = try!(state.stack
@@ -424,12 +424,13 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
     let ntos = state.stack_buffer.len();
 
     state.stack.truncate(sbase);
-    state.stack.push((state.builder.build(addr, datavec, &state.stack_buffer[tos..ntos]),
-                      StackSlot {
-        code: fref.target.typecode,
-        vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
-        expr: tos..ntos,
-    }));
+    state.stack
+        .push((state.builder.build(fref.valid.start, datavec, &state.stack_buffer[tos..ntos]),
+               StackSlot {
+            code: fref.target.typecode,
+            vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
+            expr: tos..ntos,
+        }));
 
     // check $d constraints on the used assertion now that the dust has settled.
     // Remember that we might have variable indexes allocated during the proof
