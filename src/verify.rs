@@ -101,9 +101,14 @@ pub struct StackSlot {
 pub trait ProofBuilder {
     /// The data type being generated
     type Item: Clone;
+    /// The hyp gathering type
+    type Accum: Default;
+
+    /// Add a new hyp to the accumulation type
+    fn push(&mut self, hyps: &mut Self::Accum, hyp: Self::Item);
 
     /// Create a proof data node from a statement, the data for the hypotheses, and the compressed constant string
-    fn build(&mut self, addr: StatementAddress, hyps: Vec<Self::Item>, expr: &[u8]) -> Self::Item;
+    fn build(&mut self, addr: StatementAddress, hyps: Self::Accum, expr: &[u8]) -> Self::Item;
 }
 
 /// The "null" proof builder, which creates no extra data. This
@@ -111,8 +116,11 @@ pub trait ProofBuilder {
 /// information is needed.
 impl ProofBuilder for () {
     type Item = ();
+    type Accum = ();
 
-    fn build(&mut self, _: StatementAddress, _: Vec<()>, _: &[u8]) -> () {}
+    fn push(&mut self, _: &mut (), _: ()) {}
+
+    fn build(&mut self, _: StatementAddress, _: (), _: &[u8]) -> () {}
 }
 
 /// Working memory used by the verifier on a segment.  This expands for the
@@ -199,7 +207,9 @@ fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<P>, hyp: &'a 
         .push(Hyp(vars,
                   hyp.typecode(),
                   tos..ntos,
-                  state.builder.build(hyp.address(), vec![], &state.stack_buffer[tos..ntos])));
+                  state.builder.build(hyp.address(),
+                                      Default::default(),
+                                      &state.stack_buffer[tos..ntos])));
 }
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the
@@ -248,7 +258,7 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
                 pos.segment_id == valid.start.segment_id && pos.index < valid.end,
                 Diagnostic::StepUsedAfterScope(copy_token(label)));
 
-    let addr = state.nameset.lookup_label(label).unwrap().address;
+    let addr = valid.start;
 
     if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
         state.prepared.push(Assert(addr, frame));
@@ -266,7 +276,7 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
             .push(Hyp(vars,
                       frame.target.typecode,
                       tos..ntos,
-                      state.builder.build(addr, vec![],&state.stack_buffer[tos..ntos])));
+                      state.builder.build(addr, Default::default(), &state.stack_buffer[tos..ntos])));
     }
 
     Ok(())
@@ -371,7 +381,7 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
         state.subst_info.push((0..0, Bitset::new()));
     }
 
-    let mut datavec = Vec::with_capacity(fref.hypotheses.len());
+    let mut datavec = Default::default();
 
     // process the hypotheses of the assertion we're about to apply.  $f hyps
     // allow the caller to define a replacement for a variable; $e hyps are
@@ -383,7 +393,7 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
     // the stack order of the hypotheses, we can do this in one pass
     for (ix, hyp) in fref.hypotheses.iter().enumerate() {
         let (ref data, ref slot) = state.stack[sbase + ix];
-        datavec.push(data.clone());
+        state.builder.push(&mut datavec, data.clone());
         match hyp {
             &Floating(_addr, var_index, typecode) => {
                 try_assert!(slot.code == typecode, Diagnostic::StepFloatWrongType);

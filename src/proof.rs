@@ -87,6 +87,12 @@ impl ProofTreeArray {
 
 impl ProofBuilder for ProofTreeArray {
     type Item = usize;
+    type Accum = Vec<usize>;
+
+    fn push(&mut self, hyps: &mut Vec<usize>, hyp: usize) {
+        hyps.push(hyp);
+    }
+
 
     fn build(&mut self, addr: StatementAddress, trees: Vec<usize>, expr: &[u8]) -> usize {
         let tree = ProofTree::new(self, addr, trees);
