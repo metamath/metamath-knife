@@ -2,23 +2,21 @@
 
 use diag::Diagnostic;
 use nameck::Nameset;
+use parser::as_str;
 use parser::StatementRef;
 use parser::StatementType;
 use parser::TokenRef;
+use proof::ProofStyle;
 use proof::ProofTreeArray;
+use proof::ProofTreePrinter;
 use regex::Regex;
 use scopeck::ScopeResult;
 use segment_set::SegmentSet;
-use std::cmp::Ord;
-use std::cmp::Ordering;
-use std::cmp::PartialOrd;
-use std::collections::BinaryHeap;
 use std::error;
 use std::fmt;
 use std::io;
 use std::io::Write;
 use std::str;
-use std::u16;
 
 /// The error type for export::export_mmp().
 #[derive(Debug)]
@@ -72,21 +70,22 @@ pub fn export_mmp<W: Write>(sset: &SegmentSet,
                             stmt: StatementRef,
                             out: &mut W)
                             -> Result<(), ExportError> {
+    let thm_label = stmt.label();
     try!(writeln!(out,
                   "$( <MM> <PROOF_ASST> THEOREM={}  LOC_AFTER=?\n",
-                  String::from_utf8_lossy(stmt.label())));
+                  as_str(thm_label)));
     if let Some(comment) = stmt.associated_comment() {
         let mut span = comment.span();
         span.start += 2;
         span.end -= 3;
         let cstr = Regex::new(r"\n +")
             .unwrap()
-            .replace(&String::from_utf8_lossy(span.as_ref(&comment.segment().segment.buffer)),
+            .replace_all(as_str(span.as_ref(&comment.segment().segment.buffer)),
                      "\n  ");
         try!(writeln!(out, "*{}\n", cstr));
     }
 
-    let (arr, qed) = try!(ProofTreeArray::new(sset, nset, scope, stmt));
+    let arr = try!(ProofTreeArray::new(sset, nset, scope, stmt));
 
     // TODO remove hardcoded logical step symbol
     let provable_tc = "|-".as_bytes();
@@ -126,7 +125,7 @@ pub fn export_mmp<W: Write>(sset: &SegmentSet,
                     "h".to_string() + &ix.to_string()
                 }
                 _ => {
-                    if cur == qed {
+                    if cur == arr.qed {
                         "qed".to_string()
                     } else {
                         ix.to_string()
@@ -152,7 +151,7 @@ pub fn export_mmp<W: Write>(sset: &SegmentSet,
         }
     }
 
-    let indent = calc_indent(&arr, qed);
+    let indent = arr.indent();
     let spaces = lines.iter()
         .map(|&(cur, _, ref line)| line.len() as i16 - indent[cur] as i16)
         .max()
@@ -165,71 +164,20 @@ pub fn export_mmp<W: Write>(sset: &SegmentSet,
         line.push_str(&String::from_utf8_lossy(&arr.exprs[cur]));
         try!(writeln!(out, "{}", line));
     }
+    try!(writeln!(out,
+                  "\n$={}",
+                  ProofTreePrinter {
+                      sset: sset,
+                      nset: nset,
+                      scope: scope,
+                      thm_label: thm_label,
+                      style: ProofStyle::PackedExplicit,
+                      arr: &arr,
+                      initial_chr: 2,
+                      indent: 6,
+                      line_width: 79,
+                  }));
+
     try!(writeln!(out, "\n$)"));
     Ok(())
-}
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-struct IndentNode {
-    index: usize,
-    cost: u16,
-}
-
-// The priority queue depends on `Ord`.
-// Explicitly implement the trait so the queue becomes a min-heap
-// instead of a max-heap.
-impl Ord for IndentNode {
-    fn cmp(&self, other: &IndentNode) -> Ordering {
-        // Notice that the we flip the ordering here
-        other.cost.cmp(&self.cost)
-    }
-}
-
-// `PartialOrd` needs to be implemented as well.
-impl PartialOrd for IndentNode {
-    fn partial_cmp(&self, other: &IndentNode) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-/// Finds the shortest path from each node in the proof tree to the `qed` step,
-/// using Dijkstra's algorithm.  Based on the example in
-/// https://doc.rust-lang.org/std/collections/binary_heap/.
-fn calc_indent(arr: &ProofTreeArray, qed: usize) -> Vec<u16> {
-    // dist[node] = current shortest distance from `start` to `node`
-    let mut dist: Vec<u16> = vec![u16::MAX;arr.trees.len()];
-
-    let mut heap = BinaryHeap::new();
-
-    // We're at `qed`, with a zero cost
-    dist[qed] = 0;
-    heap.push(IndentNode {
-        index: qed,
-        cost: 0,
-    });
-
-    // Examine the frontier with lower cost nodes first (min-heap)
-    while let Some(IndentNode { index, cost }) = heap.pop() {
-        // Important as we may have already found a better way
-        if cost > dist[index] {
-            continue;
-        }
-
-        // For each node we can reach, see if we can find a way with
-        // a lower cost going through this node
-        for &hix in &arr.trees[index].children {
-            let next = IndentNode {
-                index: hix,
-                cost: cost + 1,
-            };
-
-            // If so, add it to the frontier and continue
-            if next.cost < dist[next.index] {
-                heap.push(next);
-                // Relaxation, we have now found a better way
-                dist[next.index] = next.cost;
-            }
-        }
-    }
-
-    dist
 }
