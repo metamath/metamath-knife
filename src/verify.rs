@@ -107,8 +107,14 @@ pub trait ProofBuilder {
     /// Add a new hyp to the accumulation type
     fn push(&mut self, hyps: &mut Self::Accum, hyp: Self::Item);
 
-    /// Create a proof data node from a statement, the data for the hypotheses, and the compressed constant string
-    fn build(&mut self, addr: StatementAddress, hyps: Self::Accum, expr: &[u8]) -> Self::Item;
+    /// Create a proof data node from a statement, the data for the hypotheses,
+    /// and the compressed constant string
+    fn build(&mut self,
+             addr: StatementAddress,
+             hyps: Self::Accum,
+             pool: &[u8],
+             expr: Range<usize>)
+             -> Self::Item;
 }
 
 /// The "null" proof builder, which creates no extra data. This
@@ -120,7 +126,7 @@ impl ProofBuilder for () {
 
     fn push(&mut self, _: &mut (), _: ()) {}
 
-    fn build(&mut self, _: StatementAddress, _: (), _: &[u8]) -> () {}
+    fn build(&mut self, _: StatementAddress, _: (), _: &[u8], _: Range<usize>) -> () {}
 }
 
 /// Working memory used by the verifier on a segment.  This expands for the
@@ -209,7 +215,8 @@ fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<P>, hyp: &'a 
                   tos..ntos,
                   state.builder.build(hyp.address(),
                                       Default::default(),
-                                      &state.stack_buffer[tos..ntos])));
+                                      &state.stack_buffer,
+                                      tos..ntos)));
 }
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the
@@ -276,7 +283,8 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
                       tos..ntos,
                       state.builder.build(valid.start,
                                           Default::default(),
-                                          &state.stack_buffer[tos..ntos])));
+                                          &state.stack_buffer,
+                                          tos..ntos)));
     }
 
     Ok(())
@@ -284,6 +292,7 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
 
 // perform a substitution after it has been built in `vars`, appending to
 // `target`
+#[inline(always)]
 fn do_substitute(target: &mut Vec<u8>,
                  frame: &Frame,
                  expr: &VerifyExpr,
@@ -296,6 +305,7 @@ fn do_substitute(target: &mut Vec<u8>,
 }
 
 // like a substitution and equality check, but in one pass
+#[inline(always)]
 fn do_substitute_eq(mut compare: &[u8],
                     frame: &Frame,
                     expr: &VerifyExpr,
@@ -342,6 +352,7 @@ fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
 }
 
 // generate a bitmask for a substituted expression
+#[inline(always)]
 fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) -> Bitset {
     let mut out = Bitset::new();
     for part in expr {
@@ -425,7 +436,7 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
 
     state.stack.truncate(sbase);
     state.stack
-        .push((state.builder.build(fref.valid.start, datavec, &state.stack_buffer[tos..ntos]),
+        .push((state.builder.build(fref.valid.start, datavec, &state.stack_buffer, tos..ntos),
                StackSlot {
             code: fref.target.typecode,
             vars: do_substitute_vars(&fref.target.tail, &state.subst_info),

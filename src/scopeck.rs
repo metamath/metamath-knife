@@ -900,9 +900,9 @@ impl ScopeResult {
 
     /// Fetch a frame.
     pub fn get(&self, name: TokenPtr) -> Option<&Frame> {
-        self.frame_index.get(name).map(|&(_gen, segid, frix)| {
-            &self.segments[segid].as_ref().unwrap().frames_out[frix]
-        })
+        self.frame_index
+            .get(name)
+            .map(|&(_gen, segid, frix)| &self.segments[segid].as_ref().unwrap().frames_out[frix])
     }
 }
 

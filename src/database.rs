@@ -535,7 +535,8 @@ impl Database {
                                 &stmt)
                     .as_ref());
 
-            File::create(format!("{}.mmp", stmt.clone())).map_err(export::ExportError::Io)
+            File::create(format!("{}.mmp", stmt.clone()))
+                .map_err(export::ExportError::Io)
                 .and_then(|mut file| export::export_mmp(&parse, &name, &scope, sref, &mut file))
                 .unwrap()
         })

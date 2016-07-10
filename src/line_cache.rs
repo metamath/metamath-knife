@@ -110,7 +110,7 @@ impl LineCache {
         (lineno + 1, colno as u32 + 1)
     }
 
-    
+
     /// Find the offset just after the end of the line (usually the
     /// location of a '\n', unless we are at the end of the file).
     pub fn line_end(buf: &[u8], offset: usize) -> usize {

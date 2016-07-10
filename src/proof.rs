@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::hash::SipHasher;
+use std::ops::Range;
 use verify::ProofBuilder;
 use verify::verify_one;
 
@@ -72,8 +73,9 @@ impl ProofTreeArray {
         self.map.get(&tree.hash).cloned()
     }
 
-    /// Create a proof tree array from the proof  a single $p statement, returning the result of the given
-    /// proof builder, or an error if the proof is faulty
+    /// Create a proof tree array from the proof  a single $p statement,
+    /// returning the result of the given proof builder, or an error if the
+    /// proof is faulty
     pub fn new(sset: &SegmentSet,
                nset: &Nameset,
                scopes: &ScopeResult,
@@ -94,14 +96,19 @@ impl ProofBuilder for ProofTreeArray {
     }
 
 
-    fn build(&mut self, addr: StatementAddress, trees: Vec<usize>, expr: &[u8]) -> usize {
+    fn build(&mut self,
+             addr: StatementAddress,
+             trees: Vec<usize>,
+             pool: &[u8],
+             expr: Range<usize>)
+             -> usize {
         let tree = ProofTree::new(self, addr, trees);
         self.index(&tree).unwrap_or_else(|| {
             let ix = self.trees.len();
             self.map.insert(tree.hash, ix);
             self.trees.push(tree);
             let mut uexpr = vec![b' '];
-            for &chr in expr {
+            for &chr in &pool[expr] {
                 if chr & 0x80 == 0 {
                     uexpr.push(chr);
                 } else {
