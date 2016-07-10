@@ -333,6 +333,12 @@ pub fn copy_token(ptr: TokenPtr) -> Token {
     ptr.to_owned().into_boxed_slice()
 }
 
+/// Transmutes this token into a Rust string. This is safe for us
+/// because we check that our tokens are valid ASCII (and thus also valid UTF8).
+pub fn as_str(ptr: TokenPtr) -> &str {
+    unsafe { str::from_utf8_unchecked(ptr) }
+}
+
 /// Extracted data for a top-level `$d` statement in a segment.
 #[derive(Debug)]
 pub struct GlobalDv {
