@@ -457,14 +457,13 @@ impl<'a> fmt::Display for ProofTreePrinter<'a> {
                                 if fwdref <= backref_alloc.len() {
                                     &backref_alloc[fwdref - 1]
                                 } else {
-                                    backref_max = (backref_max + 1..)
-                                        .find(|n| {
-                                            self.nset
-                                                .lookup_label(n.to_string().as_bytes())
-                                                .is_none()
-                                        })
-                                        .unwrap();
-                                    backref_alloc.push(backref_max.to_string());
+                                    let mut s;
+                                    while {
+                                        backref_max += 1;
+                                        s = backref_max.to_string();
+                                        self.nset.lookup_label(s.as_bytes()).is_some()
+                                    } {}
+                                    backref_alloc.push(s);
                                     backref_alloc.last().unwrap()
                                 },
                                 estr(hyp),
