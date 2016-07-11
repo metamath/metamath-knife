@@ -435,6 +435,9 @@ impl<'a> fmt::Display for ProofTreePrinter<'a> {
                 });
         }
 
+        let mut backref_alloc = vec![];
+        let mut backref_max = 0;
+
         let mut print_step = |item: RPNStep| -> fmt::Result {
             let estr = |hyp| if explicit {
                 format!("{}=",
@@ -450,10 +453,27 @@ impl<'a> fmt::Display for ProofTreePrinter<'a> {
                     if fwdref == 0 {
                         format!("{}{}", estr(hyp), stmt_lookup[&addr].0)
                     } else {
-                        format!("{}:{}{}", fwdref, estr(hyp), stmt_lookup[&addr].0)
+                        format!("{}:{}{}",
+                                if fwdref <= backref_alloc.len() {
+                                    &backref_alloc[fwdref - 1]
+                                } else {
+                                    backref_max = (backref_max + 1..)
+                                        .find(|n| {
+                                            self.nset
+                                                .lookup_label(n.to_string().as_bytes())
+                                                .is_none()
+                                        })
+                                        .unwrap();
+                                    backref_alloc.push(backref_max.to_string());
+                                    backref_alloc.last().unwrap()
+                                },
+                                estr(hyp),
+                                stmt_lookup[&addr].0)
                     }
                 }
-                RPNStep::Backref { backref, hyp } => format!("{}{}", estr(hyp), backref),
+                RPNStep::Backref { backref, hyp } => {
+                    format!("{}{}", estr(hyp), backref_alloc[backref - 1])
+                }
             };
 
             if chr + (fmt.len() as u16) < self.line_width {
