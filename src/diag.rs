@@ -4,6 +4,7 @@
 //! interpretation and testing, as well as a mostly-text representation which
 //! can be used for various human-readable outputs.
 
+use parser::as_str;
 use parser::Comparer;
 use parser::Span;
 use parser::StatementAddress;
@@ -187,7 +188,7 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
     }
 
     fn t(v: &Token) -> String {
-        unsafe { String::from_utf8_unchecked((**v).to_owned()) }
+        as_str(v).to_owned()
     }
 
     let mut info = AnnInfo {

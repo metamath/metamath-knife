@@ -333,10 +333,9 @@ pub fn copy_token(ptr: TokenPtr) -> Token {
     ptr.to_owned().into_boxed_slice()
 }
 
-/// Transmutes this token into a Rust string. This is safe for us
-/// because we check that our tokens are valid ASCII (and thus also valid UTF8).
+/// Transmutes this token into a Rust string.
 pub fn as_str(ptr: TokenPtr) -> &str {
-    unsafe { str::from_utf8_unchecked(ptr) }
+    str::from_utf8(ptr).expect("TokenPtr is supposed to be UTF8")
 }
 
 /// Extracted data for a top-level `$d` statement in a segment.
