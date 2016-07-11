@@ -45,13 +45,16 @@ pub enum DiagnosticClass {
 pub enum Diagnostic {
     BadCharacter(usize, u8),
     BadCommentEnd(Span, Span),
+    BadExplicitLabel(Token),
     BadFloating,
     BadLabel(Span),
+    ChainBackref(Span),
     CommentMarkerNotStart(Span),
     ConstantNotTopLevel,
     DisjointSingle,
     DjNotVariable(TokenIndex),
     DjRepeatedVariable(TokenIndex, TokenIndex),
+    DuplicateExplicitLabel(Token),
     DuplicateLabel(StatementAddress),
     EmptyFilename,
     EmptyMathString,
@@ -63,6 +66,8 @@ pub enum Diagnostic {
     FloatNotVariable(TokenIndex),
     FloatRedeclared(StatementAddress),
     IoError(String),
+    LocalLabelAmbiguous(Span),
+    LocalLabelDuplicate(Span),
     MidStatementCommentMarker(Span),
     MissingLabel,
     MissingProof(Span),
@@ -214,6 +219,11 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.level = Note;
             ann(&mut info, opener);
         }
+        BadExplicitLabel(ref tok) => {
+            info.s = "Explicit label {label} does not refer to a hypothesis of the parent step";
+            info.args.push(("label", t(tok)));
+            ann(&mut info, stmt.span());
+        }
         BadFloating => {
             info.s = "A $f statement must have exactly two math tokens";
             ann(&mut info, stmt.span());
@@ -221,6 +231,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         BadLabel(lbl) => {
             info.s = "Statement labels may contain only alphanumeric characters and - _ .";
             ann(&mut info, lbl);
+        }
+        ChainBackref(span) => {
+            info.s = "Backreference steps are not permitted to have local labels";
+            ann(&mut info, span);
         }
         CommentMarkerNotStart(marker) => {
             info.s = "This comment marker must be the first token in the comment to be effective";
@@ -246,6 +260,11 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.s = "Previous appearance was here";
             info.level = Note;
             ann(&mut info, stmt.math_span(index2));
+        }
+        DuplicateExplicitLabel(ref tok) => {
+            info.s = "Explicit label {label} is used twice in the same step";
+            info.args.push(("label", t(tok)));
+            ann(&mut info, stmt.span());
         }
         DuplicateLabel(prevstmt) => {
             info.s = "Statement labels must be unique";
@@ -301,6 +320,14 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.s = "Source file could not be read (error: {error})";
             info.args.push(("error", err.clone()));
             ann(&mut info, Span::null());
+        }
+        LocalLabelAmbiguous(span) => {
+            info.s = "Local label conflicts with the name of an existing statement";
+            ann(&mut info, span);
+        }
+        LocalLabelDuplicate(span) => {
+            info.s = "Local label duplicates another label in the same proof";
+            ann(&mut info, span);
         }
         MidStatementCommentMarker(marker) => {
             info.s = "Marked comments are only effective between statements, not inside them";
