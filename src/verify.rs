@@ -68,7 +68,7 @@ use util::ptr_eq;
 macro_rules! try_assert {
     ( $cond:expr , $($arg:tt)+ ) => {
         if !$cond {
-            try!(Err($($arg)+))
+            Err($($arg)+)?
         }
     }
 }
@@ -381,10 +381,10 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
         Assert(fref) => fref,
     };
 
-    let sbase = try!(state.stack
+    let sbase = state.stack
         .len()
         .checked_sub(fref.hypotheses.len())
-        .ok_or(Diagnostic::ProofUnderflow));
+        .ok_or(Diagnostic::ProofUnderflow)?;
 
     while state.subst_info.len() < fref.mandatory_count {
         // this is mildly unhygenic, since slots corresponding to $e hyps won't get cleared, but
@@ -461,7 +461,7 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
 fn finalize_step<P: ProofBuilder>(state: &mut VerifyState<P>) -> Result<P::Item> {
     // if we get here, it's a valid proof, but was it the _right_ valid proof?
     try_assert!(state.stack.len() <= 1, Diagnostic::ProofExcessEnd);
-    let &(ref data, ref tos) = try!(state.stack.last().ok_or(Diagnostic::ProofNoSteps));
+    let &(ref data, ref tos) = state.stack.last().ok_or(Diagnostic::ProofNoSteps)?;
 
     try_assert!(tos.code == state.cur_frame.target.typecode,
                 Diagnostic::ProofWrongTypeEnd);
@@ -520,7 +520,7 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
                 break;
             }
 
-            try!(prepare_step(state, chunk));
+            prepare_step(state, chunk)?;
         }
 
         // after ) is a packed list of varints.  decode them and execute the
@@ -533,7 +533,7 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
             for &ch in chunk {
                 if ch >= b'A' && ch <= b'T' {
                     k = k * 20 + (ch - b'A') as usize;
-                    try!(execute_step(state, k));
+                    execute_step(state, k)?;
                     k = 0;
                     can_save = true;
                 } else if ch >= b'U' && ch <= b'Y' {
@@ -560,8 +560,8 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
         for i in 0..stmt.proof_len() {
             let chunk = stmt.proof_slice_at(i);
             try_assert!(chunk != b"?", Diagnostic::ProofIncomplete);
-            try!(prepare_step(state, chunk));
-            try!(execute_step(state, count));
+            prepare_step(state, chunk)?;
+            execute_step(state, count)?;
             count += 1;
         }
     }

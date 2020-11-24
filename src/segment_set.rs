@@ -323,12 +323,12 @@ impl SegmentSet {
         }
 
         // read a file from disk (intercessions have already been checked, but
-        // the first cache has not) and split/parse it; returns by try! on I/O
-        // error
+        // the first cache has not) and split/parse it; returns a Result Err
+        // variant on I/O error
         fn canonicalize_and_read(state: &mut RecState,
                                  path: String)
                                  -> io::Result<Promise<FileSR>> {
-            let metadata = try!(fs::metadata(&path));
+            let metadata = fs::metadata(&path)?;
             let time = FileTime::from_last_modification_time(&metadata);
 
             // probe 1st cache
@@ -337,10 +337,10 @@ impl SegmentSet {
                 None => {
                     // miss, but we have the file size, so try to read in one
                     // call to a buffer we won't have to move
-                    let mut fh = try!(File::open(&path));
+                    let mut fh = File::open(&path)?;
                     let mut buf = Vec::with_capacity(metadata.len() as usize + 1);
                     // note: File's read_to_end uses the buffer capacity to choose how much to read
-                    try!(fh.read_to_end(&mut buf));
+                    fh.read_to_end(&mut buf)?;
 
                     Ok(split_and_parse(state, path, Some(time), buf))
                 }
