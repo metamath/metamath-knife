@@ -810,7 +810,7 @@ pub fn verify(result: &mut VerifyResult,
             if let Some(old_res) = old_res_o {
                 if old_res.scope_usage.valid(&nset, &scope) &&
                    ptr_eq::<Segment>(&old_res.source, &sref) {
-                    return (id, old_res.clone());
+                    return (id, old_res);
                 }
             }
             if segments2.options.trace_recalc {

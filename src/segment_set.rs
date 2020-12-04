@@ -319,7 +319,7 @@ impl SegmentSet {
             // make a wrapper promise to build the proper file result.  this
             // does _not_ run on a worker thread
             Promise::join(promises)
-                .map(move |srlist| FileSR(timestamp.map(move |s| (path.clone(), s)), srlist))
+                .map(move |srlist| FileSR(timestamp.map(move |s| (path, s)), srlist))
         }
 
         // read a file from disk (intercessions have already been checked, but
@@ -445,7 +445,7 @@ impl SegmentSet {
         };
 
         // parse and recursively incorporate the initial file
-        let isegs = read_and_parse(&mut state, path.clone());
+        let isegs = read_and_parse(&mut state, path);
         let isegs = flat(&mut state, isegs.wait());
         recurse(&mut state, isegs);
 
