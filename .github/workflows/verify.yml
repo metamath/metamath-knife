@@ -1,0 +1,43 @@
+name: verify
+on: [push, pull_request, workflow_dispatch]
+
+# Verify software.
+
+jobs:
+  # Skipping duplicate jobs doesn't work well with matrix (!!),
+  # so we'll just do excess work.
+  ###########################################################
+  #    skip_dups:
+  #      name: Check for duplicate jobs to avoid duplication
+  #      # continue-on-error: true # Uncomment once integration is finished
+  #      runs-on: ubuntu-latest
+  #      # Map a step output to a job output
+  #      outputs:
+  #        should_skip: ${{ steps.skip_check.outputs.should_skip }}
+  #      steps:
+  #        - id: skip_check
+  #          uses: fkirc/skip-duplicate-actions@master
+  #          with:
+  #            github_token: ${{ github.token }}
+  #            paths_ignore: '["**/README.md", "**/docs/**"]'
+
+  ###########################################################
+  test:
+    name: Rebuild and test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-16.04, ubuntu-18.04, ubuntu-20.04, windows-latest, macOS-latest]
+        rust: [stable] # [stable, nightly]
+    # needs: skip_dups
+    # if: ${{ needs.skip_dups.outputs.should_skip != 'true' }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install rust
+        uses: hecrj/setup-rust-action@v1
+        with:
+          rust-version: ${{ matrix.rust }}
+      # TODO: Add more static tests, perhaps eventually fail on warnings
+      # (or disable those warnings, preferably as specifically as we can).
+      - name: Run tests
+        run: cargo test --verbose
