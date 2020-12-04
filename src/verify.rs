@@ -36,6 +36,7 @@ use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
 use parser::SegmentRef;
+use parser::Span;
 use parser::StatementAddress;
 use parser::StatementRef;
 use parser::StatementType;
@@ -225,7 +226,7 @@ fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<P>, hyp: &'a 
 ///
 /// This is used as a fallback when looking up a $e in the assertion hashtable
 /// fails.
-fn prepare_named_hyp<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) -> Result<()> {
+fn prepare_named_hyp<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) -> bool {
     for hyp in &*state.cur_frame.hypotheses {
         if let &Essential(addr, _) = hyp {
             assert!(addr.segment_id == state.this_seg.id);
@@ -235,24 +236,81 @@ fn prepare_named_hyp<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPt
             // in any way, we don't even need to track dependencies here.
             if state.this_seg.statement(addr.index).label() == label {
                 prepare_hypothesis(state, hyp);
-                return Ok(());
+                return true;
             }
         }
     }
-    // whoops, not in the assertion table _or_ the extended frame
-    return Err(Diagnostic::StepMissing(copy_token(label)));
+
+    // Assertion not found, but it might be a local label (checked later)
+    false
+}
+
+#[derive(Default,Clone,Copy)]
+struct StepParse<'a> {
+    // The local label for later backreference, or None for not present
+    fwdref: Option<TokenPtr<'a>>,
+    // The explicit hypothesis reference, or None for not present
+    hyptok: Option<TokenPtr<'a>>,
+    // The backreference label, or None if it was sucessfully identified as a thm reference
+    // and added to the prepared list
+    label: Option<TokenPtr<'a>>,
 }
 
 /// Used for named step references.  For NORMAL proofs this is immediately
 /// before execute_step, but for COMPRESSED proofs all used steps are prepared
 /// ahead of time, and assigned sequential numbers for later use.
-fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) -> Result<()> {
+fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
+                                     label: TokenPtr<'a>,
+                                     label_span: Option<Span>)
+                                     -> Result<StepParse<'a>> {
+    let mut out = StepParse::default();
+
     // it's either an assertion or a hypothesis.  $f hyps have pseudo-frames
     // which this function can use, $e don't and need to be looked up in the
     // local hyp list after the frame lookup fails
     let frame = match state.scoper.get(label) {
         Some(fp) => fp,
-        None => return prepare_named_hyp(state, label),
+        None => {
+            let label_span = match label_span {
+                None => {
+                    try_assert!(prepare_named_hyp(state, label),
+                                Diagnostic::StepMissing(copy_token(label)));
+                    return Ok(out);
+                }
+                Some(l) => l,
+            };
+
+            // The above handles the "fast path", for normal and compressed proofs.
+            // For packed/explicit...
+            let (fwdref, hyptok, label) = match (label.iter().position(|&x| x == b':'),
+                                                 label.iter().position(|&x| x == b'=')) {
+                (None, None) => (None, None, label),
+                (Some(m), None) => (Some(&label[..m]), None, &label[m + 1..]),
+                (None, Some(n)) => (None, Some(&label[..n]), &label[n + 1..]),
+                (Some(m), Some(n)) => {
+                    if m < n {
+                        (Some(&label[..m]), Some(&label[m + 1..n]), &label[n + 1..])
+                    } else {
+                        (Some(&label[n + 1..m]), Some(&label[..n]), &label[n + 1..])
+                    }
+                }
+            };
+            out.fwdref = fwdref;
+            out.hyptok = hyptok;
+            if let Some(x) = fwdref {
+                try_assert!(state.scoper.get(x).is_none(),
+                            Diagnostic::LocalLabelAmbiguous(label_span));
+            }
+            match state.scoper.get(label) {
+                Some(fp) => fp,
+                None => {
+                    if !prepare_named_hyp(state, label) {
+                        out.label = Some(label);
+                    }
+                    return Ok(out);
+                }
+            }
+        }
     };
 
     // disallow circular reasoning
@@ -287,7 +345,7 @@ fn prepare_step<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPtr) ->
                                           tos..ntos)));
     }
 
-    Ok(())
+    Ok(out)
 }
 
 // perform a substitution after it has been built in `vars`, appending to
@@ -361,11 +419,49 @@ fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) ->
     out
 }
 
+/// Process the hypotheses of the assertion we're about to apply.  `$f` hyps
+/// allow the caller to define a replacement for a variable; `$e` hyps are
+/// logical hypotheses that must have been proved; the result is then
+/// substituted and pushed.
+///
+/// Since a variable must be `$f`-declared before it can appear in an `$e` (or
+/// else we'll ignore the `$e`), and that logical file order is reflected in
+/// the stack order of the hypotheses, we can do this in one pass.
+#[inline(always)]
+fn process_hyp<P: ProofBuilder>(state: &mut VerifyState<P>,
+                                datavec: &mut P::Accum,
+                                frame: &Frame,
+                                ix: usize,
+                                hyp: &scopeck::Hyp)
+                                -> Result<()> {
+    let (ref data, ref slot): (P::Item, StackSlot) = state.stack[ix];
+    state.builder.push(datavec, data.clone());
+    match hyp {
+        &Floating(_addr, var_index, typecode) => {
+            try_assert!(slot.code == typecode, Diagnostic::StepFloatWrongType);
+            state.subst_info[var_index] = (slot.expr.clone(), slot.vars.clone());
+        }
+        &Essential(_addr, ref expr) => {
+            try_assert!(slot.code == expr.typecode, Diagnostic::StepEssenWrongType);
+            try_assert!(do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
+                                         frame,
+                                         &expr,
+                                         &state.subst_info,
+                                         &state.stack_buffer),
+                        Diagnostic::StepEssenWrong);
+        }
+    }
+    Ok(())
+}
+
 /// This is the main "VM" function, and responsible for ~30% of CPU time during
 /// a one-shot verify operation.
-fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Result<()> {
+#[inline(always)]
+fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
+                                 index: usize,
+                                 explicit: Option<&mut Vec<Option<TokenPtr>>>)
+                                 -> Result<()> {
     try_assert!(index < state.prepared.len(), Diagnostic::StepOutOfRange);
-
     let fref = match state.prepared[index] {
         Hyp(ref vars, code, ref expr, ref data) => {
             // hypotheses/saved steps are the easy case.  unfortunately, this is
@@ -394,31 +490,62 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>, index: usize) -> Re
 
     let mut datavec = Default::default();
 
-    // process the hypotheses of the assertion we're about to apply.  $f hyps
-    // allow the caller to define a replacement for a variable; $e hyps are
-    // logical hypotheses that must have been proved; the result is then
-    // substituted and pushed.
-    //
-    // since a variable must be $f-declared before it can appear in an $e (or
-    // else we'll ignore the $e), and that logical file order is reflected in
-    // the stack order of the hypotheses, we can do this in one pass
-    for (ix, hyp) in fref.hypotheses.iter().enumerate() {
-        let (ref data, ref slot) = state.stack[sbase + ix];
-        state.builder.push(&mut datavec, data.clone());
-        match hyp {
-            &Floating(_addr, var_index, typecode) => {
-                try_assert!(slot.code == typecode, Diagnostic::StepFloatWrongType);
-                state.subst_info[var_index] = (slot.expr.clone(), slot.vars.clone());
+    // This branch is optimized out of compressed proof processing
+    if let Some(explicit_stack) = explicit {
+        // The hypotheses are probably in the right order, so check that first
+        let mut in_order = true;
+        for (ix, hyp) in fref.hypotheses.iter().enumerate() {
+            if let Some(tok) = explicit_stack[sbase + ix] {
+                if try!(state.nameset
+                        .lookup_label(tok)
+                        .ok_or(Diagnostic::BadExplicitLabel(copy_token(tok))))
+                    .address != hyp.address() {
+                    in_order = false;
+                    break;
+                }
             }
-            &Essential(_addr, ref expr) => {
-                try_assert!(slot.code == expr.typecode, Diagnostic::StepEssenWrongType);
-                try_assert!(do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
-                                             fref,
-                                             &expr,
-                                             &state.subst_info,
-                                             &state.stack_buffer),
-                            Diagnostic::StepEssenWrong);
+        }
+        if in_order {
+            for (ix, hyp) in fref.hypotheses.iter().enumerate() {
+                try!(process_hyp(state, &mut datavec, fref, sbase + ix, hyp));
             }
+        } else {
+            // Otherwise, we need to reorder hypotheses
+
+            let mut assn_hyps: Vec<Option<usize>> = vec![None; fref.hypotheses.len()];
+            // Assign all explicit hyps
+            for (ix, &ex) in explicit_stack[sbase..].iter().enumerate() {
+                if let Some(tok) = ex {
+                    let addr = state.nameset.lookup_label(tok).unwrap().address;
+                    let hyp_ix = try!(fref.hypotheses
+                        .iter()
+                        .position(|hyp| hyp.address() == addr)
+                        .ok_or(Diagnostic::BadExplicitLabel(copy_token(tok))));
+                    try_assert!(assn_hyps[hyp_ix].is_none(),
+                                Diagnostic::DuplicateExplicitLabel(copy_token(tok)));
+                    assn_hyps[hyp_ix] = Some(ix);
+                }
+            }
+            // assign all the remaining hyps
+            for (ix, ex) in explicit_stack[sbase..].iter().enumerate() {
+                if ex.is_none() {
+                    *assn_hyps.iter_mut().find(|slot| slot.is_none()).unwrap() = Some(ix);
+                }
+            }
+
+            for (ix, slot) in assn_hyps.iter().enumerate() {
+                try!(process_hyp(state,
+                                 &mut datavec,
+                                 fref,
+                                 sbase + ix,
+                                 &fref.hypotheses[slot.unwrap()]));
+            }
+        }
+
+        explicit_stack.truncate(sbase);
+    } else {
+        for (ix, hyp) in fref.hypotheses.iter().enumerate() {
+            try!(process_hyp(state, &mut datavec, fref, sbase + ix, hyp));
         }
     }
 
@@ -510,7 +637,7 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
             prepare_hypothesis(state, hyp);
         }
 
-        // parse and prepare the label list before the )
+        // parse and prepare the label list before the ')'
         loop {
             try_assert!(i < stmt.proof_len(), Diagnostic::ProofUnterminatedRoster);
             let chunk = stmt.proof_slice_at(i);
@@ -520,7 +647,7 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
                 break;
             }
 
-            try!(prepare_step(state, chunk));
+            try!(prepare_step(state, chunk, None));
         }
 
         // after ) is a packed list of varints.  decode them and execute the
@@ -533,7 +660,7 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
             for &ch in chunk {
                 if ch >= b'A' && ch <= b'T' {
                     k = k * 20 + (ch - b'A') as usize;
-                    try!(execute_step(state, k));
+                    try!(execute_step(state, k, None));
                     k = 0;
                     can_save = true;
                 } else if ch >= b'U' && ch <= b'Y' {
@@ -556,13 +683,38 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
         try_assert!(k == 0, Diagnostic::ProofMalformedVarint);
     } else {
         let mut count = 0;
+        let mut backrefs: HashMap<TokenPtr, usize> = new_map();
+        let mut explicit_stack: Option<Vec<Option<TokenPtr<'a>>>> = None;
+
         // NORMAL mode proofs are just a list of steps, with no saving provision
         for i in 0..stmt.proof_len() {
+            let span = stmt.proof_span(i);
             let chunk = stmt.proof_slice_at(i);
             try_assert!(chunk != b"?", Diagnostic::ProofIncomplete);
-            try!(prepare_step(state, chunk));
-            try!(execute_step(state, count));
-            count += 1;
+            let step = try!(prepare_step(state, chunk, Some(span)));
+            if let Some(label) = step.label {
+                try_assert!(step.fwdref.is_none(), Diagnostic::ChainBackref(span));
+                let &ix = try!(backrefs.get(label)
+                    .ok_or_else(|| Diagnostic::StepMissing(copy_token(label))));
+                try!(execute_step(state, ix, explicit_stack.as_mut()));
+            } else {
+                try!(execute_step(state, count, explicit_stack.as_mut()));
+                if let Some(fwdref) = step.fwdref {
+                    state.prepared.pop();
+                    save_step(state);
+                    try_assert!(backrefs.insert(fwdref, count).is_none(),
+                                Diagnostic::LocalLabelDuplicate(span));
+                }
+                count += 1;
+            }
+            if step.hyptok.is_some() {
+                if explicit_stack.is_none() {
+                    // lazy initialization so that we don't need to maintain
+                    // this parallel stack if we are not in explicit mode
+                    explicit_stack = Some(vec![None; state.stack.len()-1]);
+                }
+                explicit_stack.as_mut().unwrap().push(step.hyptok);
+            }
         }
     }
 

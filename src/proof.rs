@@ -5,14 +5,16 @@ use nameck::Nameset;
 use parser::as_str;
 use parser::StatementAddress;
 use parser::StatementRef;
+use parser::StatementType::*;
 use parser::TokenPtr;
 use scopeck::ScopeResult;
 use segment_set::SegmentSet;
+use std::cmp::max;
 use std::cmp::Ord;
 use std::cmp::Ordering;
 use std::cmp::PartialOrd;
 use std::collections::BinaryHeap;
-use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Write;
 use std::hash::Hash;
@@ -20,6 +22,8 @@ use std::hash::Hasher;
 use std::hash::SipHasher;
 use std::ops::Range;
 use std::u16;
+use util::HashMap;
+use util::new_map;
 use verify::ProofBuilder;
 use verify::verify_one;
 
@@ -361,7 +365,7 @@ impl ProofBuilder for ProofTreeArray {
 }
 
 /// List of possible proof output types.
-#[derive(Debug,PartialEq,Eq)]
+#[derive(Copy,Clone,Debug,PartialEq,Eq)]
 pub enum ProofStyle {
     /// `/compressed` proof output (default). Label list followed by step letters.
     Compressed,
@@ -373,6 +377,30 @@ pub enum ProofStyle {
     Explicit,
     /// `/packed/explicit` proof output. `/normal` with hypothesis names and backreferences.
     PackedExplicit,
+}
+
+impl ProofStyle {
+    /// Returns `true` if this is in explicit style (showing proof hypotheses labels
+    /// on each step)
+    pub fn explicit(self) -> bool {
+        match self {
+            ProofStyle::Explicit |
+            ProofStyle::PackedExplicit => true,
+            _ => false,
+        }
+    }
+
+    /// Returns `true` if this is in packed style, meaning duplicate subtrees are
+    /// referred to by backreferences instead of inlined. (Compressed proofs are
+    /// considered packed by this definition.)
+    pub fn packed(self) -> bool {
+        match self {
+            ProofStyle::Compressed |
+            ProofStyle::Packed |
+            ProofStyle::PackedExplicit => true,
+            _ => false,
+        }
+    }
 }
 
 /// A struct for storing display parameters for printing proofs.
@@ -397,89 +425,304 @@ pub struct ProofTreePrinter<'a> {
     pub line_width: u16,
 }
 
+/// The local variables of `ProofTreePrinter::fmt()`, extracted into a struct
+/// so that the inner functions can be broken out.
+struct ProofTreePrinterImpl<'a, 'b: 'a> {
+    p: &'a ProofTreePrinter<'a>,
+    f: &'a mut fmt::Formatter<'b>,
+    indent: String,
+    chr: u16,
+    stmt_lookup: HashMap<StatementAddress, (&'a str, Vec<&'a str>)>,
+    backref_alloc: Vec<String>,
+    backref_max: usize,
+}
+
+impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
+    fn write_word(&mut self, word: &str) -> fmt::Result {
+        let len = word.len() as u16;
+        if self.chr + len < self.p.line_width {
+            self.chr += len + 1;
+            try!(self.f.write_char(' '));
+        } else {
+            self.chr = self.p.indent + len;
+            try!(self.f.write_str(&self.indent));
+        }
+        self.f.write_str(word)
+    }
+
+    fn estr(&self, hyp: Option<(StatementAddress, usize)>) -> String {
+        if self.p.style.explicit() {
+            format!("{}=",
+                    match hyp {
+                        Some((stmt, i)) => self.stmt_lookup[&stmt].1[i],
+                        None => as_str(self.p.thm_label),
+                    })
+        } else {
+            String::new()
+        }
+    }
+
+    fn print_step(&mut self, item: RPNStep) -> fmt::Result {
+        let word = match item {
+            RPNStep::Normal { fwdref, addr, hyp } => {
+                if fwdref == 0 {
+                    format!("{}{}", self.estr(hyp), self.stmt_lookup[&addr].0)
+                } else {
+                    format!("{}:{}{}",
+                            if fwdref <= self.backref_alloc.len() {
+                                &self.backref_alloc[fwdref - 1]
+                            } else {
+                                let mut s;
+                                while {
+                                    self.backref_max += 1;
+                                    s = self.backref_max.to_string();
+                                    self.p.nset.lookup_label(s.as_bytes()).is_some()
+                                } {}
+                                self.backref_alloc.push(s);
+                                self.backref_alloc.last().unwrap()
+                            },
+                            self.estr(hyp),
+                            self.stmt_lookup[&addr].0)
+                }
+            }
+            RPNStep::Backref { backref, hyp } => {
+                format!("{}{}", self.estr(hyp), self.backref_alloc[backref - 1])
+            }
+        };
+        self.write_word(&word)
+    }
+
+    fn init_stmt_lookup(&mut self) {
+        for tree in &self.p.arr.trees {
+            if !self.stmt_lookup.contains_key(&tree.address) {
+                let label = self.p.sset.statement(tree.address).label();
+                let hyps = if self.p.style.explicit() {
+                    match self.p.scope.get(label) {
+                        Some(frame) => {
+                            frame.hypotheses
+                                .iter()
+                                .map(|hyp| {
+                                    as_str(self.p
+                                        .sset
+                                        .statement(hyp.address())
+                                        .label())
+                                })
+                                .collect()
+                        }
+                        None => vec![],
+                    }
+                } else {
+                    vec![]
+                };
+                self.stmt_lookup.insert(tree.address, (as_str(label), hyps));
+            }
+        }
+    }
+
+    fn fmt_compressed(&mut self) -> fmt::Result {
+        let parents = self.p.arr.count_parents();
+        let rpn = self.p.arr.to_rpn(&parents, false);
+        let mut proof_ordered_hyps = vec![];
+        let mut proof_ordered: Vec<(StatementRef, usize)> = vec![];
+        let frame = self.p.scope.get(self.p.thm_label).unwrap();
+        for item in &rpn {
+            if let &RPNStep::Normal { addr, .. } = item {
+                let stmt = self.p.sset.statement(addr);
+                let vec = match stmt.statement_type() {
+                    Floating => {
+                        let atom = self.p.nset.var_atom(stmt).unwrap();
+                        if frame.var_list[..frame.mandatory_count].contains(&atom) {
+                            continue;
+                        }
+                        &mut proof_ordered_hyps
+                    }
+                    Essential => &mut proof_ordered_hyps,
+                    Axiom | Provable => &mut proof_ordered,
+                    _ => unreachable!(),
+                };
+                match vec.iter().position(|&(s, _)| s.address() == addr) {
+                    Some(n) => vec[n].1 += 1,
+                    None => vec.push((stmt, 1)),
+                }
+            }
+        }
+        proof_ordered_hyps.append(&mut proof_ordered);
+        proof_ordered = proof_ordered_hyps;
+        let values: Vec<u16> =
+            proof_ordered.iter().map(|&(s, _)| s.label().len() as u16 + 1).collect();
+
+        let mut sorted_by_refs = (0..proof_ordered.len()).collect::<Vec<usize>>();
+        sorted_by_refs.sort_by(|&a, &b| proof_ordered[b].1.cmp(&proof_ordered[a].1));
+        let mut i = frame.mandatory_count;
+        let mut cutoff = 20;
+        while cutoff <= i {
+            i -= cutoff;
+            cutoff *= 5;
+        }
+        let mut length_block = vec![];
+        let mut line_pos = 2u16;
+        let mut paren_stmt = vec![];
+        let width = self.p.line_width - self.p.indent + 1;
+
+        let mut knapsack = VecDeque::new(); // scratch space used in knapsack_fit
+        let mut process_block = |paren_stmt: &mut Vec<StatementRef<'a>>,
+                                 length_block: &mut Vec<usize>| {
+            length_block.sort();
+            while !length_block.is_empty() {
+                knapsack_fit(&length_block,
+                             &values,
+                             (width - line_pos) as usize,
+                             &mut knapsack);
+                for &p in &knapsack {
+                    line_pos += values[p];
+                    paren_stmt.push(proof_ordered[p].0);
+                    if let Ok(n) = length_block.binary_search(&p) {
+                        length_block.remove(n);
+                    }
+                }
+                if !knapsack.is_empty() || line_pos >= width - 1 {
+                    line_pos = 0;
+                }
+            }
+        };
+
+        for pos in sorted_by_refs {
+            if i == cutoff {
+                i = 1;
+                cutoff *= 5;
+                process_block(&mut paren_stmt, &mut length_block);
+            } else {
+                i += 1;
+            }
+            length_block.push(pos);
+        }
+        process_block(&mut paren_stmt, &mut length_block);
+
+        let mut letters: Vec<u8> = vec![];
+        for item in &rpn {
+            let (is_fwdref, mut letter) = match item {
+                &RPNStep::Normal { fwdref, addr, .. } => {
+                    let stmt = self.p.sset.statement(addr);
+                    let pos = if stmt.statement_type() == Floating {
+                        let atom = self.p.nset.var_atom(stmt).unwrap();
+                        frame.var_list[..frame.mandatory_count]
+                            .iter()
+                            .position(|&a| a == atom)
+                    } else {
+                        None
+                    };
+                    (fwdref != 0,
+                     pos.unwrap_or_else(|| {
+                        frame.mandatory_count +
+                        paren_stmt.iter().position(|s| s.address() == addr).unwrap()
+                    }))
+                }
+                &RPNStep::Backref { backref, .. } => {
+                    (false, frame.mandatory_count + paren_stmt.len() + backref - 1)
+                }
+            };
+            let code_start = letters.len();
+            letters.push(b'A' + (letter % 20) as u8);
+            letter /= 20;
+            while letter != 0 {
+                letter -= 1;
+                letters.insert(code_start, b'U' + (letter % 5) as u8);
+                letter /= 5;
+            }
+            if is_fwdref {
+                letters.push(b'Z');
+            }
+        }
+
+        try!(self.write_word("("));
+        for s in paren_stmt {
+            try!(self.write_word(as_str(s.label())));
+        }
+        try!(self.write_word(")"));
+        let mut letters: &[u8] = &letters;
+        loop {
+            let ll = (self.p.line_width - self.chr)
+                .checked_sub(1)
+                .unwrap_or(self.p.line_width - self.p.indent) as usize;
+            if ll < letters.len() {
+                let (left, right) = letters.split_at(ll);
+                letters = right;
+                try!(self.write_word(as_str(left)));
+            } else {
+                return self.write_word(as_str(letters));
+            }
+        }
+    }
+
+    fn fmt(&mut self) -> fmt::Result {
+        try!(self.f.write_str(&self.indent[(self.p.initial_chr + 2) as usize..]));
+
+        match self.p.style {
+            ProofStyle::Normal | ProofStyle::Explicit => {
+                self.init_stmt_lookup();
+                for item in self.p.arr.normal_iter(self.p.style.explicit()) {
+                    try!(self.print_step(item));
+                }
+            }
+            ProofStyle::Packed |
+            ProofStyle::PackedExplicit => {
+                self.init_stmt_lookup();
+                let parents = self.p.arr.count_parents();
+                for item in self.p.arr.to_rpn(&parents, self.p.style.explicit()) {
+                    try!(self.print_step(item));
+                }
+            }
+            ProofStyle::Compressed => try!(self.fmt_compressed()),
+        }
+        self.write_word("$.")
+    }
+}
+
+/// Given an array of items, such that `values[i]` is the cost of the `i`th item,
+/// and the items are labeled by `items` (so only the values `i = items[j]` are
+/// relevant), find the best fit of items whose total cost is no more than `size`,
+/// and return the result in the `included` array.
+///
+/// Implements the algorithm given in https://en.wikipedia.org/wiki/Knapsack_problem#0.2F1_knapsack_problem.
+fn knapsack_fit(items: &[usize], values: &[u16], mut size: usize, included: &mut VecDeque<usize>) {
+    let mut worth: Vec<Vec<u16>> = vec![vec![0; size+1]; items.len()+1];
+    for (i, &item) in items.iter().enumerate() {
+        let value = values[item];
+        for s in 0..size + 1 {
+            worth[i + 1][s] = if s >= value as usize {
+                max(worth[i][s], value + worth[i][s - value as usize])
+            } else {
+                worth[i][s]
+            }
+        }
+    }
+    included.clear();
+    for (i, &item) in items.iter().enumerate().rev() {
+        if worth[i + 1][size] != worth[i][size] {
+            included.push_front(item);
+            size -= values[item] as usize;
+            if size == 0 {
+                break;
+            }
+        }
+    }
+}
+
 impl<'a> fmt::Display for ProofTreePrinter<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut indent = "\n".to_string();
         for _ in 0..self.indent {
             indent.push(' ');
         }
-        try!(f.write_str(&indent[(self.initial_chr + 2) as usize..]));
-        let mut chr = self.indent - 1;
-        let parents = self.arr.count_parents();
-
-        let explicit = match self.style {
-            ProofStyle::Explicit |
-            ProofStyle::PackedExplicit => true,
-            _ => false,
-        };
-
-        let mut stmt_lookup: HashMap<StatementAddress, (&str, Vec<&str>)> = HashMap::new();
-        for tree in &self.arr.trees {
-            stmt_lookup.entry(tree.address)
-                .or_insert_with(|| {
-                    let label = self.sset.statement(tree.address).label();
-                    (as_str(label),
-                     if explicit {
-                        match self.scope.get(label) {
-                            Some(frame) => {
-                                frame.hypotheses
-                                    .iter()
-                                    .map(|hyp| as_str(self.sset.statement(hyp.address()).label()))
-                                    .collect()
-                            }
-                            None => vec![],
-                        }
-                    } else {
-                        vec![]
-                    })
-                });
-        }
-
-        let mut print_step = |item: RPNStep| -> fmt::Result {
-            let estr = |hyp| if explicit {
-                format!("{}=",
-                        match hyp {
-                            Some((stmt, i)) => stmt_lookup[&stmt].1[i],
-                            None => as_str(self.thm_label),
-                        })
-            } else {
-                String::new()
-            };
-            let fmt = match item {
-                RPNStep::Normal { fwdref, addr, hyp } => {
-                    if fwdref == 0 {
-                        format!("{}{}", estr(hyp), stmt_lookup[&addr].0)
-                    } else {
-                        format!("{}:{}{}", fwdref, estr(hyp), stmt_lookup[&addr].0)
-                    }
-                }
-                RPNStep::Backref { backref, hyp } => format!("{}{}", estr(hyp), backref),
-            };
-
-            if chr + (fmt.len() as u16) < self.line_width {
-                chr += (fmt.len() as u16) + 1;
-                try!(f.write_char(' '));
-            } else {
-                chr = self.indent + (fmt.len() as u16);
-                try!(f.write_str(&indent));
+        ProofTreePrinterImpl {
+                p: &self,
+                f: f,
+                indent: indent,
+                chr: self.indent - 1,
+                stmt_lookup: new_map(),
+                backref_alloc: vec![],
+                backref_max: 0,
             }
-            f.write_str(&fmt)
-        };
-
-        match self.style {
-            ProofStyle::Compressed => unimplemented!(),
-            ProofStyle::Normal | ProofStyle::Explicit => {
-                for item in self.arr.normal_iter(explicit) {
-                    try!(print_step(item));
-                }
-            }
-            ProofStyle::Packed |
-            ProofStyle::PackedExplicit => {
-                for item in self.arr.to_rpn(&parents, explicit) {
-                    try!(print_step(item));
-                }
-            }
-        }
-        Ok(())
+            .fmt()
     }
 }

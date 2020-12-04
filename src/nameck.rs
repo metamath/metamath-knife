@@ -25,6 +25,7 @@ use parser::SegmentId;
 use parser::SegmentOrder;
 use parser::SegmentRef;
 use parser::StatementAddress;
+use parser::StatementRef;
 use parser::SymbolType;
 use parser::Token;
 use parser::TokenAddress;
@@ -349,7 +350,11 @@ impl Nameset {
                 }
             })
         })
+    }
 
+    /// Looks up the atom from a $f statement.
+    pub fn var_atom(&self, stmt: StatementRef) -> Option<Atom> {
+        self.lookup_symbol(&stmt.math_at(1)).map(|lookup| lookup.atom)
     }
 }
 
