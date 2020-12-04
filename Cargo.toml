@@ -1,6 +1,6 @@
 [package]
 authors = ["Stefan O'Rear <sorear2@gmail.com>"]
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 name = "smetamath"
 readme = "README.md"
 version = "3.0.1-1"
