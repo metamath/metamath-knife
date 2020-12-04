@@ -149,7 +149,7 @@ pub struct DbOptions {
 
 /// Wraps a heap-allocated closure with a difficulty score which can be used for
 /// sorting; this might belong in the standard library as `CompareFirst` or such.
-struct Job(usize, Box<FnMut() + Send>);
+struct Job(usize, Box<dyn FnMut() + Send>);
 impl PartialEq for Job {
     fn eq(&self, other: &Job) -> bool {
         self.0 == other.0
@@ -187,7 +187,7 @@ impl fmt::Debug for Executor {
     }
 }
 
-fn queue_work(exec: &Executor, estimate: usize, mut f: Box<FnMut() + Send>) {
+fn queue_work(exec: &Executor, estimate: usize, mut f: Box<dyn FnMut() + Send>) {
     if exec.concurrency <= 1 {
         f();
         return;
@@ -277,7 +277,7 @@ impl Executor {
 /// computation to a thread pool.  There are several other methods to attach
 /// code to promises; these do **not** parallelize, and are intended to do very
 /// cheap tasks for interface consistency purposes only.
-pub struct Promise<T>(Box<FnMut() -> T + Send>);
+pub struct Promise<T>(Box<dyn FnMut() -> T + Send>);
 
 impl<T> Promise<T> {
     /// Wait for a value to be available and return it, rethrowing any panic.
@@ -454,7 +454,7 @@ impl Database {
                 }
                 let pr = self.parse_result().clone();
                 {
-                    let mut ns = Arc::make_mut(self.prev_nameset.as_mut().unwrap());
+                    let ns = Arc::make_mut(self.prev_nameset.as_mut().unwrap());
                     ns.update(&pr);
                 }
                 self.nameset = self.prev_nameset.clone();
@@ -480,7 +480,7 @@ impl Database {
                 let parse = self.parse_result().clone();
                 let name = self.name_result().clone();
                 {
-                    let mut ns = Arc::make_mut(self.prev_scopes.as_mut().unwrap());
+                    let ns = Arc::make_mut(self.prev_scopes.as_mut().unwrap());
                     scopeck::scope_check(ns, &parse, &name);
                 }
                 self.scopes = self.prev_scopes.clone();
@@ -507,7 +507,7 @@ impl Database {
                 let scope = self.scope_result().clone();
                 let name = self.name_result().clone();
                 {
-                    let mut ver = Arc::make_mut(self.prev_verify.as_mut().unwrap());
+                    let ver = Arc::make_mut(self.prev_verify.as_mut().unwrap());
                     verify::verify(ver, &parse, &name, &scope);
                 }
                 self.verify = self.prev_verify.clone();
