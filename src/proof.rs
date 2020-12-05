@@ -131,7 +131,7 @@ impl ProofTreeArray {
                stmt: StatementRef)
                -> Result<ProofTreeArray, Diagnostic> {
         let mut arr = ProofTreeArray::default();
-        arr.qed = try!(verify_one(sset, nset, scopes, &mut arr, stmt));
+        arr.qed = verify_one(sset, nset, scopes, &mut arr, stmt)?;
         arr.indent = arr.calc_indent();
         Ok(arr)
     }
@@ -442,10 +442,10 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
         let len = word.len() as u16;
         if self.chr + len < self.p.line_width {
             self.chr += len + 1;
-            try!(self.f.write_char(' '));
+            self.f.write_char(' ')?;
         } else {
             self.chr = self.p.indent + len;
-            try!(self.f.write_str(&self.indent));
+            self.f.write_str(&self.indent)?;
         }
         self.f.write_str(word)
     }
@@ -634,11 +634,11 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
             }
         }
 
-        try!(self.write_word("("));
+        self.write_word("(")?;
         for s in paren_stmt {
-            try!(self.write_word(as_str(s.label())));
+            self.write_word(as_str(s.label()))?;
         }
-        try!(self.write_word(")"));
+        self.write_word(")")?;
         let mut letters: &[u8] = &letters;
         loop {
             let ll = (self.p.line_width - self.chr)
@@ -647,7 +647,7 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
             if ll < letters.len() {
                 let (left, right) = letters.split_at(ll);
                 letters = right;
-                try!(self.write_word(as_str(left)));
+                self.write_word(as_str(left))?;
             } else {
                 return self.write_word(as_str(letters));
             }
@@ -655,13 +655,13 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
     }
 
     fn fmt(&mut self) -> fmt::Result {
-        try!(self.f.write_str(&self.indent[(self.p.initial_chr + 2) as usize..]));
+        self.f.write_str(&self.indent[(self.p.initial_chr + 2) as usize..])?;
 
         match self.p.style {
             ProofStyle::Normal | ProofStyle::Explicit => {
                 self.init_stmt_lookup();
                 for item in self.p.arr.normal_iter(self.p.style.explicit()) {
-                    try!(self.print_step(item));
+                    self.print_step(item)?;
                 }
             }
             ProofStyle::Packed |
@@ -669,10 +669,10 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                 self.init_stmt_lookup();
                 let parents = self.p.arr.count_parents();
                 for item in self.p.arr.to_rpn(&parents, self.p.style.explicit()) {
-                    try!(self.print_step(item));
+                    self.print_step(item)?;
                 }
             }
-            ProofStyle::Compressed => try!(self.fmt_compressed()),
+            ProofStyle::Compressed => self.fmt_compressed()?,
         }
         self.write_word("$.")
     }
