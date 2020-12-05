@@ -19,7 +19,7 @@ use std::fmt;
 use std::fmt::Write;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::hash::SipHasher;
+use std::collections::hash_map::DefaultHasher;
 use std::ops::Range;
 use std::u16;
 use util::HashMap;
@@ -56,7 +56,7 @@ impl Hash for ProofTree {
 impl ProofTree {
     /// Create a new proof tree using the given atom and children.
     pub fn new(parent: &ProofTreeArray, address: StatementAddress, children: Vec<usize>) -> Self {
-        let mut hasher = SipHasher::new();
+        let mut hasher = DefaultHasher::new();
         address.hash(&mut hasher);
         for &ix in &children {
             parent.trees[ix].hash(&mut hasher);
