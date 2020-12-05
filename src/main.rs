@@ -46,7 +46,7 @@ fn positive_integer(val: String) -> Result<(), String> {
 }
 
 fn main() {
-    let matches = App::new("smetamath-rs")
+    let matches = App::new("smetamath-knife")
         .version(crate_version!())
         .about("A Metamath database verifier and processing tool")
         .arg(Arg::with_name("DATABASE").help("Database file to load").required_unless("TEXT"))

@@ -76,6 +76,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "metamath-knife"
+version = "3.1.0-1"
+dependencies = [
+ "clap",
+ "filetime",
+ "fnv",
+ "regex",
+]
+
+[[package]]
 name = "regex"
 version = "0.1.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -93,16 +103,6 @@ name = "regex-syntax"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baa04823ba7be7ed0bed3d0704c7b923019d9c4e4931c5af2804c7c7a0e3d00b"
-
-[[package]]
-name = "smetamath"
-version = "3.0.1-1"
-dependencies = [
- "clap",
- "filetime",
- "fnv",
- "regex",
-]
 
 [[package]]
 name = "strsim"
