@@ -1,11 +1,11 @@
 [package]
-authors = ["Stefan O'Rear <sorear2@gmail.com>"]
+authors = ["David A. Wheeler <dwheeler@dwheeler.com>", "Stefan O'Rear <sorear2@gmail.com>"]
 license = "MIT OR Apache-2.0"
-name = "smetamath"
+name = "metamath-knife"
 readme = "README.md"
-version = "3.0.1-1"
+version = "3.1.0-1"
 description = "A parallel and incremental verifier for Metamath databases"
-repository = "https://github.com/sorear/smetamath-rs"
+repository = "https://github.com/david-a-wheeler/metamath-knife"
 
 [dependencies]
 clap = "2.5.2"
