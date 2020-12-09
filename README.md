@@ -12,8 +12,7 @@ Metamath-knife is a friendly fork of
 
 * It supports *all* Metamath proof formats. In particular, Metamath-knife
   adds support for *all* Metamath proof formats
-  (<a href="https://groups.google.com/g/metamath/c/xCUNA2ttHew/m/RXSNzdovBAAJ"
-  >uncompressed, compressed, package, or explicit</a>.
+  (<a href="https://groups.google.com/g/metamath/c/xCUNA2ttHew/m/RXSNzdovBAAJ">uncompressed, compressed, package, or explicit</a>.
 * We take extra steps to prevent errors, e.g., we have a CI pipeline
   (implemented using GitHub actons).
 * We remove deprecated constructs, e.g., the deprecated try!(...)
@@ -24,7 +23,7 @@ Metamath-knife is a friendly fork of
 
 ## Building
 
-Install Rust ([rustup.sh]), "Rust 2018" (version 1.31.0) or later, then check out this repository and run:
+Install Rust, "Rust 2018" (version 1.31.0) or later, then check out this repository and run:
 
     cargo build --release
 
@@ -58,11 +57,7 @@ Note that this is exactly the same license as smetamath-rs (SMM3),
 That is intentional, because we want smetamath-rs (SMM3) to be able to
 re-incorporate whatever we do if they like.
 
-
-at your option.
-
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any
-additional terms or conditions.
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
