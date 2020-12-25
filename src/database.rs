@@ -573,7 +573,7 @@ impl Database {
     /// Dump the outline of this database.
     fn print_outline_node(&mut self, node: &OutlineNode, indent: usize) {
         // let indent = (node.level as usize) * 3
-        println!("{:indent$} {:?}", "", node.level, indent = indent);
+        println!("{:indent$} {:?} {:?}", "", node.level, node.get_name(), indent = indent);
         for child in node.children.iter() {
             self.print_outline_node(&child, indent + 1);
         }        

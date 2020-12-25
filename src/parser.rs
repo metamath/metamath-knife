@@ -403,6 +403,8 @@ pub struct LocalVarDef {
 /// Extracted information for outline heading statements.
 #[derive(Debug)]
 pub struct HeadingDef {
+    /// The name of the heading (this is not strictly speaking a token)
+    pub name: Token,
     /// Local inder of the heading statement.
     pub index: StatementIndex,
     /// Level of this outline
@@ -1518,7 +1520,11 @@ fn collect_definitions(seg: &mut Segment) {
                 });
             }
             HeadingComment(level) => {
-                seg.outline.push(HeadingDef { index, level });
+                seg.outline.push(HeadingDef { 
+					name: copy_token(get_heading_name(buf,stmt.span.start)),
+					index, 
+					level 
+				});
             }
             _ => {}
         }
@@ -1533,14 +1539,9 @@ fn is_valid_label(label: &[u8]) -> bool {
     })
 }
 
-/// Slightly set.mm specific hack to extract a section name from a byte buffer.
-///
-/// This is run before parsing so it can't take advantage of comment extraction;
-/// instead we look for the first indented line, within a heuristic limit of 500
-/// bytes.
-pub fn guess_buffer_name(buffer: &[u8]) -> &str {
-    let buffer = &buffer[0..cmp::min(500, buffer.len())];
-    let mut index = 0;
+/// Extract a section name from a comment
+fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
+	let mut index = pos as usize;
     while index < buffer.len() {
         // is this line indented?
         if buffer[index] == b' ' {
@@ -1569,12 +1570,23 @@ pub fn guess_buffer_name(buffer: &[u8]) -> &str {
     while eol > index && (buffer[eol - 1] == b'\r' || buffer[eol - 1] == b' ') {
         eol -= 1;
     }
+	&buffer[index..eol]
+}
+
+/// Slightly set.mm specific hack to extract a section name from a byte buffer.
+///
+/// This is run before parsing so it can't take advantage of comment extraction;
+/// instead we look for the first indented line, within a heuristic limit of 500
+/// bytes.
+pub fn guess_buffer_name(buffer: &[u8]) -> &str {
+    let buffer = &buffer[0..cmp::min(500, buffer.len())];
+    let ptr = get_heading_name(buffer, 0);
 
     // fail gracefully, this is a debugging aid only
-    if eol == index {
+    if ptr.is_empty() {
         "<no section name found>"
     } else {
-        str::from_utf8(&buffer[index..eol]).unwrap_or("<invalid UTF-8 in section name>")
+        str::from_utf8(ptr).unwrap_or("<invalid UTF-8 in section name>")
     }
 }
 
