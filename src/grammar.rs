@@ -521,8 +521,10 @@ impl Grammar {
 
 	/// Handle common prefixes. 
 	/// For example in set.mm, ` (  A ` is a prefix common to ` ( A X. B ) ` and ` ( A e. B /\ T. ) `
-	/// The first is a notation, but would "shadow" the second option
-	// NOTES: 
+	/// The first is a notation, but would "shadow" the second option.
+	/// The command `ambiguous_prefix ( A   =>   ( ph ;` handles this.
+	/// 
+	// NOTE: 
 	//    Common prefix must be constant only, and both first differing symbols must be variables
 	fn handle_common_prefixes(&mut self, prefix: &[Token], shadows: &[Token], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
 		let mut node_id = self.root;
