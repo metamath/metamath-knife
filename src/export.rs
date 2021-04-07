@@ -48,13 +48,6 @@ impl fmt::Display for ExportError {
 }
 
 impl error::Error for ExportError {
-    fn description(&self) -> &str {
-        match *self {
-            ExportError::Io(ref err) => err.description(),
-            ExportError::Verify(_) => "verification error",
-        }
-    }
-
     fn cause(&self) -> Option<&dyn error::Error> {
         match *self {
             ExportError::Io(ref err) => Some(err),

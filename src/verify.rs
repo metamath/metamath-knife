@@ -538,7 +538,7 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
                                  &mut datavec,
                                  fref,
                                  sbase + ix,
-                                 &fref.hypotheses[slot.unwrap()]);
+                                 &fref.hypotheses[slot.unwrap()])?;
             }
         }
 
