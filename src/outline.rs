@@ -4,15 +4,15 @@
 //! to be instantiated through `Database`.  It is not considered a stable API,
 //! although a stable wrapper may be added in `Database`.
 
-use parser::as_str;
-use parser::copy_token;
-use parser::Token;
-use parser::HeadingLevel;
-use parser::HeadingDef;
-use parser::SegmentId;
-use parser::SegmentRef;
-use parser::StatementAddress;
-use segment_set::SegmentSet;
+use crate::parser::as_str;
+use crate::parser::copy_token;
+use crate::parser::Token;
+use crate::parser::HeadingLevel;
+use crate::parser::HeadingDef;
+use crate::parser::SegmentId;
+use crate::parser::SegmentRef;
+use crate::parser::StatementAddress;
+use crate::segment_set::SegmentSet;
 use std::sync::Arc;
 
 #[derive(Debug,Default,Clone)]
@@ -25,7 +25,7 @@ pub struct OutlineNode {
 	/// Statement address
 	pub stmt_address: StatementAddress,
 	/// A list of children subsections
-	pub children: Vec<OutlineNode>,
+	pub children: Vec<Arc<OutlineNode>>,
 }
 
 impl OutlineNode {
@@ -55,14 +55,14 @@ impl OutlineNode {
 		match self.children.last_mut() {
 			None => {
 				// this is our first child
-				self.children.push(child);
+				self.children.push(Arc::new(child));
 			},
 			Some(last_child) => {
 				// Append to our last child
 				if child.level > last_child.level {
-					last_child.add_child(child);
+					Arc::make_mut(last_child).add_child(child);
 				} else {
-					self.children.push(child);
+					self.children.push(Arc::new(child));
 				}
 			},
 		}

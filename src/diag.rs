@@ -4,17 +4,17 @@
 //! interpretation and testing, as well as a mostly-text representation which
 //! can be used for various human-readable outputs.
 
-use parser::as_str;
-use parser::Comparer;
-use parser::Span;
-use parser::StatementAddress;
-use parser::StatementIndex;
-use parser::StatementRef;
-use parser::Token;
-use parser::TokenAddress;
-use parser::TokenIndex;
-use segment_set::SegmentSet;
-use segment_set::SourceInfo;
+use crate::parser::as_str;
+use crate::parser::Comparer;
+use crate::parser::Span;
+use crate::parser::StatementAddress;
+use crate::parser::StatementIndex;
+use crate::parser::StatementRef;
+use crate::parser::Token;
+use crate::parser::TokenAddress;
+use crate::parser::TokenIndex;
+use crate::segment_set::SegmentSet;
+use crate::segment_set::SourceInfo;
 use std::fmt::Display;
 use std::io;
 use std::mem;

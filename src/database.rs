@@ -97,17 +97,17 @@
 //! To improve packing efficiency, jobs are dispatched in descending order of
 //! estimated runtime.  This requires an additional argument when queueing.
 
-use diag;
-use diag::DiagnosticClass;
-use diag::Notation;
-use export;
-use nameck::Nameset;
-use outline;
-use outline::OutlineNode;
-use parser::StatementRef;
-use scopeck;
-use scopeck::ScopeResult;
-use segment_set::SegmentSet;
+use crate::diag;
+use crate::diag::DiagnosticClass;
+use crate::diag::Notation;
+use crate::export;
+use crate::nameck::Nameset;
+use crate::outline;
+use crate::outline::OutlineNode;
+use crate::parser::StatementRef;
+use crate::scopeck;
+use crate::scopeck::ScopeResult;
+use crate::segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt;
@@ -118,8 +118,8 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
-use verify;
-use verify::VerifyResult;
+use crate::verify;
+use crate::verify::VerifyResult;
 
 /// Structure for options that affect database processing, and must be constant
 /// for the lifetime of the database container.
@@ -357,7 +357,7 @@ pub struct Database {
     scopes: Option<Arc<ScopeResult>>,
     prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
-    outline: Option<OutlineNode>,
+    outline: Option<Arc<OutlineNode>>,
 }
 
 fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
@@ -525,16 +525,22 @@ impl Database {
     }
 
     /// Returns the root node of the outline
-    pub fn outline_result(&mut self) -> &OutlineNode {
+    pub fn outline_result(&mut self) -> &Arc<OutlineNode> {
         if self.outline.is_none() {
             time(&self.options.clone(), "outline", || {
                 let parse = self.parse_result().clone();
-                self.outline = Some(OutlineNode::default());
-                outline::build_outline(&mut self.outline.as_mut().unwrap(), &parse);
+                let mut outline = OutlineNode::default();
+                outline::build_outline(&mut outline, &parse);
+                self.outline = Some(Arc::new(outline));
             })
         }
         self.outline.as_ref().unwrap()
     }
+
+	/// A getter method which does not build the outline
+	pub fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
+        &self.outline
+	}
 
     /// Get a statement by label.
     pub fn statement(&mut self, name: &str) -> Option<StatementRef> {

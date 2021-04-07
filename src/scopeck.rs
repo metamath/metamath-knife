@@ -28,41 +28,41 @@
 //! The scope check procedure runs a single pass over the statements in a
 //! segment, tracking the active `$e` and `$f` statements at each point.
 
-use bit_set::Bitset;
-use diag::Diagnostic;
-use nameck::Atom;
-use nameck::NameReader;
-use nameck::Nameset;
-use nameck::NameUsage;
-use parser;
-use parser::Comparer;
-use parser::copy_token;
-use parser::GlobalRange;
-use parser::NO_STATEMENT;
-use parser::Segment;
-use parser::SegmentId;
-use parser::SegmentOrder;
-use parser::SegmentRef;
-use parser::StatementAddress;
-use parser::StatementIndex;
-use parser::StatementRef;
-use parser::StatementType;
-use parser::SymbolType;
-use parser::Token;
-use parser::TokenAddress;
-use parser::TokenPtr;
-use parser::TokenRef;
-use segment_set::SegmentSet;
+use crate::bit_set::Bitset;
+use crate::diag::Diagnostic;
+use crate::nameck::Atom;
+use crate::nameck::NameReader;
+use crate::nameck::Nameset;
+use crate::nameck::NameUsage;
+use crate::parser;
+use crate::parser::Comparer;
+use crate::parser::copy_token;
+use crate::parser::GlobalRange;
+use crate::parser::NO_STATEMENT;
+use crate::parser::Segment;
+use crate::parser::SegmentId;
+use crate::parser::SegmentOrder;
+use crate::parser::SegmentRef;
+use crate::parser::StatementAddress;
+use crate::parser::StatementIndex;
+use crate::parser::StatementRef;
+use crate::parser::StatementType;
+use crate::parser::SymbolType;
+use crate::parser::Token;
+use crate::parser::TokenAddress;
+use crate::parser::TokenPtr;
+use crate::parser::TokenRef;
+use crate::segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
-use util::fast_extend;
-use util::HashMap;
-use util::HashSet;
-use util::new_map;
-use util::new_set;
-use util::ptr_eq;
+use crate::util::fast_extend;
+use crate::util::HashMap;
+use crate::util::HashSet;
+use crate::util::new_map;
+use crate::util::new_set;
+use crate::util::ptr_eq;
 
 /// Information on a `$v` active in the local or global scope.
 #[derive(Clone,Copy)]

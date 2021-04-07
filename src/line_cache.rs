@@ -1,7 +1,7 @@
 //! Utilities for source-offset/line-number mapping.
 
 use std::cmp::Ordering;
-use util::HashMap;
+use crate::util::HashMap;
 
 const PAGE: usize = 256;
 

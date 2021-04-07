@@ -24,32 +24,32 @@
 //! code, at the expense of making scopeck even more useless to other consumers
 //! than it is now.
 
-use bit_set::Bitset;
-use diag::Diagnostic;
-use nameck::Atom;
-use nameck::Nameset;
-use parser;
-use parser::Comparer;
-use parser::copy_token;
-use parser::NO_STATEMENT;
-use parser::Segment;
-use parser::SegmentId;
-use parser::SegmentOrder;
-use parser::SegmentRef;
-use parser::Span;
-use parser::StatementAddress;
-use parser::StatementRef;
-use parser::StatementType;
-use parser::TokenPtr;
-use scopeck;
-use scopeck::ExprFragment;
-use scopeck::Frame;
-use scopeck::Hyp::*;
-use scopeck::ScopeReader;
-use scopeck::ScopeResult;
-use scopeck::ScopeUsage;
-use scopeck::VerifyExpr;
-use segment_set::SegmentSet;
+use crate::bit_set::Bitset;
+use crate::diag::Diagnostic;
+use crate::nameck::Atom;
+use crate::nameck::Nameset;
+use crate::parser;
+use crate::parser::Comparer;
+use crate::parser::copy_token;
+use crate::parser::NO_STATEMENT;
+use crate::parser::Segment;
+use crate::parser::SegmentId;
+use crate::parser::SegmentOrder;
+use crate::parser::SegmentRef;
+use crate::parser::Span;
+use crate::parser::StatementAddress;
+use crate::parser::StatementRef;
+use crate::parser::StatementType;
+use crate::parser::TokenPtr;
+use crate::scopeck;
+use crate::scopeck::ExprFragment;
+use crate::scopeck::Frame;
+use crate::scopeck::Hyp::*;
+use crate::scopeck::ScopeReader;
+use crate::scopeck::ScopeResult;
+use crate::scopeck::ScopeUsage;
+use crate::scopeck::VerifyExpr;
+use crate::segment_set::SegmentSet;
 use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
@@ -57,12 +57,12 @@ use std::result;
 use std::sync::Arc;
 use std::u32;
 use std::usize;
-use util::copy_portion;
-use util::fast_clear;
-use util::fast_extend;
-use util::HashMap;
-use util::new_map;
-use util::ptr_eq;
+use crate::util::copy_portion;
+use crate::util::fast_clear;
+use crate::util::fast_extend;
+use crate::util::HashMap;
+use crate::util::new_map;
+use crate::util::ptr_eq;
 
 // Proofs are very fragile and there are very few situations where errors are
 // recoverable, so we bail out using Result on any error.

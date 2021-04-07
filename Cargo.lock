@@ -46,9 +46,9 @@ dependencies = [
 
 [[package]]
 name = "fnv"
-version = "1.0.2"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6986d86e860ee9eb8fa701235b1c63dc7a2a2054b8e96114611dfa8fd48c950f"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "kernel32-sys"
@@ -62,9 +62,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.11"
+version = "0.2.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c96061f0c8a2dc27482e394d82e23073569de41d73cd736672ccd3e5c7471bfd"
+checksum = "1482821306169ec4d07f6aca392a4681f66c75c9918aa49641a2595db64053cb"
 
 [[package]]
 name = "memchr"

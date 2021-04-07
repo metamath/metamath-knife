@@ -1,17 +1,17 @@
 //! Export support for mmj2 proof files.
 
-use diag::Diagnostic;
-use nameck::Nameset;
-use parser::as_str;
-use parser::StatementRef;
-use parser::StatementType;
-use parser::TokenRef;
-use proof::ProofStyle;
-use proof::ProofTreeArray;
-use proof::ProofTreePrinter;
+use crate::diag::Diagnostic;
+use crate::nameck::Nameset;
+use crate::parser::as_str;
+use crate::parser::StatementRef;
+use crate::parser::StatementType;
+use crate::parser::TokenRef;
+use crate::proof::ProofStyle;
+use crate::proof::ProofTreeArray;
+use crate::proof::ProofTreePrinter;
 use regex::Regex;
-use scopeck::ScopeResult;
-use segment_set::SegmentSet;
+use crate::scopeck::ScopeResult;
+use crate::segment_set::SegmentSet;
 use std::error;
 use std::fmt;
 use std::io;
