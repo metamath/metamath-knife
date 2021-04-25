@@ -16,6 +16,7 @@ pub mod diag;
 pub mod export;
 pub mod nameck;
 pub mod outline;
+pub mod grammar;
 pub mod parser;
 pub mod proof;
 pub mod scopeck;

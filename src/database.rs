@@ -101,6 +101,8 @@ use crate::diag;
 use crate::diag::DiagnosticClass;
 use crate::diag::Notation;
 use crate::export;
+use crate::grammar;
+use crate::grammar::Grammar;
 use crate::nameck::Nameset;
 use crate::outline;
 use crate::outline::OutlineNode;
@@ -138,8 +140,6 @@ pub struct DbOptions {
     /// `parser::guess_buffer_name`) of segments which are recalculated in each
     /// pass.
     pub trace_recalc: bool,
-    /// True to record database outline with parts, chapters, and sections.
-    pub outline: bool,
     /// True to record detailed usage data needed for incremental operation.
     ///
     /// This will slow down the initial analysis, so don't set it if you won't
@@ -149,6 +149,8 @@ pub struct DbOptions {
     pub incremental: bool,
     /// Number of jobs to run in parallel at any given time.
     pub jobs: usize,
+	/// If true, will parse the statements in addition to preparing the grammar
+	pub parse_statements: bool,
 }
 
 /// Wraps a heap-allocated closure with a difficulty score which can be used for
@@ -358,6 +360,7 @@ pub struct Database {
     prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
     outline: Option<Arc<OutlineNode>>,
+    grammar: Option<Arc<Grammar>>,
 }
 
 fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
@@ -400,6 +403,7 @@ impl Database {
             scopes: None,
             verify: None,
             outline: None,
+            grammar: None,
             prev_nameset: None,
             prev_scopes: None,
             prev_verify: None,
@@ -442,6 +446,7 @@ impl Database {
             self.scopes = None;
             self.verify = None;
             self.outline = None;
+            self.grammar = None;
         });
     }
 
@@ -537,6 +542,23 @@ impl Database {
         self.outline.as_ref().unwrap()
     }
 
+    /// Builds and returns the grammar
+    pub fn grammar_result(&mut self) -> &Arc<Grammar> {
+        if self.grammar.is_none() {
+            self.name_result();
+            self.scope_result();
+            time(&self.options.clone(), "grammar", || {
+                let parse = self.parse_result().clone();
+                let name = self.name_result().clone();
+                let scope = self.scope_result().clone();
+                let mut grammar = Grammar::default();
+                grammar::build_grammar(&mut grammar, &parse, &name, &scope, self.options.parse_statements);
+                self.grammar = Some(Arc::new(grammar));
+            })
+        }
+        self.grammar.as_ref().unwrap()
+    }
+
 	/// A getter method which does not build the outline
 	pub fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
         &self.outline
@@ -603,6 +625,9 @@ impl Database {
         }
         if types.contains(&DiagnosticClass::Verify) {
             diags.extend(self.verify_result().diagnostics());
+        }
+        if types.contains(&DiagnosticClass::Grammar) {
+            diags.extend(self.grammar_result().diagnostics());
         }
         time(&self.options.clone(),
              "diag",

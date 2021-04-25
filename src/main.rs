@@ -16,6 +16,7 @@ pub mod bit_set;
 pub mod database;
 pub mod diag;
 pub mod export;
+pub mod grammar;
 pub mod line_cache;
 pub mod nameck;
 pub mod outline;
@@ -57,6 +58,7 @@ fn main() {
         .arg(Arg::with_name("timing").help("Print milliseconds after each stage").long("timing"))
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
         .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("o"))
+        .arg(Arg::with_name("grammar").help("Check grammar").long("grammar").short("g"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -86,11 +88,12 @@ fn main() {
     let mut options = DbOptions::default();
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
-    options.outline = matches.is_present("outline");
     options.trace_recalc = matches.is_present("trace-recalc");
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
+    options.incremental |= matches.is_present("grammar");
+    options.parse_statements = true;
 
     let mut db = Database::new(options);
 
@@ -114,6 +117,10 @@ fn main() {
 
         if matches.is_present("verify") {
             types.push(DiagnosticClass::Verify);
+        }
+
+        if matches.is_present("grammar") {
+            types.push(DiagnosticClass::Grammar);
         }
 
         let mut lc = LineCache::default();
