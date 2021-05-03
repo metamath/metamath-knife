@@ -59,6 +59,7 @@ fn main() {
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
         .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("o"))
         .arg(Arg::with_name("grammar").help("Check grammar").long("grammar").short("g"))
+        .arg(Arg::with_name("stmt_parse").help("Parse statements according to the databases grammar").long("stmt_parse").short("p"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -92,8 +93,7 @@ fn main() {
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
-    options.incremental |= matches.is_present("grammar");
-    options.parse_statements = true;
+    options.incremental |= matches.is_present("grammar") || matches.is_present("stmt_parse");
 
     let mut db = Database::new(options);
 
@@ -123,13 +123,24 @@ fn main() {
             types.push(DiagnosticClass::Grammar);
         }
 
+        if matches.is_present("stmt_parse") {
+            types.push(DiagnosticClass::StmtParse);
+        }
+
         let mut lc = LineCache::default();
+        let mut count = 0;
         for notation in db.diag_notations(types) {
             print_annotation(&mut lc, notation);
+            count += 1;
         }
+        println!("{} diagnostics issued.", count);
 
         if matches.is_present("outline") {
             db.print_outline();
+        }
+
+        if matches.is_present("print_grammar") {
+            db.print_grammar();
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {

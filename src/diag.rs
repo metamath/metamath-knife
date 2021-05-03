@@ -35,6 +35,8 @@ pub enum DiagnosticClass {
     Verify,
     /// Grammar errors reflect whether the database is unambiguous
     Grammar,
+    /// Statement Parsing result
+    StmtParse,
 }
 
 /// List of all diagnostic codes.  For a description of each, see the source of
@@ -79,6 +81,8 @@ pub enum Diagnostic {
     NotActiveSymbol(TokenIndex),
     NotAProvableStatement,
     ParsedStatementTooShort(Token),
+    ParsedStatementNoTypeCode,
+    ParsedStatementWrongTypeCode(Token, Token),
     ProofDvViolation,
     ProofExcessEnd,
     ProofIncomplete,
@@ -374,9 +378,19 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.s = "Statement does not start with the provable constant type";
             ann(&mut info, stmt.span());
         }
+        ParsedStatementNoTypeCode => {
+            info.s = "Empty statement";
+            ann(&mut info, stmt.span());
+        }
         ParsedStatementTooShort(ref tok) => {
             info.s = "Statement is too short, expecting for example {expected}";
             info.args.push(("expected", t(tok)));
+            ann(&mut info, stmt.span());
+        }
+        ParsedStatementWrongTypeCode(ref expected, ref found) => {
+            info.s = "The statement is of type {found}, expected {expected}";
+            info.args.push(("found", t(found)));
+            info.args.push(("expected", t(expected)));
             ann(&mut info, stmt.span());
         }
         ProofDvViolation => {

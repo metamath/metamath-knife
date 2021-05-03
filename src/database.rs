@@ -103,6 +103,7 @@ use crate::diag::Notation;
 use crate::export;
 use crate::grammar;
 use crate::grammar::Grammar;
+use crate::grammar::StmtParse;
 use crate::nameck::Nameset;
 use crate::outline;
 use crate::outline::OutlineNode;
@@ -149,8 +150,8 @@ pub struct DbOptions {
     pub incremental: bool,
     /// Number of jobs to run in parallel at any given time.
     pub jobs: usize,
-	/// If true, will parse the statements in addition to preparing the grammar
-	pub parse_statements: bool,
+    /// If true, will parse the statements in addition to preparing the grammar
+    pub parse_statements: bool,
 }
 
 /// Wraps a heap-allocated closure with a difficulty score which can be used for
@@ -361,6 +362,7 @@ pub struct Database {
     verify: Option<Arc<VerifyResult>>,
     outline: Option<Arc<OutlineNode>>,
     grammar: Option<Arc<Grammar>>,
+    stmt_parse: Option<Arc<StmtParse>>,
 }
 
 fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
@@ -404,6 +406,7 @@ impl Database {
             verify: None,
             outline: None,
             grammar: None,
+            stmt_parse: None,
             prev_nameset: None,
             prev_scopes: None,
             prev_verify: None,
@@ -550,19 +553,35 @@ impl Database {
             time(&self.options.clone(), "grammar", || {
                 let parse = self.parse_result().clone();
                 let name = self.name_result().clone();
-                let scope = self.scope_result().clone();
                 let mut grammar = Grammar::default();
-                grammar::build_grammar(&mut grammar, &parse, &name, &scope, self.options.parse_statements);
+                grammar::build_grammar(&mut grammar, &parse, &name);
                 self.grammar = Some(Arc::new(grammar));
             })
         }
         self.grammar.as_ref().unwrap()
     }
 
-	/// A getter method which does not build the outline
-	pub fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
+    /// Parses the statements using the grammar
+    pub fn stmt_parse_result(&mut self) -> &Arc<StmtParse> {
+        if self.stmt_parse.is_none() {
+            self.name_result();
+            self.scope_result();
+            time(&self.options.clone(), "grammar", || {
+                let parse = self.parse_result().clone();
+                let name = self.name_result().clone();
+                let grammar = self.grammar_result().clone();
+                let mut stmt_parse = StmtParse::default();
+                grammar::parse_statements(&mut stmt_parse, &parse, &name, &grammar);
+                self.stmt_parse = Some(Arc::new(stmt_parse));
+            })
+        }
+        self.stmt_parse.as_ref().unwrap()
+    }
+
+    /// A getter method which does not build the outline
+    pub fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
         &self.outline
-	}
+    }
 
     /// Get a statement by label.
     pub fn statement(&mut self, name: &str) -> Option<StatementRef> {
@@ -587,6 +606,15 @@ impl Database {
                 .map_err(export::ExportError::Io)
                 .and_then(|mut file| export::export_mmp(&parse, &name, &scope, sref, &mut file))
                 .unwrap()
+        })
+    }
+
+    /// Dump the grammar of this database.
+    pub fn print_grammar(&mut self) {
+        time(&self.options.clone(), "print_grammar", || {
+            let name = self.name_result().clone();
+            let grammar = self.grammar_result().clone();
+            grammar.dump(&name);
         })
     }
 
@@ -628,6 +656,9 @@ impl Database {
         }
         if types.contains(&DiagnosticClass::Grammar) {
             diags.extend(self.grammar_result().diagnostics());
+        }
+        if types.contains(&DiagnosticClass::StmtParse) {
+            diags.extend(self.stmt_parse_result().diagnostics());
         }
         time(&self.options.clone(),
              "diag",
