@@ -71,6 +71,7 @@ pub enum Diagnostic {
     FloatNotVariable(TokenIndex),
     FloatRedeclared(StatementAddress),
     GrammarAmbiguous(StatementAddress),
+	GrammarProvableFloat,
     IoError(String),
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
@@ -82,7 +83,7 @@ pub enum Diagnostic {
     NotAProvableStatement,
     ParsedStatementTooShort(Token),
     ParsedStatementNoTypeCode,
-    ParsedStatementWrongTypeCode(Token, Token),
+    ParsedStatementWrongTypeCode(Token),
     ProofDvViolation,
     ProofExcessEnd,
     ProofIncomplete,
@@ -335,6 +336,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.level = Note;
             ann(&mut info, Span::null());
         }
+		GrammarProvableFloat => {
+            info.s = "Floating declaration of provable type";
+            ann(&mut info, stmt.span());
+		}
         IoError(ref err) => {
             info.s = "Source file could not be read (error: {error})";
             info.args.push(("error", err.clone()));
@@ -387,10 +392,9 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.args.push(("expected", t(tok)));
             ann(&mut info, stmt.span());
         }
-        ParsedStatementWrongTypeCode(ref expected, ref found) => {
-            info.s = "The statement is of type {found}, expected {expected}";
+        ParsedStatementWrongTypeCode(ref found) => {
+            info.s = "Type code {found} is not among the expected type codes";
             info.args.push(("found", t(found)));
-            info.args.push(("expected", t(expected)));
             ann(&mut info, stmt.span());
         }
         ProofDvViolation => {

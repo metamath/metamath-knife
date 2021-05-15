@@ -23,16 +23,16 @@ type Symbol = Atom;
 
 type NodeId = usize;
 
-struct Arena(Vec<GrammarNode>);
+struct GrammarTree(Vec<GrammarNode>);
 
-impl Arena {
+impl GrammarTree {
 	fn create_branch(&mut self) -> NodeId {
-	    self.0.push(GrammarNode::Branch{cst_map: new_map(), var_map: new_map()});
+	    self.0.push(GrammarNode::Branch{cst_map: new_map(), var_map: new_map(), leaf_label: None});
 	    self.0.len() - 1
 	}
 
-	fn create_leaf(&mut self, label: Atom) -> NodeId {
-	    self.0.push(GrammarNode::Leaf(label));
+	fn create_leaf(&mut self, label: Atom, typecode: TypeCode) -> NodeId {
+	    self.0.push(GrammarNode::Leaf{label, typecode});
 	    self.0.len() - 1
 	}
 	
@@ -54,16 +54,20 @@ pub struct Grammar {
 	provable_type: TypeCode,
 	logic_type: TypeCode,
 	typecodes: Vec<TypeCode>,
-	nodes: Arena,
+	nodes: GrammarTree,
 	root: NodeId, // The root of the Grammar tree
 	diagnostics: HashMap<StatementAddress, Diagnostic>,
 }
 
 enum GrammarNode {
-	Leaf(Atom), // The atoms for Label of the Statement obtained - TODO, double leafs
-	Branch{
-		cst_map: HashMap<Symbol, NodeId>, 	// Table of choices leading to the next node
-		var_map: HashMap<TypeCode, NodeId>, 
+	Leaf {
+		label: Atom,
+		typecode: TypeCode,
+		},
+	Branch {
+		cst_map: HashMap<Symbol, NodeId>, 	// Table of choices leading to the next node when a constant is encountered
+		var_map: HashMap<TypeCode, NodeId>, // Table of choices leading to the next node when a variable is successfully parsed
+		leaf_label: Option<Atom>,           // This deals with ambiguity in the grammar, see `bake_in_lookahead`
 	}, 
 }
 
@@ -73,7 +77,7 @@ impl Default for Grammar {
 			provable_type: Atom::default(),
 			logic_type: Atom::default(),
 			typecodes: Vec::new(),
-			nodes: Arena(Vec::new()),
+			nodes: GrammarTree(Vec::new()),
 			root: 0,
 			diagnostics: new_map(),
 		}
@@ -102,7 +106,7 @@ impl Grammar {
 					// It shall be safe to unwrap here, as we shall never insert a branch without a leaf
 					node = *cst_map.values().next().unwrap();
 				}
-				GrammarNode::Leaf(label) => {
+				GrammarNode::Leaf{label, ..} => {
 					let sa = nset.lookup_label(nset.atom_name(*label)).unwrap().address;
 					return Diagnostic::GrammarAmbiguous(sa);
 				}
@@ -116,17 +120,11 @@ impl Grammar {
 		Diagnostic::ParsedStatementTooShort(expected_token)
 	}
 
-	fn wrong_typecode(expected_typecode: TypeCode, found_typecode: TypeCode, nset: &Arc<Nameset>) -> Diagnostic {
-		let expected_token = copy_token(nset.atom_name(expected_typecode));
-		let found_token = copy_token(nset.atom_name(found_typecode));
-		Diagnostic::ParsedStatementWrongTypeCode(expected_token, found_token)
-	}
-
 	/// Adds the symbol to the branch, and returns the next node
 	fn add_branch(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, leaf: Option<NodeId>) -> Result<NodeId, NodeId> {
 		match self.nodes.get_mut(to_node) {
-			GrammarNode::Leaf(_) => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
-			GrammarNode::Branch{cst_map, var_map} => {
+			GrammarNode::Leaf{..} => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
+			GrammarNode::Branch{cst_map, var_map, ..} => {
 				let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
 				match leaf {
 					Some(leaf_node) => {
@@ -141,7 +139,7 @@ impl Grammar {
 							Some(prev_node) => Ok(*prev_node),
 							None => {
 								let new_node = self.nodes.create_branch();
-								if let GrammarNode::Branch{cst_map, var_map} = self.nodes.get_mut(to_node) {
+								if let GrammarNode::Branch{cst_map, var_map, ..} = self.nodes.get_mut(to_node) {
 									let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
 									map.insert(symbol, new_node);
 									Ok(new_node)
@@ -160,7 +158,7 @@ impl Grammar {
 	fn add_axiom(&mut self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
 		let mut tokens = sref.math_iter().peekable();
 
-		// Atom for this axiom's label. TODO: Safe to unwrap here?  
+		// Atom for this axiom's label.
 		let this_label = nset.lookup_label(sref.label()).unwrap().atom;
 		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
 		let this_typecode = nset.get_atom(tokens.next().unwrap().slice); 
@@ -168,9 +166,9 @@ impl Grammar {
 		// In case of a non-syntax axiom, skip it.
 		if this_typecode == self.provable_type { return Ok(()); }
 
-		// We will add this syntax axiom to the corresponding grammar tree
+		// We will add this syntax axiom to the grammar tree
 		let mut node = self.root;
-		let leaf_node = self.nodes.create_leaf(this_label);
+		let leaf_node = self.nodes.create_leaf(this_label, this_typecode);
 		while let Some(token) = tokens.next() {
 			let symbol = names.lookup_symbol(token.slice).unwrap();
 			let atom = match symbol.stype {
@@ -187,124 +185,112 @@ impl Grammar {
 				Ok(next_node) => { node = next_node; },
 				Err(conflict_node) => { return Err(self.ambiguous(conflict_node, nset)); },
 			}
-//
-//			match node {
-//				&mut GrammarNode::Leaf(_) => {
-//					// A prefix of this syntax is already recorded: the grammar is ambiguous
-//					return Some(ambiguous(node, nset));
-//				}
-//				&mut GrammarNode::Branch(mut map) => {
-//					// It is safe to unwrap since parser has checked for NotActiveSymbol error 
-//					let symbol = names.lookup_symbol(token.slice).unwrap();
-//					//let atom = names.get_atom(token.slice);
-//					let atom = match symbol.stype {
-//						SymbolType::Constant => symbol.atom,
-//						// We need a second lookup to find out the typecode of a floating variable...
-//						SymbolType::Variable => names.lookup_float(token.slice).unwrap().typecode_atom,
-//					};
-//					match &tokens.peek() {
-//						Some(_) => { 
-//							node = map.entry(atom).or_insert(Grammar::create_branch());
-//						},
-//						None => {
-//							match map.get(&atom) {
-//								Some(other_node) => {
-//									// A longer syntax is already recorded: the grammar is ambiguous, search for a leaf
-//									return Some(ambiguous(other_node, nset));
-//								},
-//								None => {
-//									map.insert(atom, GrammarNode::Leaf(this_label));
-//								}
-//							}
-//						},
-//					}
-//				}
-//			}
 		};
-		// TODO
 		Ok(())
 	}
 
-	fn parse_formula(&self, sref: &StatementRef, ix: &mut TokenIndex, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
+	/// Add a floating variable node to the parse tree.
+	fn add_floating(&mut self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
+		let mut tokens = sref.math_iter();
+
+		// Atom for this flaot's label.
+		let this_label = nset.lookup_label(sref.label()).unwrap().atom;
+		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
+		let this_typecode = nset.get_atom(tokens.next().unwrap().slice); 
+
+		// Float shall not be of the provable typecode.
+		if this_typecode == self.provable_type { return Err(Diagnostic::GrammarProvableFloat); }
+
+		// We will add this floating declaration to the grammar tree
+		let leaf_node = self.nodes.create_leaf(this_label, this_typecode);
+
+		// If is safe to unwrap here since parser has already checked.
+		let token = tokens.next().unwrap();
+		let symbol = names.lookup_symbol(token.slice).unwrap();
+		match self.nodes.get_mut(self.root) {
+			GrammarNode::Branch{cst_map, ..} => match cst_map.insert(symbol.atom, leaf_node) {
+				None => Ok(()),
+				Some(conflict_node) => Err(self.ambiguous(conflict_node, nset)),
+			}
+			_ => panic!("Root node shall be a branch node!"),
+		}
+	}
+
+	/// Bake the lookahead into the grammar automaton.
+	/// This handles casses like the ambiguity between ` ( x e. A /\ ph ) ` and ` ( x e. A |-> B ) `
+	/// which share a common prefix, and can only be distinguished after the 5th token is read.
+	/// This is dealt with by introducing branch nodes where the optional leaf is set, 
+	/// which lead to partial reduce. 
+	/// In the example case, at the 5th token "/\", this method modifies the grammar tree 
+	/// by adding the optional "wcel" reduce to the corresponding tree node.
+	fn bake_in_lookahead(&mut self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) {
+		let mut tokens = sref.math_iter().peekable();
+
+		// Atom for this axiom's label.
+		let this_label = nset.lookup_label(sref.label()).unwrap().atom;
+		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
+		let this_typecode = nset.get_atom(tokens.next().unwrap().slice);
+
+		// In case of a non-syntax axiom, skip it.
+		if this_typecode == self.provable_type { return; }
+
+		// Search a sub-string of this syntax axiom which is parseable itself.
+		
+		
+	}
+
+	fn do_shift(&self, sref: &StatementRef, ix: &mut TokenIndex, nset: &Arc<Nameset>, names: &mut NameReader) {
+		let token = sref.math_at(*ix);
+		let symbol = names.lookup_symbol(token.slice).unwrap();
+		println!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
+		*ix += 1;
+	}
+
+	fn do_reduce(&self, stmt: Atom, nset: &Arc<Nameset>) {
+		println!("   REDUCE {:?}", as_str(nset.atom_name(stmt)));
+	}
+
+	fn parse_formula<'a>(&self, sref: &StatementRef, ix: &mut TokenIndex, _expected_typecodes: impl IntoIterator<Item = &'a TypeCode>, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
 		let mut node = self.root;
 		loop {
 			match self.nodes.get(node) {
-				GrammarNode::Leaf(_label) => {
+				GrammarNode::Leaf{label, typecode} => {
 					// We found a leaf: REDUCE
-					//let stmt = sset.statement(label)  //let stmt_address = nset.lookup_label(nset.atom_name(label)).unwrap().address;
-					//print!("   REDUCE!");
-					return Ok(self.logic_type); // TODO use actual statement type!
+					self.do_reduce(*label, nset);
+					return Ok(*typecode);
 				},
-				GrammarNode::Branch{cst_map, var_map} => {
+				GrammarNode::Branch{cst_map, var_map, ..} => {
 					if *ix == sref.math_len() { return Err(Grammar::too_short(cst_map, nset)); }
 					let token = sref.math_at(*ix);
 					let symbol = names.lookup_symbol(token.slice).unwrap();
-					//print!("   {:?}", as_str(nset.atom_name(symbol.atom)));
-					match symbol.stype {
-						SymbolType::Variable => {
-							// Token is a variable, we can immediately reduce it to is float typecode
-							let typecode = names.lookup_float(token.slice).unwrap().typecode_atom;
-							//println!(" -> Variable, typecode {:?}", as_str(nset.atom_name(typecode)));
-							// SHIFT REDUCE, we don't use the map as this is an extra $f reduct
-							if node == 0 {
-								// If we were at the root node, just reduce the float and return.
-								//println!("   SHIFT REDUCE single float!");
-								*ix += 1;
-								return Ok(typecode);
-							}
-							else {
-								match var_map.get(&typecode) {
-									Some(next_node) => {
-										// Found and reduced a variable, to the next node
-										*ix += 1;
-										node = *next_node;
-										//println!("   SHIFT REDUCE FLOAT, Next: {:?}", node);
-									},
-									None => {
-										// No match found, try recursively.
-										let typecode = self.parse_formula(sref, ix, nset, names)?;
-										match var_map.get(&typecode) {
-											Some(next_node) => {
-												// Found and reduced a compound variable, to the next node
-												node = *next_node;
-												//println!("   Next: {:?}", node);
-											},
-											None => {
-												// No match found.
-												return Err(Grammar::wrong_typecode(*var_map.keys().next().unwrap(), typecode, nset));
-											}
-										}
-									}
-								}
-							}
+					print!("   {:?}", as_str(nset.atom_name(symbol.atom)));
+
+					match cst_map.get(&symbol.atom) {
+						Some(next_node) => {
+							// Found an atom matching one of our next nodes: SHIFT, to the next node
+							self.do_shift(sref, ix, nset, names);
+							node = *next_node;
+							println!("   Next Node: {:?}", node);
 						},
-						SymbolType::Constant => { 
-							match cst_map.get(&symbol.atom) {
+						None => {
+							// No matching constant, search among variables
+							println!(" ++ Not in CST map, recursive call");
+							let typecode = self.parse_formula(sref, ix, var_map.keys(), nset, names)?;
+							println!(" ++ Finished parsing formula, found typecode {:?}", as_str(nset.atom_name(typecode)));
+							match var_map.get(&typecode) {
 								Some(next_node) => {
-									// Found a constant matching one of our next nodes: SHIFT, to the next node
-									*ix += 1;
+									// Found and reduced a sub-formula, to the next node
 									node = *next_node;
-									//println!("   SHIFT CST! Next: {:?}", node);
+									println!("   Next: {:?}", node);
 								},
 								None => {
-									// No matching constant, search among variables
-									//println!(" ++ Not in CST map, recursive call");
-									let typecode = self.parse_formula(sref, ix, nset, names)?;
-									//println!(" ++ Finished parsing formula, found typecode {:?}", as_str(nset.atom_name(typecode)));
-									match var_map.get(&typecode) {
-										Some(next_node) => {
-											// Found and reduced a sub-formula, to the next node
-											node = *next_node;
-											//println!("   Next: {:?}", node);
-										},
-										None => {
-											// No match found, error.
-											return Err(Diagnostic::UnparseableStatement(token.index()));
-										}
-									}
+									// No match found, error.
+									println!("EXIT 2");
+									std::process::exit(1);
+									//return Err(Diagnostic::UnparseableStatement(token.index()));
 								}
 							}
-						},
+						}
 					}
 				},
 			}
@@ -329,12 +315,10 @@ impl Grammar {
 		// If this is a provable statement, prove that this is a wff. Otherwise just use the provided typecode
 		if expected_typecode == self.provable_type { expected_typecode = self.logic_type; }
 
-		let found_typecode = self.parse_formula(sref, &mut 1, nset, names)?;
-		if found_typecode != expected_typecode {
-			Err(Grammar::wrong_typecode(expected_typecode, found_typecode, nset))
-		} else {
-			Ok(())
-		}
+		// At the time of writing, there are only 3 statements which are not provable but "syntactic theorems": weq, wel and bj-0
+
+		self.parse_formula(sref, &mut 1, vec![&expected_typecode], nset, names)?;
+		Ok(())
 	}
 
 	/// Lists the contents of the grammar
@@ -342,8 +326,8 @@ impl Grammar {
 		println!("Grammar tree has {:?} nodes.", self.nodes.len());
 		for i in 0 .. self.nodes.len() {
 			match &self.nodes.0[i] {
-				GrammarNode::Leaf(label) => { println!("{:?}: {}", i, as_str(nset.atom_name(*label))); },
-				GrammarNode::Branch{cst_map, var_map} => {
+				GrammarNode::Leaf{label, typecode} => { println!("{:?}: {} {}", i, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(*label))); },
+				GrammarNode::Branch{cst_map, var_map, leaf_label} => {
 					print!("{:?}: CST={{", i);
 					for (symbol, node) in cst_map {
 						print!("{}: {}, ", as_str(nset.atom_name(*symbol)), node);
@@ -351,6 +335,9 @@ impl Grammar {
 					print!("}} VAR={{");
 					for (typecode, node) in var_map {
 						print!("{}: {}, ", as_str(nset.atom_name(*typecode)), node);
+					}
+					if let Some(label) = leaf_label {
+						print!("Leaf: {}, ", as_str(nset.atom_name(*label)));
 					}
 					println!("}}");
 				},
@@ -391,9 +378,21 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	    for sref in *segment {
 	        if let Err(diag) = match sref.statement_type() {
 	            StatementType::Axiom => grammar.add_axiom(&sref, nset, &mut names),
+	            StatementType::Floating => grammar.add_floating(&sref, nset, &mut names),
 	            _ => Ok(())
 	        } {
 				grammar.diagnostics.insert(sref.address(), diag);
+			}
+	    }
+	}
+
+	let segments = sset.segments();
+	assert!(segments.len() > 0, "Parse returned no segment!");
+    for segment in segments.iter() {
+	    for sref in *segment {
+			match sref.statement_type() {
+		        StatementType::Axiom => grammar.bake_in_lookahead(&sref, nset, &mut names),
+				_ => {},
 			}
 	    }
 	}
@@ -434,7 +433,7 @@ pub fn parse_statements<'a>(stmt_parse: &mut StmtParse, sset: &'a Arc<SegmentSet
 	    for sref in *segment {
 			println!("Statement {:?}\n---------", as_str(nset.atom_name(nset.lookup_label(sref.label()).map_or(Atom::default(), |l| l.atom))));
 	        if let Err(diag) = match sref.statement_type() {
-	            StatementType::Axiom | StatementType::Provable => grammar.parse_statement(&sref, nset, &mut names),
+	            StatementType::Axiom | StatementType::Essential | StatementType::Provable => grammar.parse_statement(&sref, nset, &mut names),
 	            _ => Ok(())
 	        } {
 				stmt_parse.diagnostics.insert(sref.address(), diag);
