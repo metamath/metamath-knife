@@ -6,6 +6,8 @@ use crate::diag::Diagnostic;
 use crate::nameck::Atom;
 use crate::nameck::NameReader;
 use crate::nameck::Nameset;
+use crate::parser::Segment;
+use crate::parser::SegmentId;
 use crate::parser::StatementAddress;
 use crate::parser::StatementType;
 use crate::parser::StatementRef;
@@ -14,6 +16,8 @@ use crate::parser::TokenIndex;
 use crate::parser::as_str;
 use crate::parser::copy_token;
 use crate::segment_set::SegmentSet;
+use crate::formula::Formula;
+use crate::formula::FormulaBuilder;
 use std::sync::Arc;
 use crate::util::HashMap;
 use crate::util::new_map;
@@ -57,6 +61,7 @@ pub struct Grammar {
 	nodes: GrammarTree,
 	root: NodeId, // The root of the Grammar tree
 	diagnostics: HashMap<StatementAddress, Diagnostic>,
+	debug: bool,
 }
 
 enum GrammarNode {
@@ -80,6 +85,7 @@ impl Default for Grammar {
 			nodes: GrammarTree(Vec::new()),
 			root: 0,
 			diagnostics: new_map(),
+			debug: false,
 		}
 	}
 }
@@ -240,48 +246,54 @@ impl Grammar {
 	}
 
 	fn do_shift(&self, sref: &StatementRef, ix: &mut TokenIndex, nset: &Arc<Nameset>, names: &mut NameReader) {
-		let token = sref.math_at(*ix);
-		let symbol = names.lookup_symbol(token.slice).unwrap();
-		println!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
+		if self.debug {
+			let token = sref.math_at(*ix);
+			let symbol = names.lookup_symbol(token.slice).unwrap();
+			println!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
+		}
 		*ix += 1;
 	}
 
-	fn do_reduce(&self, stmt: Atom, nset: &Arc<Nameset>) {
-		println!("   REDUCE {:?}", as_str(nset.atom_name(stmt)));
+	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, stmt: Atom, nset: &Arc<Nameset>) {
+		if self.debug {
+			println!("   REDUCE {:?}", as_str(nset.atom_name(stmt)));
+		}
+		formula_builder.reduce(stmt);
+		print!(" {:?}", as_str(nset.atom_name(stmt)));
 	}
 
-	fn parse_formula<'a>(&self, sref: &StatementRef, ix: &mut TokenIndex, _expected_typecodes: impl IntoIterator<Item = &'a TypeCode>, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
+	fn parse_formula<'a>(&self, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, _expected_typecodes: impl IntoIterator<Item = &'a TypeCode>, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
 		let mut node = self.root;
 		loop {
 			match self.nodes.get(node) {
 				GrammarNode::Leaf{label, typecode} => {
 					// We found a leaf: REDUCE
-					self.do_reduce(*label, nset);
+					self.do_reduce(formula_builder, *label, nset);
 					return Ok(*typecode);
 				},
 				GrammarNode::Branch{cst_map, var_map, ..} => {
 					if *ix == sref.math_len() { return Err(Grammar::too_short(cst_map, nset)); }
 					let token = sref.math_at(*ix);
 					let symbol = names.lookup_symbol(token.slice).unwrap();
-					print!("   {:?}", as_str(nset.atom_name(symbol.atom)));
+					if self.debug { print!("   {:?}", as_str(nset.atom_name(symbol.atom))); }
 
 					match cst_map.get(&symbol.atom) {
 						Some(next_node) => {
 							// Found an atom matching one of our next nodes: SHIFT, to the next node
 							self.do_shift(sref, ix, nset, names);
 							node = *next_node;
-							println!("   Next Node: {:?}", node);
+							if self.debug { println!("   Next Node: {:?}", node); }
 						},
 						None => {
 							// No matching constant, search among variables
-							println!(" ++ Not in CST map, recursive call");
-							let typecode = self.parse_formula(sref, ix, var_map.keys(), nset, names)?;
-							println!(" ++ Finished parsing formula, found typecode {:?}", as_str(nset.atom_name(typecode)));
+							if self.debug { println!(" ++ Not in CST map, recursive call"); }
+							let typecode = self.parse_formula(sref, ix, formula_builder, var_map.keys(), nset, names)?;
+							if self.debug { println!(" ++ Finished parsing formula, found typecode {:?}", as_str(nset.atom_name(typecode))); }
 							match var_map.get(&typecode) {
 								Some(next_node) => {
 									// Found and reduced a sub-formula, to the next node
 									node = *next_node;
-									println!("   Next: {:?}", node);
+									if self.debug { println!("   Next Node: {:?}", node); }
 								},
 								None => {
 									// No match found, error.
@@ -297,7 +309,7 @@ impl Grammar {
 		}
 	}
 
-	fn parse_statement(&self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
+	fn parse_statement(&self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<Option<Formula>, Diagnostic> {
 		if sref.math_len() == 0 {
 			//println!("Statement #{}, {} has length 0", sref.index(), nset.lookup_label(sref.label()));
 			return Err(Diagnostic::ParsedStatementNoTypeCode);
@@ -310,15 +322,20 @@ impl Grammar {
 		let mut expected_typecode = nset.get_atom(sref.math_at(0).slice); 
 
 		// Skip syntactic axioms 
-		if sref.statement_type() == StatementType::Axiom && expected_typecode != self.provable_type { return Ok(()) }
+		if sref.statement_type() == StatementType::Axiom && expected_typecode != self.provable_type { return Ok(None) }
 
 		// If this is a provable statement, prove that this is a wff. Otherwise just use the provided typecode
 		if expected_typecode == self.provable_type { expected_typecode = self.logic_type; }
 
 		// At the time of writing, there are only 3 statements which are not provable but "syntactic theorems": weq, wel and bj-0
+		let mut formula_builder = FormulaBuilder::default();
 
-		self.parse_formula(sref, &mut 1, vec![&expected_typecode], nset, names)?;
-		Ok(())
+		if true {
+			println!("\nStatement {:?}\n---------", as_str(nset.atom_name(nset.lookup_label(sref.label()).map_or(Atom::default(), |l| l.atom))));
+		}
+
+		self.parse_formula(sref, &mut 1, &mut formula_builder, vec![&expected_typecode], nset, names)?;
+		Ok(Some(formula_builder.build()))
 	}
 
 	/// Lists the contents of the grammar
@@ -400,13 +417,13 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 
 /** The result of parsing all statements with the language grammar */
 pub struct StmtParse {
-	diagnostics: HashMap<StatementAddress, Diagnostic>,
+    segments: HashMap<SegmentId, Arc<StmtParseSegment>>,
 }
 
 impl Default for StmtParse {
 	fn default() -> Self {
 		StmtParse {
-			diagnostics: new_map(),
+			segments: new_map(),
 		}
 	}
 }
@@ -415,10 +432,48 @@ impl StmtParse {
     /// Returns a list of errors that were generated when parsing the database's statements.
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
-        for (sa, diag) in &self.diagnostics {
-            out.push((*sa, diag.clone()));
+        for sps in self.segments.values() {
+            for (&sa, &ref diag) in &sps.diagnostics {
+                out.push((sa, diag.clone()));
+            }
         }
         out
+    }
+}
+
+/// Data generated by the statement parsing process for a single segment.
+struct StmtParseSegment {
+    source: Arc<Segment>,
+    diagnostics: HashMap<StatementAddress, Diagnostic>,
+    formulas: HashMap<StatementAddress, Formula>,
+}
+
+/// Runs statement parsing for a single segment.
+fn parse_statements_single<'a>(sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, grammar: &Arc<Grammar>, sid: SegmentId) -> StmtParseSegment {
+	let segment = sset.segment(sid);
+    let mut diagnostics = new_map();
+    let mut formulas = new_map();
+
+    for sref in segment {
+        match match sref.statement_type() {
+            StatementType::Axiom | StatementType::Essential | StatementType::Provable => grammar.parse_statement(&sref, nset, names),
+            _ => Ok(None)
+        } {
+			Err(diag) => {
+				diagnostics.insert(sref.address(), diag);
+				break; // inserted here to stop at first error!
+			},
+			Ok(Some(formula)) => {
+				formulas.insert(sref.address(), formula);
+			},
+			_ => {},
+		}
+    }
+
+    StmtParseSegment {
+        source: (*segment).clone(),
+        diagnostics,
+        formulas,
     }
 }
 
@@ -429,16 +484,11 @@ pub fn parse_statements<'a>(stmt_parse: &mut StmtParse, sset: &'a Arc<SegmentSet
 	let segments = sset.segments();
 	assert!(segments.len() > 0, "Parse returned no segment!");
 
+	// TODO make this parallel using segments.exec.exec()!
+	stmt_parse.segments.clear();
     for segment in segments.iter() {
-	    for sref in *segment {
-			println!("Statement {:?}\n---------", as_str(nset.atom_name(nset.lookup_label(sref.label()).map_or(Atom::default(), |l| l.atom))));
-	        if let Err(diag) = match sref.statement_type() {
-	            StatementType::Axiom | StatementType::Essential | StatementType::Provable => grammar.parse_statement(&sref, nset, &mut names),
-	            _ => Ok(())
-	        } {
-				stmt_parse.diagnostics.insert(sref.address(), diag);
-				return; // inserted here to stop at first error!
-			}
-	    }
+		let id = segment.id;
+		let arc = Arc::new(parse_statements_single(sset, nset, &mut names, grammar, id));
+		stmt_parse.segments.insert(id, arc);
 	}
 }

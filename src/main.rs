@@ -17,6 +17,7 @@ pub mod database;
 pub mod diag;
 pub mod export;
 pub mod grammar;
+pub mod formula;
 pub mod line_cache;
 pub mod nameck;
 pub mod outline;
