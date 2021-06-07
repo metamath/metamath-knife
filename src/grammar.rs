@@ -35,8 +35,8 @@ impl GrammarTree {
 	    self.0.len() - 1
 	}
 
-	fn create_leaf(&mut self, label: Atom, typecode: TypeCode) -> NodeId {
-	    self.0.push(GrammarNode::Leaf{label, typecode});
+	fn create_leaf(&mut self, label: Atom, var_count: u8, typecode: TypeCode) -> NodeId {
+	    self.0.push(GrammarNode::Leaf{label, var_count, typecode});
 	    self.0.len() - 1
 	}
 	
@@ -67,6 +67,7 @@ pub struct Grammar {
 enum GrammarNode {
 	Leaf {
 		label: Atom,
+		var_count: u8,
 		typecode: TypeCode,
 		},
 	Branch {
@@ -165,7 +166,7 @@ impl Grammar {
 		let mut tokens = sref.math_iter().peekable();
 
 		// Atom for this axiom's label.
-		let this_label = nset.lookup_label(sref.label()).unwrap().atom;
+		let this_label = names.lookup_label(sref.label()).unwrap().atom;
 		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
 		let this_typecode = nset.get_atom(tokens.next().unwrap().slice); 
 
@@ -174,18 +175,21 @@ impl Grammar {
 
 		// We will add this syntax axiom to the grammar tree
 		let mut node = self.root;
-		let leaf_node = self.nodes.create_leaf(this_label, this_typecode);
+		let mut var_count = 0;
 		while let Some(token) = tokens.next() {
 			let symbol = names.lookup_symbol(token.slice).unwrap();
 			let atom = match symbol.stype {
 				SymbolType::Constant => symbol.atom,
-				// We need a second lookup to find out the typecode of a floating variable...
-				// Ideally this information would be included in the LookupSymbol
-				SymbolType::Variable => names.lookup_float(token.slice).unwrap().typecode_atom,
+				SymbolType::Variable => {
+					var_count += 1;
+					// We need a second lookup to find out the typecode of a floating variable...
+					// Ideally this information would be included in the LookupSymbol
+					names.lookup_float(token.slice).unwrap().typecode_atom
+				}
 			};
 			let next_leaf = match &tokens.peek() {
 				Some(_) => None,
-				None => Some(leaf_node),
+				None => Some(self.nodes.create_leaf(this_label, var_count, this_typecode)),
 			};
 			match self.add_branch(node, atom, symbol.stype, next_leaf) {
 				Ok(next_node) => { node = next_node; },
@@ -200,7 +204,7 @@ impl Grammar {
 		let mut tokens = sref.math_iter();
 
 		// Atom for this flaot's label.
-		let this_label = nset.lookup_label(sref.label()).unwrap().atom;
+		let this_label = names.lookup_label(sref.label()).unwrap().atom;
 		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
 		let this_typecode = nset.get_atom(tokens.next().unwrap().slice); 
 
@@ -208,11 +212,14 @@ impl Grammar {
 		if this_typecode == self.provable_type { return Err(Diagnostic::GrammarProvableFloat); }
 
 		// We will add this floating declaration to the grammar tree
-		let leaf_node = self.nodes.create_leaf(this_label, this_typecode);
+		let leaf_node = self.nodes.create_leaf(this_label, 0, this_typecode);
 
 		// If is safe to unwrap here since parser has already checked.
 		let token = tokens.next().unwrap();
 		let symbol = names.lookup_symbol(token.slice).unwrap();
+
+		println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
+
 		match self.nodes.get_mut(self.root) {
 			GrammarNode::Branch{cst_map, ..} => match cst_map.insert(symbol.atom, leaf_node) {
 				None => Ok(()),
@@ -233,12 +240,12 @@ impl Grammar {
 		let mut tokens = sref.math_iter().peekable();
 
 		// Atom for this axiom's label.
-		let this_label = nset.lookup_label(sref.label()).unwrap().atom;
+		let _this_label = names.lookup_label(sref.label()).unwrap().atom;
 		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
-		let this_typecode = nset.get_atom(tokens.next().unwrap().slice);
+		let _this_typecode = nset.get_atom(tokens.next().unwrap().slice);
 
 		// In case of a non-syntax axiom, skip it.
-		if this_typecode == self.provable_type { return; }
+		if _this_typecode == self.provable_type { return; }
 
 		// Search a sub-string of this syntax axiom which is parseable itself.
 		
@@ -254,21 +261,21 @@ impl Grammar {
 		*ix += 1;
 	}
 
-	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, stmt: Atom, nset: &Arc<Nameset>) {
+	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, stmt: Atom, var_count: u8, nset: &Arc<Nameset>) {
 		if self.debug {
 			println!("   REDUCE {:?}", as_str(nset.atom_name(stmt)));
 		}
-		formula_builder.reduce(stmt);
-		print!(" {:?}", as_str(nset.atom_name(stmt)));
+		formula_builder.reduce(stmt, var_count);
+		print!(" {:?} {}", as_str(nset.atom_name(stmt)), var_count);
 	}
 
 	fn parse_formula<'a>(&self, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, _expected_typecodes: impl IntoIterator<Item = &'a TypeCode>, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
 		let mut node = self.root;
 		loop {
 			match self.nodes.get(node) {
-				GrammarNode::Leaf{label, typecode} => {
+				GrammarNode::Leaf{label, var_count, typecode} => {
 					// We found a leaf: REDUCE
-					self.do_reduce(formula_builder, *label, nset);
+					self.do_reduce(formula_builder, *label, *var_count, nset);
 					return Ok(*typecode);
 				},
 				GrammarNode::Branch{cst_map, var_map, ..} => {
@@ -297,9 +304,10 @@ impl Grammar {
 								},
 								None => {
 									// No match found, error.
-									println!("EXIT 2");
-									std::process::exit(1);
-									//return Err(Diagnostic::UnparseableStatement(token.index()));
+									//println!("EXIT 2");
+									//std::process::exit(1);
+									return Err(Diagnostic::UnparseableStatement(token.index()));
+									//return Ok(None);
 								}
 							}
 						}
@@ -331,7 +339,7 @@ impl Grammar {
 		let mut formula_builder = FormulaBuilder::default();
 
 		if true {
-			println!("\nStatement {:?}\n---------", as_str(nset.atom_name(nset.lookup_label(sref.label()).map_or(Atom::default(), |l| l.atom))));
+			println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
 		}
 
 		self.parse_formula(sref, &mut 1, &mut formula_builder, vec![&expected_typecode], nset, names)?;
@@ -343,7 +351,7 @@ impl Grammar {
 		println!("Grammar tree has {:?} nodes.", self.nodes.len());
 		for i in 0 .. self.nodes.len() {
 			match &self.nodes.0[i] {
-				GrammarNode::Leaf{label, typecode} => { println!("{:?}: {} {}", i, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(*label))); },
+				GrammarNode::Leaf{label, var_count, typecode} => { println!("{:?}: {} {} ({} vars)", i, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(*label)), var_count); },
 				GrammarNode::Branch{cst_map, var_map, leaf_label} => {
 					print!("{:?}: CST={{", i);
 					for (symbol, node) in cst_map {
@@ -439,6 +447,17 @@ impl StmtParse {
         }
         out
     }
+
+	/// Writes down all formulas
+	pub fn dump(&self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
+		println!("Formula Dump:");
+        for sps in self.segments.values() {
+            for (&sa, &ref formula) in &sps.formulas {
+				let sref = sset.statement(sa);
+				println!("{}: {}", as_str(nset.statement_name(&sref)), formula.display(sset, nset));
+            }
+        }
+	}
 }
 
 /// Data generated by the statement parsing process for a single segment.

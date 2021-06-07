@@ -618,6 +618,16 @@ impl Database {
         })
     }
 
+    /// Dump the formulas of this database.
+    pub fn print_formula(&mut self) {
+        time(&self.options.clone(), "print_formulas", || {
+            let parse = self.parse_result().clone();
+            let name = self.name_result().clone();
+            let stmt_parse = self.stmt_parse_result().clone();
+            stmt_parse.dump(&parse, &name);
+        })
+    }
+
     /// Dump the outline of this database.
     pub fn print_outline(&mut self) {
         time(&self.options.clone(), "print_outline", || {

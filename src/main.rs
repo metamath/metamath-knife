@@ -58,9 +58,11 @@ fn main() {
             .long("split"))
         .arg(Arg::with_name("timing").help("Print milliseconds after each stage").long("timing"))
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
-        .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("o"))
+        .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("O"))
         .arg(Arg::with_name("grammar").help("Check grammar").long("grammar").short("g"))
         .arg(Arg::with_name("stmt_parse").help("Parse statements according to the databases grammar").long("stmt_parse").short("p"))
+        .arg(Arg::with_name("print_grammar").help("Print the database's grammar").long("print_grammar").short("G"))
+        .arg(Arg::with_name("print_formula").help("Parse all statements according to the database's grammar").long("print_formula").short("F"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -142,6 +144,10 @@ fn main() {
 
         if matches.is_present("print_grammar") {
             db.print_grammar();
+        }
+
+        if matches.is_present("print_formula") {
+            db.print_formula();
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
