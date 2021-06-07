@@ -16,14 +16,14 @@ use crate::parser::TokenIndex;
 use crate::parser::as_str;
 use crate::parser::copy_token;
 use crate::segment_set::SegmentSet;
+use crate::formula::Symbol;
+use crate::formula::TypeCode;
 use crate::formula::Formula;
 use crate::formula::FormulaBuilder;
 use std::sync::Arc;
 use crate::util::HashMap;
 use crate::util::new_map;
 
-type TypeCode = Atom;
-type Symbol = Atom;
 
 type NodeId = usize;
 
@@ -218,7 +218,9 @@ impl Grammar {
 		let token = tokens.next().unwrap();
 		let symbol = names.lookup_symbol(token.slice).unwrap();
 
-		println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
+		if self.debug {
+			println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
+		}
 
 		match self.nodes.get_mut(self.root) {
 			GrammarNode::Branch{cst_map, ..} => match cst_map.insert(symbol.atom, leaf_node) {
@@ -266,7 +268,9 @@ impl Grammar {
 			println!("   REDUCE {:?}", as_str(nset.atom_name(stmt)));
 		}
 		formula_builder.reduce(stmt, var_count);
-		print!(" {:?} {}", as_str(nset.atom_name(stmt)), var_count);
+		if self.debug {
+			print!(" {:?} {}", as_str(nset.atom_name(stmt)), var_count);
+		}
 	}
 
 	fn parse_formula<'a>(&self, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, _expected_typecodes: impl IntoIterator<Item = &'a TypeCode>, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
@@ -327,7 +331,8 @@ impl Grammar {
 		//println!("Parsing {:?}", this_label);
 
 		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
-		let mut expected_typecode = nset.get_atom(sref.math_at(0).slice); 
+		let typecode = nset.get_atom(sref.math_at(0).slice); 
+		let mut expected_typecode = typecode; 
 
 		// Skip syntactic axioms 
 		if sref.statement_type() == StatementType::Axiom && expected_typecode != self.provable_type { return Ok(None) }
@@ -338,12 +343,12 @@ impl Grammar {
 		// At the time of writing, there are only 3 statements which are not provable but "syntactic theorems": weq, wel and bj-0
 		let mut formula_builder = FormulaBuilder::default();
 
-		if true {
+		if self.debug {
 			println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
 		}
 
 		self.parse_formula(sref, &mut 1, &mut formula_builder, vec![&expected_typecode], nset, names)?;
-		Ok(Some(formula_builder.build()))
+		Ok(Some(formula_builder.build(typecode)))
 	}
 
 	/// Lists the contents of the grammar

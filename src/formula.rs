@@ -9,6 +9,9 @@ use crate::nameck::Atom;
 use crate::nameck::Nameset;
 use std::sync::Arc;
 
+pub type TypeCode = Atom;
+pub type Symbol = Atom;
+
 type NodeId = usize;
 
 struct FormulaNode {
@@ -20,6 +23,7 @@ struct FormulaNode {
 /// A parsed formula, in a format in which it is convenient to perform unifications
 #[derive(Default)]
 pub struct Formula {
+	typecode: TypeCode,
 	root: NodeId,
 	nodes: Vec<FormulaNode>,
 }
@@ -39,6 +43,7 @@ impl Formula {
 	/// Displays the formula as a string
 	pub fn display(&self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) -> String {
 		let mut str = String::new();
+		str.push_str(as_str(nset.atom_name(self.typecode)));
 		for symbol in self.iter(sset, nset) {
 			str.push_str(" ");
 			str.push_str(as_str(nset.atom_name(symbol)));
@@ -64,7 +69,7 @@ pub struct Flattener<'a> {
 }
 
 impl<'a> Iterator for Flattener<'a> {
-	type Item = Atom;
+	type Item = Symbol;
 	
     fn next(&mut self) -> Option<Self::Item> {
 		if self.stack.len() == 0 { return None; }
@@ -140,10 +145,11 @@ impl FormulaBuilder {
 		self.stack.push(self.formula.nodes.len());
 	}
 
-	pub(crate) fn build(mut self) -> Formula {
+	pub(crate) fn build(mut self, typecode: TypeCode) -> Formula {
 		// Only one entry shall remain in the stack at the time of building, the formula root.
 		assert!(self.stack.len() == 1); 
 		self.formula.root = self.stack[0];
+		self.formula.typecode = typecode;
 		return self.formula;
 	}
 }

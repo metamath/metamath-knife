@@ -566,7 +566,7 @@ impl Database {
         if self.stmt_parse.is_none() {
             self.name_result();
             self.scope_result();
-            time(&self.options.clone(), "grammar", || {
+            time(&self.options.clone(), "stmt_parse", || {
                 let parse = self.parse_result().clone();
                 let name = self.name_result().clone();
                 let grammar = self.grammar_result().clone();
