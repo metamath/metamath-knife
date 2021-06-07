@@ -97,7 +97,10 @@ fn main() {
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
-    options.incremental |= matches.is_present("grammar") || matches.is_present("stmt_parse");
+    options.incremental |= matches.is_present("grammar") 
+		|| matches.is_present("stmt_parse") 
+		|| matches.is_present("print_grammar") 
+		|| matches.is_present("print_formula");
 
     let mut db = Database::new(options);
 
