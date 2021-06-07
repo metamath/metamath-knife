@@ -27,6 +27,7 @@ pub mod scopeck;
 pub mod segment_set;
 pub mod util;
 pub mod verify;
+mod tree;
 
 #[cfg(test)]
 mod util_tests;

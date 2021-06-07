@@ -9,6 +9,7 @@ pub use regex;
 
 mod bit_set;
 mod segment_set;
+mod tree;
 mod util;
 
 pub mod database;
