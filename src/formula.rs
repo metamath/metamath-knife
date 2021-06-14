@@ -18,11 +18,14 @@ pub type TypeCode = Atom;
 /// An atom representing a math symbol
 pub type Symbol = Atom;
 
+/// An atom representing a label (nameck suggests LAtom for this)
+pub type Label = Atom;
+
 /// A parsed formula, in a tree format which is convenient to perform unifications
 #[derive(Default)]
 pub struct Formula {
 	typecode: TypeCode,
-	tree: Tree<Atom>,
+	tree: Tree<Label>,
 	root: NodeId,
 }
 
@@ -61,7 +64,7 @@ impl Formula {
 /// An iterator going through each symbol in a formula
 pub struct Flatten<'a> {
 	formula: &'a Formula,
-	stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Atom>>)>,
+	stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Label>>)>,
 	sset: &'a Arc<SegmentSet>, 
 	nset: &'a Arc<Nameset>,
 }
@@ -124,7 +127,7 @@ pub(crate) struct FormulaBuilder {
 impl FormulaBuilder {
 	/// Every REDUCE pops `var_count` subformula items on the stack, 
 	/// and pushes one single new item, with the popped subformulas as children
-	pub(crate) fn reduce(&mut self, label: Atom, var_count: u8) {
+	pub(crate) fn reduce(&mut self, label: Label, var_count: u8) {
 		assert!(self.stack.len()>=var_count.into());
 		let new_length = self.stack.len().saturating_sub(var_count.into());
 		let new_node_id = {
@@ -136,7 +139,7 @@ impl FormulaBuilder {
 
 	pub(crate) fn build(mut self, typecode: TypeCode) -> Formula {
 		// Only one entry shall remain in the stack at the time of building, the formula root.
-		assert!(self.stack.len() == 1, "Final formula building state does not have one root"); 
+		assert!(self.stack.len() == 1, "Final formula building state does not have one root - {:?}", self.stack); 
 		self.formula.root = self.stack[0];
 		self.formula.typecode = typecode;
 		return self.formula;
