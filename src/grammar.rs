@@ -1,10 +1,12 @@
 //! Grammar processes a database, extracts a Grammar, which it also
 //! validates, and parses statements in the system.
 //!
+// TODO See EareyParser! / EarleyParseFunctionAlgorithm.html
 
 use crate::diag::Diagnostic;
 use crate::nameck::NameReader;
 use crate::nameck::Nameset;
+use crate::nameck::Atom;
 use crate::parser::Segment;
 use crate::parser::SegmentId;
 use crate::parser::StatementAddress;
@@ -20,10 +22,10 @@ use crate::formula::TypeCode;
 use crate::formula::Label;
 use crate::formula::Formula;
 use crate::formula::FormulaBuilder;
+use std::ops::Index;
 use std::sync::Arc;
 use crate::util::HashMap;
 use crate::util::new_map;
-
 
 type NodeId = usize;
 
@@ -106,6 +108,7 @@ impl NextNode {
 	}
 }
 
+#[derive(Clone, Debug)]
 enum GrammarNode {
 	Leaf {
 		label: Label,
@@ -116,6 +119,21 @@ enum GrammarNode {
 		cst_map: HashMap<Symbol, NextNode>,   // Table of choices leading to the next node when a constant is encountered
 		var_map: HashMap<TypeCode, NextNode>, // Table of choices leading to the next node when a variable is successfully parsed
 	}, 
+}
+
+impl Index<SymbolType> for GrammarNode {
+	type Output = HashMap<Atom, NextNode>;
+	
+    fn index(&self, index: SymbolType) -> &Self::Output {
+		if let GrammarNode::Branch{cst_map, var_map} = self {
+			match index {
+				SymbolType::Constant => cst_map,
+				SymbolType::Variable => var_map,
+			}
+		} else {
+			panic!("Only index branch nodes!");
+		}
+    }
 }
 
 impl Default for Grammar {
@@ -282,9 +300,10 @@ impl Grammar {
 		}
 
 		match self.nodes.get_mut(self.root) {
+			// We ignore the ambiguity in floats, since they are actually frame dependent.
 			GrammarNode::Branch{cst_map, ..} => match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
 				None => Ok(()),
-				Some(conflict_node) => Err(self.ambiguous(conflict_node.next_node_id, nset)),
+				Some(conflict_node) => Ok(()), // Err(self.ambiguous(conflict_node.next_node_id, nset)), 
 			}
 			_ => panic!("Root node shall be a branch node!"),
 		}
@@ -296,27 +315,22 @@ impl Grammar {
 	fn perform_type_conversion(&mut self, from_typecode: TypeCode, to_typecode: TypeCode, label: Label) -> Result<(), Diagnostic> {
 		let len = self.nodes.len();
 		for node_id in 0 .. len {
-			match &self.nodes.get(node_id) {
+			match self.nodes.get(node_id) {
 				GrammarNode::Branch { var_map, .. } => {
 					if let Some(ref_next_node_id) = var_map.get(&to_typecode) {
 						let next_node_id = ref_next_node_id.next_node_id;
 						match var_map.get(&from_typecode) {
 							None => {
 								// No branch exist for the converted type: create one, with a leaf label.
-								println!("{}: {} class None setvar", node_id, next_node_id);
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
 									next_node_id, leaf_label: Some((label, 1)),
 								}));
 							},
 							Some(existing_next_node) => {
 								// A branch for the converted type already exist: add the conversion to that branch!
-								println!("{}: {} class {} setvar", node_id, next_node_id, existing_next_node.next_node_id);
 								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Some((label, 1)));
-								
 							},
 						}
-
-
 					}
 				},
 				_ => {}, // Nothing to do for leafs
@@ -401,7 +415,111 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 				_ => {},
 */
 
+	fn next_var_node(&self, node_id: NodeId, typecode: TypeCode) -> Option<NodeId> {
+		match self.nodes.get(node_id) {
+			GrammarNode::Branch { var_map, .. } => match var_map.get(&typecode) {
+				Some(NextNode { next_node_id, .. }) => Some(*next_node_id),
+				_ => None
+			},
+			_ => None
+		}
+	}
 
+	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, make_leaf: F) where F: Fn(Label, u8) -> NextNode + Copy {
+		println!("Clone {} to {}", add_from_node_id, add_to_node_id);
+		for stype in &[SymbolType::Constant, SymbolType::Variable] {
+			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
+			for (symbol, next_node) in map {
+				if let GrammarNode::Leaf { label, var_count, .. } = self.nodes.get(next_node.next_node_id) {
+					match self.add_branch(add_to_node_id, *symbol, *stype, Some(make_leaf(*label, *var_count))) {
+						_ => {},
+					}
+				} else {
+					match self.add_branch(add_to_node_id, *symbol, *stype, None) {
+						Ok(new_next_node_id) | Err(new_next_node_id) => {
+							self.clone_branches(next_node.next_node_id, new_next_node_id, make_leaf);
+						},
+					}
+				}
+			}
+		}
+	}
+
+	/// Handle common prefixes. 
+	/// For example in set.mm, ` (  A ` is a prefix common to ` ( A X. B ) ` and ` ( A e. B /\ T. ) `
+	/// The first is a notation, but would "shadow" the second option
+	// NOTES: 
+	//   it might be better/easier to use slices of TokenPtr instead of slices of Atoms. TBC
+	//   common prefix must be constant only, and diergence must be both variable
+	fn handle_common_prefixes(&mut self, prefix: &[Symbol], shadows: &[Symbol], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
+		let mut node_id = self.root;
+		let mut index = 0;
+		
+		// First we follow the tree to the common prefix
+		loop {
+			if prefix[index] != shadows[index] { break; }
+			// TODO use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
+			if let GrammarNode::Branch { cst_map, .. } = self.nodes.get(node_id) {
+				let next_node = cst_map.get(&prefix[index]).expect("Prefix cannot be parsed!");
+				node_id = next_node.next_node_id;
+				index += 1;
+			}
+			else {
+				panic!("Leaf reached while parsing common prefixes!");
+			}
+		}
+
+		// We note the typecode and next branch of the "shadowed" prefix
+		let shadowed_typecode = names.lookup_float(nset.atom_name(shadows[index])).unwrap().typecode_atom;
+		let shadowed_next_node = self.next_var_node(node_id, shadowed_typecode).expect("Shadowed prefix cannot be parsed!");
+		
+		// We note what comes after the shadowing typecode, and go to the next node
+		let shadowing_typecode = names.lookup_float(nset.atom_name(prefix[index])).unwrap().typecode_atom;
+		let add_from_node_id = self.next_var_node(self.root, shadowing_typecode).expect("Shadowing prefix cannot be parsed from root!");
+		node_id = self.next_var_node(node_id, shadowing_typecode).expect("Shadowing prefix cannot be parsed!");
+
+		println!("Handle common prefix node {}", node_id);
+		println!("Shadowed token: {}", as_str(nset.atom_name(shadows[index])));
+		println!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
+		println!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
+		println!("Handle shadowing next node {}, typecode {:?}", node_id, shadowing_typecode);
+
+		// Then we copy each of the next branch of the shadowed string to the shadowing branch
+		// If the next node is a leaf, instead, we add a leaf label, and point to the next
+		self.clone_branches(add_from_node_id, node_id, |label, var_count| {
+			println!("LEAF label={:?} {}", label, var_count);
+			NextNode { 
+				next_node_id: shadowed_next_node,
+				leaf_label: Some((label, var_count)),
+			 }
+		});
+
+//		match &(*self.nodes.get(add_from_node_id)).clone() {
+//			GrammarNode::Branch { cst_map, var_map } => {
+//				// here we need to ADD to node_id / cst_map and var_map
+//				for (symbol, next_node) in cst_map {
+//					match self.add_branch(node_id, *symbol, SymbolType::Constant, None) {
+//						Ok(new_next_node) | Err(new_next_node) => {
+//							
+//							/* TBC */
+//						},
+//					}
+//				}
+//				for (typecode, next_node) in var_map {
+//					match self.add_branch(node_id, *typecode, SymbolType::Variable, None) {
+//						Ok(new_next_node) | Err(new_next_node) => {
+//							/* TBC */
+//						},
+//					}
+//				}
+//			},
+//			_ => {
+//				panic!("Leaf reached while parsing shadowing prefix!");
+//			}
+//		}
+		
+		Ok(())
+	}
 
 	/// Bake the lookahead into the grammar automaton.
 	/// This handles casses like the ambiguity between ` ( x e. A /\ ph ) ` and ` ( x e. A |-> B ) `
@@ -492,6 +610,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 									if self.debug { println!("   Next Node: {:?}", node); }
 								},
 								None => {
+									// Here maybe we shall not always come back to root...
+									
 									// No match found, try as a prefix of a larger formula
 									let (_, var_map_2) = self.get_branch(self.root);
 									match var_map_2.get(&typecode) {
@@ -642,6 +762,12 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 			}
 	    }
 	}
+
+	// Handle common prefixes
+	let phi = nset.lookup_symbol("ph".as_bytes()).unwrap().atom;
+	let a = nset.lookup_symbol("A".as_bytes()).unwrap().atom;
+	let open_parens = nset.lookup_symbol("(".as_bytes()).unwrap().atom;
+	grammar.handle_common_prefixes(&[open_parens, a], &[open_parens, phi], nset, &mut names);
 
 	// Handle replacement schemes
 	for (from_typecode, to_typecode, label) in type_conversions {

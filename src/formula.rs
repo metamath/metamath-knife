@@ -1,4 +1,5 @@
 //! `Formula` stores the result of a parsing as the tree of its "synctactic proof" 
+//! The formula nodes are the equivalent of MMJ2's "ParseNode"s, and the formula itself the equivalent of MMJ2's "ParseTree"
 //!
 
 use crate::parser::as_str;
