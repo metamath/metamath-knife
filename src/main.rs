@@ -61,9 +61,9 @@ fn main() {
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
         .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("O"))
         .arg(Arg::with_name("grammar").help("Check grammar").long("grammar").short("g"))
-        .arg(Arg::with_name("stmt_parse").help("Parse statements according to the databases grammar").long("stmt_parse").short("p"))
-        .arg(Arg::with_name("print_grammar").help("Print the database's grammar").long("print_grammar").short("G"))
-        .arg(Arg::with_name("print_formula").help("Parse all statements according to the database's grammar").long("print_formula").short("F"))
+        .arg(Arg::with_name("parse-stmt").help("Parse statements according to the databases grammar").long("parse-stmt").short("p"))
+        .arg(Arg::with_name("print-grammar").help("Print the database's grammar").long("print-grammar").short("G"))
+        .arg(Arg::with_name("print-formula").help("Parse all statements according to the database's grammar").long("print-formula").short("F"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -98,9 +98,9 @@ fn main() {
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
     options.incremental |= matches.is_present("grammar") 
-		|| matches.is_present("stmt_parse") 
-		|| matches.is_present("print_grammar") 
-		|| matches.is_present("print_formula");
+		|| matches.is_present("parse-stmt") 
+		|| matches.is_present("print-grammar") 
+		|| matches.is_present("print-formula");
 
     let mut db = Database::new(options);
 
@@ -130,7 +130,7 @@ fn main() {
             types.push(DiagnosticClass::Grammar);
         }
 
-        if matches.is_present("stmt_parse") {
+        if matches.is_present("parse-stmt") {
             types.push(DiagnosticClass::StmtParse);
         }
 
@@ -146,11 +146,11 @@ fn main() {
             db.print_outline();
         }
 
-        if matches.is_present("print_grammar") {
+        if matches.is_present("print-grammar") {
             db.print_grammar();
         }
 
-        if matches.is_present("print_formula") {
+        if matches.is_present("print-formula") {
             db.print_formula();
         }
 
