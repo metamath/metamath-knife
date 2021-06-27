@@ -3,6 +3,8 @@
 //!
 // TODO See EareyParser! / EarleyParseFunctionAlgorithm.html
 
+// Possibly: Remove branch/leaf and keep only the optional leaf? (then final leaf = no next node id)
+
 use crate::diag::Diagnostic;
 use crate::nameck::NameReader;
 use crate::nameck::Nameset;
@@ -24,6 +26,7 @@ use crate::formula::Formula;
 use crate::formula::FormulaBuilder;
 use std::ops::Index;
 use std::sync::Arc;
+use crate::util::PairVec;
 use crate::util::HashMap;
 use crate::util::new_map;
 
@@ -37,8 +40,8 @@ impl GrammarTree {
 	    self.0.len() - 1
 	}
 
-	fn create_leaf(&mut self, label: Label, var_count: u8, typecode: TypeCode) -> NodeId {
-	    self.0.push(GrammarNode::Leaf{label, var_count, typecode});
+	fn create_leaf(&mut self, reduce: Reduce, typecode: TypeCode) -> NodeId {
+	    self.0.push(GrammarNode::Leaf{reduce, typecode});
 	    self.0.len() - 1
 	}
 	
@@ -55,7 +58,7 @@ impl GrammarTree {
 	}
 
 	// Copy all branches from `from_node` to `to_node`, adding the provided leaf label on the way
-	fn copy_branches(&mut self, copy_from_node_id: NodeId, copy_to_node_id: NodeId, set_leaf_label: Option<(Label, u8)>) -> Result<(), NodeId> {
+	fn copy_branches(&mut self, copy_from_node_id: NodeId, copy_to_node_id: NodeId, set_leaf_label: PairVec<Reduce>) -> Result<(), NodeId> {
 		let (from_node, to_node) = if copy_from_node_id < copy_to_node_id {
 			let slice = &mut self.0[copy_from_node_id .. copy_to_node_id+1];
 			let (first_part, second_part) = slice.split_at_mut(copy_to_node_id-copy_from_node_id);
@@ -93,17 +96,29 @@ pub struct Grammar {
 }
 
 #[derive(Clone,Copy,Debug)]
+struct Reduce {
+	label: Label,
+	var_count: u8,
+}
+
+impl Reduce {
+	fn new(label: Label, var_count: u8) -> Self {
+		Reduce { label, var_count }
+	}
+}
+
+#[derive(Clone,Copy,Debug)]
 struct NextNode {
 	next_node_id: NodeId,
-	leaf_label: Option<(Label, u8)>,          // This deals with ambiguity in the grammar, performing a reduce then continuing
+	leaf_label: PairVec<Reduce>,          // This deals with ambiguity in the grammar, performing one or several reduce then continuing
 }
 
 impl NextNode {
 	fn new(next_node_id: NodeId) -> Self {
-		NextNode { next_node_id, leaf_label: None }
+		NextNode { next_node_id, leaf_label: PairVec::Zero }
 	}
 	
-	fn with_leaf_label(&self, leaf_label: Option<(Label, u8)>) -> Self {
+	fn with_leaf_label(&self, leaf_label: PairVec<Reduce>) -> Self {
 		NextNode { next_node_id: self.next_node_id, leaf_label }
 	}
 }
@@ -111,8 +126,7 @@ impl NextNode {
 #[derive(Clone, Debug)]
 enum GrammarNode {
 	Leaf {
-		label: Label,
-		var_count: u8,
+		reduce: Reduce,
 		typecode: TypeCode,
 		},
 	Branch {
@@ -172,8 +186,8 @@ impl Grammar {
 					// It shall be safe to unwrap here, as we shall never insert a branch without a leaf
 					node = cst_map.values().next().unwrap().next_node_id;
 				}
-				GrammarNode::Leaf{label, ..} => {
-					let sa = nset.lookup_label(nset.atom_name(*label)).unwrap().address;
+				GrammarNode::Leaf{reduce, ..} => {
+					let sa = nset.lookup_label(nset.atom_name(reduce.label)).unwrap().address;
 					return Diagnostic::GrammarAmbiguous(sa);
 				}
 			}
@@ -266,7 +280,7 @@ impl Grammar {
 			};
 			let next_leaf = match &tokens.peek() {
 				Some(_) => None,
-				None => Some(NextNode::new(self.nodes.create_leaf(this_label, var_count, this_typecode))),
+				None => Some(NextNode::new(self.nodes.create_leaf(Reduce::new(this_label, var_count), this_typecode))),
 			};
 			match self.add_branch(node, atom, symbol.stype, next_leaf) {
 				Ok(next_node) => { node = next_node; },
@@ -289,7 +303,7 @@ impl Grammar {
 		if this_typecode == self.provable_type { return Err(Diagnostic::GrammarProvableFloat); }
 
 		// We will add this floating declaration to the grammar tree
-		let leaf_node = self.nodes.create_leaf(this_label, 0, this_typecode);
+		let leaf_node = self.nodes.create_leaf(Reduce::new(this_label, 0), this_typecode);
 
 		// If is safe to unwrap here since parser has already checked.
 		let token = tokens.next().unwrap();
@@ -323,12 +337,12 @@ impl Grammar {
 							None => {
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
-									next_node_id, leaf_label: Some((label, 1)),
+									next_node_id, leaf_label: PairVec::One(Reduce::new(label, 1)),
 								}));
 							},
 							Some(existing_next_node) => {
 								// A branch for the converted type already exist: add the conversion to that branch!
-								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Some((label, 1)));
+								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, PairVec::One(Reduce::new(label, 1)));
 							},
 						}
 					}
@@ -425,13 +439,13 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		}
 	}
 
-	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, make_leaf: F) where F: Fn(Label, u8) -> NextNode + Copy {
+	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, make_leaf: F) where F: Fn(Reduce) -> NextNode + Copy {
 		println!("Clone {} to {}", add_from_node_id, add_to_node_id);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
-				if let GrammarNode::Leaf { label, var_count, .. } = self.nodes.get(next_node.next_node_id) {
-					match self.add_branch(add_to_node_id, *symbol, *stype, Some(make_leaf(*label, *var_count))) {
+				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
+					match self.add_branch(add_to_node_id, *symbol, *stype, Some(make_leaf(*reduce))) {
 						_ => {},
 					}
 				} else {
@@ -486,11 +500,11 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
-		self.clone_branches(add_from_node_id, node_id, |label, var_count| {
-			println!("LEAF label={:?} {}", label, var_count);
+		self.clone_branches(add_from_node_id, node_id, |reduce| {
+			println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
 			NextNode { 
 				next_node_id: shadowed_next_node,
-				leaf_label: Some((label, var_count)),
+				leaf_label: PairVec::One(reduce),
 			 }
 		});
 
@@ -553,13 +567,13 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		*ix += 1;
 	}
 
-	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, stmt: Label, var_count: u8, nset: &Arc<Nameset>) {
+	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
 		if self.debug {
-			println!("   REDUCE {:?}", as_str(nset.atom_name(stmt)));
+			println!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
 		}
-		formula_builder.reduce(stmt, var_count);
+		formula_builder.reduce(reduce.label, reduce.var_count);
 		if self.debug {
-			print!(" {:?} {}", as_str(nset.atom_name(stmt)), var_count);
+			print!(" {:?} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count);
 		}
 	}
 
@@ -567,9 +581,9 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		let mut node = start_node;
 		loop {
 			match self.nodes.get(node) {
-				GrammarNode::Leaf{label, var_count, typecode} => {
+				GrammarNode::Leaf{reduce, typecode} => {
 					// We found a leaf: REDUCE
-					self.do_reduce(formula_builder, *label, *var_count, nset);
+					self.do_reduce(formula_builder, *reduce, nset);
 					return Ok(*typecode);
 				},
 				GrammarNode::Branch{cst_map, var_map} => {
@@ -581,8 +595,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 					match cst_map.get(&symbol.atom) {
 						Some(NextNode { next_node_id, leaf_label }) => {
 							// Found an atom matching one of our next nodes: First optionally REDUCE and continue
-							if let Some((label, var_count)) = leaf_label {
-								self.do_reduce(formula_builder, *label, *var_count, nset);
+							if let PairVec::One(reduce) = leaf_label { // TODO PairVec here, iterate
+								self.do_reduce(formula_builder, *reduce, nset);
 							}
 
 							// Found an atom matching one of our next nodes: SHIFT, to the next node
@@ -602,8 +616,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 							match var_map.get(&typecode) {
 								Some(NextNode { next_node_id, leaf_label }) => {
 									// Found a sub-formula: First optionally REDUCE and continue
-									if let Some((label, var_count)) = leaf_label {
-										self.do_reduce(formula_builder, *label, *var_count, nset);
+									if let PairVec::One(reduce) = leaf_label { // TODO PairVec here, iterate
+										self.do_reduce(formula_builder, *reduce, nset);
 									}
 
 									node = *next_node_id;
@@ -617,8 +631,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 									match var_map_2.get(&typecode) {
 										Some(NextNode { next_node_id: next_node_id_2, leaf_label: leaf_label_2 }) => {
 											// Found a sub-formula: First optionally REDUCE and continue
-											if let Some((label, var_count)) = leaf_label_2 {
-												self.do_reduce(formula_builder, *label, *var_count, nset);
+											if let PairVec::One(reduce) = leaf_label_2 { // TODO PairVec here, iterate
+												self.do_reduce(formula_builder, *reduce, nset);
 											}
 		
 											// Found and reduced a sub-formula, to the next node
@@ -628,8 +642,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 											match var_map.get(&typecode) {
 												Some(NextNode { next_node_id, leaf_label }) => {
 													// Found a sub-formula: First optionally REDUCE and continue
-													if let Some((label, var_count)) = leaf_label {
-														self.do_reduce(formula_builder, *label, *var_count, nset);
+													if let PairVec::One(reduce) = leaf_label { // TODO PairVec here, iterate
+														self.do_reduce(formula_builder, *reduce, nset);
 													}
 				
 													node = *next_node_id;
@@ -696,21 +710,21 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		println!("Grammar tree has {:?} nodes.", self.nodes.len());
 		for i in 0 .. self.nodes.len() {
 			match &self.nodes.0[i] {
-				GrammarNode::Leaf{label, var_count, typecode} => { println!("{:?}: {} {} ({} vars)", i, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(*label)), var_count); },
+				GrammarNode::Leaf{reduce, typecode} => { println!("{:?}: {} {} ({} vars)", i, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(reduce.label)), reduce.var_count); },
 				GrammarNode::Branch{cst_map, var_map} => {
 					print!("{:?}: CST={{", i);
 					for (symbol, node) in cst_map {
 						print!("{}: {:?}", as_str(nset.atom_name(*symbol)), node.next_node_id);
-						if let Some((label, var_count)) = node.leaf_label {
-							print!("({:?} {})", as_str(nset.atom_name(label)), var_count);
+						if let PairVec::One(reduce) = node.leaf_label { // TODO PairVec here, iterate
+							print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
 						}
 						print!(", ");
 					}
 					print!("}} VAR={{");
 					for (typecode, node) in var_map {
 						print!("{}: {:?}", as_str(nset.atom_name(*typecode)), node.next_node_id);
-						if let Some((label, var_count)) = node.leaf_label {
-							print!("({:?} {})", as_str(nset.atom_name(label)), var_count);
+						if let PairVec::One(reduce) = node.leaf_label { // TODO PairVec here, iterate
+							print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
 						}
 						print!(", ");
 					}
