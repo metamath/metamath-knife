@@ -57,21 +57,25 @@ impl GrammarTree {
 		self.0.len()
 	}
 
-	// Copy all branches from `from_node` to `to_node`, adding the provided leaf label on the way
-	fn copy_branches(&mut self, copy_from_node_id: NodeId, copy_to_node_id: NodeId, set_leaf_label: PairVec<Reduce>) -> Result<(), NodeId> {
-		let (from_node, to_node) = if copy_from_node_id < copy_to_node_id {
-			let slice = &mut self.0[copy_from_node_id .. copy_to_node_id+1];
-			let (first_part, second_part) = slice.split_at_mut(copy_to_node_id-copy_from_node_id);
+	// 
+	fn get_two_nodes_mut(&mut self, from_node_id: NodeId, to_node_id: NodeId) -> (&GrammarNode, &mut GrammarNode) {
+		if from_node_id < to_node_id {
+			let slice = &mut self.0[from_node_id .. to_node_id+1];
+			let (first_part, second_part) = slice.split_at_mut(to_node_id-from_node_id);
 			(&first_part[0], &mut second_part[0])
 		} else {
-			let slice = &mut self.0[copy_to_node_id .. copy_from_node_id+1];
-			let (first_part, second_part) = slice.split_at_mut(copy_from_node_id-copy_to_node_id);
+			let slice = &mut self.0[to_node_id .. from_node_id+1];
+			let (first_part, second_part) = slice.split_at_mut(from_node_id-to_node_id);
 			(&second_part[0], &mut first_part[0])
-		};
-		match (to_node, from_node) {
-			(GrammarNode::Branch { cst_map: ref mut to_cst_map,.. }, GrammarNode::Branch { cst_map,.. }) => {
+		}
+	}
+
+	// Copy all branches from `from_node` to `to_node`, adding the provided reduce on the way
+	fn copy_branches(&mut self, copy_from_node_id: NodeId, copy_to_node_id: NodeId, add_reduce: Reduce) -> Result<(), NodeId> {
+		match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
+			(GrammarNode::Branch { cst_map,.. }, GrammarNode::Branch { cst_map: ref mut to_cst_map,.. }) => {
 				for (symbol, next_node) in cst_map.iter() {
-					if let Some(conflict_next_node) = to_cst_map.insert(*symbol, next_node.with_leaf_label(set_leaf_label)) {
+					if let Some(conflict_next_node) = to_cst_map.insert(*symbol, next_node.with_reduce(add_reduce)) {
 						return Err(conflict_next_node.next_node_id);
 					}
 				}
@@ -118,8 +122,8 @@ impl NextNode {
 		NextNode { next_node_id, leaf_label: PairVec::Zero }
 	}
 	
-	fn with_leaf_label(&self, leaf_label: PairVec<Reduce>) -> Self {
-		NextNode { next_node_id: self.next_node_id, leaf_label }
+	fn with_reduce(&self, reduce: Reduce) -> Self {
+		NextNode { next_node_id: self.next_node_id, leaf_label: self.leaf_label.prepend(reduce) }
 	}
 }
 
@@ -148,6 +152,34 @@ impl Index<SymbolType> for GrammarNode {
 			panic!("Only index branch nodes!");
 		}
     }
+}
+
+impl GrammarNode {
+	/// Lists the contents of the grammar node
+	pub fn dump(&self, node_id: NodeId, nset: &Arc<Nameset>) {
+		match self {
+			GrammarNode::Leaf{reduce, typecode} => { println!("{:?}: {} {} ({} vars)", node_id, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(reduce.label)), reduce.var_count); },
+			GrammarNode::Branch{cst_map, var_map} => {
+				print!("{:?}: CST={{", node_id);
+				for (symbol, node) in cst_map {
+					print!("{}: {:?}", as_str(nset.atom_name(*symbol)), node.next_node_id);
+					for reduce in node.leaf_label.into_iter() {
+						print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
+					}
+					print!(", ");
+				}
+				print!("}} VAR={{");
+				for (typecode, node) in var_map {
+					print!("{}: {:?}", as_str(nset.atom_name(*typecode)), node.next_node_id);
+					for reduce in node.leaf_label.into_iter() {
+						print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
+					}
+					print!(", ");
+				}
+				println!("}}");
+			},
+		}
+	}
 }
 
 impl Default for Grammar {
@@ -326,23 +358,25 @@ impl Grammar {
 	/// Handle type conversion:
 	/// Go through each node and everywhere there is to_typecode(`class`), put a from_typecode(`setvar`), 
 	/// pointing to a copy of the next node with a leaf to first do a `cv`
-	fn perform_type_conversion(&mut self, from_typecode: TypeCode, to_typecode: TypeCode, label: Label) -> Result<(), Diagnostic> {
+	fn perform_type_conversion(&mut self, from_typecode: TypeCode, to_typecode: TypeCode, label: Label, nset: &Arc<Nameset>) -> Result<(), Diagnostic> {
 		let len = self.nodes.len();
 		for node_id in 0 .. len {
 			match self.nodes.get(node_id) {
 				GrammarNode::Branch { var_map, .. } => {
-					if let Some(ref_next_node_id) = var_map.get(&to_typecode) {
-						let next_node_id = ref_next_node_id.next_node_id;
+					if let Some(ref_next_node) = var_map.get(&to_typecode) {
+						let next_node_id = ref_next_node.next_node_id;
 						match var_map.get(&from_typecode) {
 							None => {
+								println!("Type Conv adding to {} node id {}", node_id, next_node_id);
+								self.dump_node(node_id, nset);
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
-									next_node_id, leaf_label: PairVec::One(Reduce::new(label, 1)),
+									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1)),
 								}));
 							},
 							Some(existing_next_node) => {
 								// A branch for the converted type already exist: add the conversion to that branch!
-								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, PairVec::One(Reduce::new(label, 1)));
+								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1));
 							},
 						}
 					}
@@ -439,8 +473,10 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		}
 	}
 
-	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, make_leaf: F) where F: Fn(Reduce) -> NextNode + Copy {
+	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, make_leaf: F) where F: Fn(Reduce) -> NextNode + Copy {
 		println!("Clone {} to {}", add_from_node_id, add_to_node_id);
+		self.dump_node(add_from_node_id, nset);
+		self.dump_node(add_to_node_id, nset);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
@@ -451,7 +487,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 				} else {
 					match self.add_branch(add_to_node_id, *symbol, *stype, None) {
 						Ok(new_next_node_id) | Err(new_next_node_id) => {
-							self.clone_branches(next_node.next_node_id, new_next_node_id, make_leaf);
+							self.clone_branches(next_node.next_node_id, new_next_node_id, nset, make_leaf);
 						},
 					}
 				}
@@ -500,7 +536,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
-		self.clone_branches(add_from_node_id, node_id, |reduce| {
+		self.clone_branches(add_from_node_id, node_id, nset, |reduce| {
 			println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
 			NextNode { 
 				next_node_id: shadowed_next_node,
@@ -595,7 +631,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 					match cst_map.get(&symbol.atom) {
 						Some(NextNode { next_node_id, leaf_label }) => {
 							// Found an atom matching one of our next nodes: First optionally REDUCE and continue
-							if let PairVec::One(reduce) = leaf_label { // TODO PairVec here, iterate
+							for reduce in leaf_label.into_iter() {
 								self.do_reduce(formula_builder, *reduce, nset);
 							}
 
@@ -616,7 +652,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 							match var_map.get(&typecode) {
 								Some(NextNode { next_node_id, leaf_label }) => {
 									// Found a sub-formula: First optionally REDUCE and continue
-									if let PairVec::One(reduce) = leaf_label { // TODO PairVec here, iterate
+									for reduce in leaf_label.into_iter() {
 										self.do_reduce(formula_builder, *reduce, nset);
 									}
 
@@ -631,7 +667,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 									match var_map_2.get(&typecode) {
 										Some(NextNode { next_node_id: next_node_id_2, leaf_label: leaf_label_2 }) => {
 											// Found a sub-formula: First optionally REDUCE and continue
-											if let PairVec::One(reduce) = leaf_label_2 { // TODO PairVec here, iterate
+											for reduce in leaf_label_2.into_iter() {
 												self.do_reduce(formula_builder, *reduce, nset);
 											}
 		
@@ -642,7 +678,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 											match var_map.get(&typecode) {
 												Some(NextNode { next_node_id, leaf_label }) => {
 													// Found a sub-formula: First optionally REDUCE and continue
-													if let PairVec::One(reduce) = leaf_label { // TODO PairVec here, iterate
+													for reduce in leaf_label.into_iter() {
 														self.do_reduce(formula_builder, *reduce, nset);
 													}
 				
@@ -705,32 +741,15 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		Ok(Some(formula_builder.build(typecode)))
 	}
 
+	fn dump_node(&self, node_id: NodeId, nset: &Arc<Nameset>) {
+		self.nodes.0[node_id].dump(node_id, nset);
+	}
+
 	/// Lists the contents of the grammar
 	pub fn dump(&self, nset: &Arc<Nameset>) {
 		println!("Grammar tree has {:?} nodes.", self.nodes.len());
 		for i in 0 .. self.nodes.len() {
-			match &self.nodes.0[i] {
-				GrammarNode::Leaf{reduce, typecode} => { println!("{:?}: {} {} ({} vars)", i, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(reduce.label)), reduce.var_count); },
-				GrammarNode::Branch{cst_map, var_map} => {
-					print!("{:?}: CST={{", i);
-					for (symbol, node) in cst_map {
-						print!("{}: {:?}", as_str(nset.atom_name(*symbol)), node.next_node_id);
-						if let PairVec::One(reduce) = node.leaf_label { // TODO PairVec here, iterate
-							print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
-						}
-						print!(", ");
-					}
-					print!("}} VAR={{");
-					for (typecode, node) in var_map {
-						print!("{}: {:?}", as_str(nset.atom_name(*typecode)), node.next_node_id);
-						if let PairVec::One(reduce) = node.leaf_label { // TODO PairVec here, iterate
-							print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
-						}
-						print!(", ");
-					}
-					println!("}}");
-				},
-			}
+			self.dump_node(i, nset);
 		}
 	}
 }
@@ -777,15 +796,18 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	    }
 	}
 
-	// Handle common prefixes
+	// Handle $j ambiguous_prefix ` ( A ` ` ( ph ` ; $)
 	let phi = nset.lookup_symbol("ph".as_bytes()).unwrap().atom;
 	let a = nset.lookup_symbol("A".as_bytes()).unwrap().atom;
 	let open_parens = nset.lookup_symbol("(".as_bytes()).unwrap().atom;
 	grammar.handle_common_prefixes(&[open_parens, a], &[open_parens, phi], nset, &mut names);
 
+	// Handle $j ambiguous_prefix ` ( A F B ` ` ( ph ` ; $)
+	grammar.handle_common_prefixes(&[open_parens, a, a, a], &[open_parens, phi], nset, &mut names);
+
 	// Handle replacement schemes
 	for (from_typecode, to_typecode, label) in type_conversions {
-		if let Err(diag) = grammar.perform_type_conversion(from_typecode, to_typecode, label) {
+		if let Err(diag) = grammar.perform_type_conversion(from_typecode, to_typecode, label, nset) {
 			//grammar.diagnostics.insert(sref.address(), diag);
 			println!("ERROR {:?}", diag); // TODO format error message!
 		}
