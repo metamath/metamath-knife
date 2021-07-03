@@ -581,27 +581,34 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		let shadowed_typecode = names.lookup_float(nset.atom_name(shadows[index])).unwrap().typecode_atom;
 		let shadowed_next_node = self.next_var_node(node_id, shadowed_typecode).expect("Shadowed prefix cannot be parsed!");
 		
-		// We note what comes after the shadowing typecode, and go to the next node
-		let shadowing_typecode = names.lookup_float(nset.atom_name(prefix[index])).unwrap().typecode_atom;
-		let add_from_node_id = self.next_var_node(self.root, shadowing_typecode).expect("Shadowing prefix cannot be parsed from root!");
-		node_id = self.next_var_node(node_id, shadowing_typecode).expect("Shadowing prefix cannot be parsed!");
+		// We note what comes after the shadowing typecode, both if we start from the prefix and if we start from the root
+		let mut add_from_node_id = self.root;
+		let mut shadowing_atom:Atom;
+		let mut shadowing_stype;
+		for symbol in &prefix[index..] {
+			let atom_name = nset.atom_name(*symbol);
+			let lookup_symbol = names.lookup_symbol(atom_name).unwrap();
+			println!("Following prefix {}, at {}", as_str(atom_name), add_from_node_id);
+			shadowing_stype = lookup_symbol.stype;
+			shadowing_atom = match shadowing_stype {
+				SymbolType::Constant => *symbol,
+				SymbolType::Variable => names.lookup_float(atom_name).unwrap().typecode_atom,
+			};
+			node_id = self.nodes.get(node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
+			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
+		}
 
-		println!("Handle common prefix node {}", node_id);
 		println!("Shadowed token: {}", as_str(nset.atom_name(shadows[index])));
 		println!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
 		println!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
-		println!("Handle shadowing next node {}, typecode {:?}", node_id, shadowing_typecode);
+		println!("Handle shadowing next node {}", node_id);
 
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
-		self.clone_branches(add_from_node_id, node_id, nset, shadowed_next_node);
-		/*|reduce| {
-			println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
-			NextNode { 
-				next_node_id: shadowed_next_node,
-				leaf_label: PairVec::One(reduce),
-			 }
-		});*/
+		match self.nodes.get(add_from_node_id) {
+			GrammarNode::Branch {..} => { self.clone_branches(add_from_node_id, node_id, nset, shadowed_next_node); }
+			GrammarNode::Leaf { reduce, .. } => { self.clone_with_reduce(shadowed_next_node, node_id, nset, *reduce); }
+		}
 
 		Ok(())
 	}
@@ -852,7 +859,7 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	}
 
 	// Handle $j ambiguous_prefix ` ( x e. A ` ` ( ph ` ; $)
-	//grammar.handle_common_prefixes(&[open_parens, x, e, a], &[open_parens, phi], nset, &mut names);
+	grammar.handle_common_prefixes(&[open_parens, x, e, a], &[open_parens, phi], nset, &mut names);
 
 	grammar.dump(nset);
 
