@@ -214,7 +214,7 @@ impl Default for Grammar {
 			nodes: GrammarTree(Vec::new()),
 			root: 0,
 			diagnostics: new_map(),
-			debug: true,
+			debug: false,
 		}
 	}
 }
@@ -544,11 +544,12 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
-				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
-					panic!("Not yet implemented!");
-				} else {
-					self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce))).expect("Double conflict!");
-				}
+				self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce))).expect("Double conflict!");
+//				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
+//					panic!("Not yet implemented!");
+//				} else {
+//					self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce))).expect("Double conflict!");
+//				}
 			}
 		}
 	}
@@ -588,14 +589,14 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		for symbol in &prefix[index..] {
 			let atom_name = nset.atom_name(*symbol);
 			let lookup_symbol = names.lookup_symbol(atom_name).unwrap();
-			println!("Following prefix {}, at {}", as_str(atom_name), add_from_node_id);
+			println!("Following prefix {}, at {} / {}", as_str(atom_name), node_id, add_from_node_id);
 			shadowing_stype = lookup_symbol.stype;
 			shadowing_atom = match shadowing_stype {
 				SymbolType::Constant => *symbol,
 				SymbolType::Variable => names.lookup_float(atom_name).unwrap().typecode_atom,
 			};
 			node_id = self.nodes.get(node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
-			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
+			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Shadowig prefix cannot be parsed!").next_node_id;
 		}
 
 		println!("Shadowed token: {}", as_str(nset.atom_name(shadows[index])));
@@ -841,11 +842,12 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	let a = nset.lookup_symbol("A".as_bytes()).unwrap().atom;
 	let x = nset.lookup_symbol("x".as_bytes()).unwrap().atom;
 	let e = nset.lookup_symbol("e.".as_bytes()).unwrap().atom;
+	let bra = nset.lookup_symbol("<.".as_bytes()).unwrap().atom;
+	let ket = nset.lookup_symbol(">.".as_bytes()).unwrap().atom;
 	let phi = nset.lookup_symbol("ph".as_bytes()).unwrap().atom;
+	let coma = nset.lookup_symbol(",".as_bytes()).unwrap().atom;
 	let open_parens = nset.lookup_symbol("(".as_bytes()).unwrap().atom;
-
-	// Handle $j ambiguous_prefix ` ( A F B ` ` ( ph ` ; $)
-	//grammar.handle_common_prefixes(&[open_parens, a, a, a], &[open_parens, phi], nset, &mut names);
+	let open_bracket = nset.lookup_symbol("{".as_bytes()).unwrap().atom;
 
 	// Handle $j ambiguous_prefix ` ( A ` ` ( ph ` ; $)
 	grammar.handle_common_prefixes(&[open_parens, a], &[open_parens, phi], nset, &mut names);
@@ -860,6 +862,12 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 
 	// Handle $j ambiguous_prefix ` ( x e. A ` ` ( ph ` ; $)
 	grammar.handle_common_prefixes(&[open_parens, x, e, a], &[open_parens, phi], nset, &mut names);
+
+	// Handle $j ambiguous_prefix ` { <. ` ` { A ` ; $)
+	grammar.handle_common_prefixes(&[open_bracket, bra], &[open_bracket, a], nset, &mut names);
+
+	// Handle $j ambiguous_prefix ` { <. <. ` ` { A ` ; $)
+	//grammar.handle_common_prefixes(&[open_bracket, bra, bra], &[open_bracket, a], nset, &mut names);
 
 	grammar.dump(nset);
 
