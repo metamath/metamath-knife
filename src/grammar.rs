@@ -73,10 +73,22 @@ impl GrammarTree {
 	// Copy all branches from `from_node` to `to_node`, adding the provided reduce on the way
 	fn copy_branches(&mut self, copy_from_node_id: NodeId, copy_to_node_id: NodeId, add_reduce: Reduce) -> Result<(), NodeId> {
 		match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
-			(GrammarNode::Branch { cst_map,.. }, GrammarNode::Branch { cst_map: ref mut to_cst_map,.. }) => {
+			// TODO here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
+			(GrammarNode::Branch { cst_map, var_map }, GrammarNode::Branch { cst_map: ref mut to_cst_map, var_map: ref mut to_var_map }) => {
 				for (symbol, next_node) in cst_map.iter() {
-					if let Some(conflict_next_node) = to_cst_map.insert(*symbol, next_node.with_reduce(add_reduce)) {
-						return Err(conflict_next_node.next_node_id);
+					if let Some(conflict_next_node) = to_cst_map.get(symbol) { // TODO later use map_try_insert #82766
+						// Skip error here, do nothing for now...
+						//return Err(conflict_next_node.next_node_id);
+					} else {
+						to_cst_map.insert(*symbol, next_node.with_reduce(add_reduce));
+					}
+				}
+				for (typecode, next_node) in var_map.iter() {
+					if let Some(conflict_next_node) = to_var_map.get(typecode) { // TODO later use map_try_insert #82766
+						// Skip error here, do nothing for now...
+						//return Err(conflict_next_node.next_node_id);
+					} else {
+						to_var_map.insert(*typecode, next_node.with_reduce(add_reduce));
 					}
 				}
 				Ok(())
@@ -155,6 +167,17 @@ impl Index<SymbolType> for GrammarNode {
 }
 
 impl GrammarNode {
+	/// Next node
+	fn next_node(&self, symbol: Symbol, stype: SymbolType) -> Option<&NextNode> {
+		match self {
+			GrammarNode::Leaf{..} => None,
+			GrammarNode::Branch{cst_map, var_map} => {
+				let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
+				map.get(&symbol)
+			}
+		}
+	}
+	
 	/// Lists the contents of the grammar node
 	pub fn dump(&self, node_id: NodeId, nset: &Arc<Nameset>) {
 		match self {
@@ -249,9 +272,9 @@ impl Grammar {
 				let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
 				match leaf {
 					Some(ref leaf_node) => {
-						match map.insert(symbol, *leaf_node) {
+						match map.get(&symbol) {
 							Some(prev_node) => Err(prev_node.next_node_id), // Error : We want to add a leaf note, but there is already a branch.
-							None => Ok(leaf_node.next_node_id),
+							None => { map.insert(symbol, *leaf_node); Ok(leaf_node.next_node_id) },
 						}
 					},
 					None => {
@@ -375,6 +398,9 @@ impl Grammar {
 								}));
 							},
 							Some(existing_next_node) => {
+								println!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
+								self.dump_node(next_node_id, nset);
+								self.dump_node(existing_next_node.next_node_id, nset);
 								// A branch for the converted type already exist: add the conversion to that branch!
 								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1));
 							},
@@ -473,23 +499,55 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		}
 	}
 
-	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, make_leaf: F) where F: Fn(Reduce) -> NextNode + Copy {
+	fn clone_branches(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, next_node_id: NodeId) { // make_leaf: F) where F: Fn(Reduce) -> NextNode + Copy {
 		println!("Clone {} to {}", add_from_node_id, add_to_node_id);
 		self.dump_node(add_from_node_id, nset);
 		self.dump_node(add_to_node_id, nset);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
-				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
-					match self.add_branch(add_to_node_id, *symbol, *stype, Some(make_leaf(*reduce))) {
-						_ => {},
+				if let GrammarNode::Leaf { reduce: r, .. } = self.nodes.get(next_node.next_node_id) {
+					let reduce = *r;
+					println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
+					match self.add_branch(add_to_node_id, *symbol, *stype, Some(NextNode { 
+						next_node_id,
+						leaf_label: PairVec::One(reduce),
+					 })) {
+						Ok(_) => {},
+						Err(conflict_node_id) => {
+							println!("Conflict Node = {}", conflict_node_id);
+							// conflict node id = 394 : CST={): 395, } VAR={}
+							// next_node_id = 16: CST={\/: 23, <->: 20, -/\: 35, /\: 26, ->: 17, \/_: 38, } VAR={}
+							// reduce = wbr 3
+							// expected result: 394 : CST={): 395, \/: (wbr 3) 23, <->: (wbr 3) 20, ...} VAR={}
+							self.clone_with_reduce(next_node_id, conflict_node_id, nset, reduce);
+						}, 
 					}
 				} else {
 					match self.add_branch(add_to_node_id, *symbol, *stype, None) {
 						Ok(new_next_node_id) | Err(new_next_node_id) => {
-							self.clone_branches(next_node.next_node_id, new_next_node_id, nset, make_leaf);
+							self.clone_branches(next_node.next_node_id, new_next_node_id, nset, next_node_id);
 						},
 					}
+				}
+			}
+		}
+	}
+
+
+	// compare this with "copy_branches"!
+	fn clone_with_reduce(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, reduce: Reduce) {
+		if add_from_node_id == add_to_node_id { return; } // nothing to clone here!
+		println!("Clone with reduce {} to {}", add_from_node_id, add_to_node_id);
+		self.dump_node(add_from_node_id, nset);
+		self.dump_node(add_to_node_id, nset);
+		for stype in &[SymbolType::Constant, SymbolType::Variable] {
+			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
+			for (symbol, next_node) in map {
+				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
+					panic!("Not yet implemented!");
+				} else {
+					self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce))).expect("Double conflict!");
 				}
 			}
 		}
@@ -536,38 +594,15 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
-		self.clone_branches(add_from_node_id, node_id, nset, |reduce| {
+		self.clone_branches(add_from_node_id, node_id, nset, shadowed_next_node);
+		/*|reduce| {
 			println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
 			NextNode { 
 				next_node_id: shadowed_next_node,
 				leaf_label: PairVec::One(reduce),
 			 }
-		});
+		});*/
 
-//		match &(*self.nodes.get(add_from_node_id)).clone() {
-//			GrammarNode::Branch { cst_map, var_map } => {
-//				// here we need to ADD to node_id / cst_map and var_map
-//				for (symbol, next_node) in cst_map {
-//					match self.add_branch(node_id, *symbol, SymbolType::Constant, None) {
-//						Ok(new_next_node) | Err(new_next_node) => {
-//							
-//							/* TBC */
-//						},
-//					}
-//				}
-//				for (typecode, next_node) in var_map {
-//					match self.add_branch(node_id, *typecode, SymbolType::Variable, None) {
-//						Ok(new_next_node) | Err(new_next_node) => {
-//							/* TBC */
-//						},
-//					}
-//				}
-//			},
-//			_ => {
-//				panic!("Leaf reached while parsing shadowing prefix!");
-//			}
-//		}
-		
 		Ok(())
 	}
 
@@ -796,14 +831,17 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	    }
 	}
 
-	// Handle $j ambiguous_prefix ` ( A ` ` ( ph ` ; $)
-	let phi = nset.lookup_symbol("ph".as_bytes()).unwrap().atom;
 	let a = nset.lookup_symbol("A".as_bytes()).unwrap().atom;
+	let x = nset.lookup_symbol("x".as_bytes()).unwrap().atom;
+	let e = nset.lookup_symbol("e.".as_bytes()).unwrap().atom;
+	let phi = nset.lookup_symbol("ph".as_bytes()).unwrap().atom;
 	let open_parens = nset.lookup_symbol("(".as_bytes()).unwrap().atom;
-	grammar.handle_common_prefixes(&[open_parens, a], &[open_parens, phi], nset, &mut names);
 
 	// Handle $j ambiguous_prefix ` ( A F B ` ` ( ph ` ; $)
-	grammar.handle_common_prefixes(&[open_parens, a, a, a], &[open_parens, phi], nset, &mut names);
+	//grammar.handle_common_prefixes(&[open_parens, a, a, a], &[open_parens, phi], nset, &mut names);
+
+	// Handle $j ambiguous_prefix ` ( A ` ` ( ph ` ; $)
+	grammar.handle_common_prefixes(&[open_parens, a], &[open_parens, phi], nset, &mut names);
 
 	// Handle replacement schemes
 	for (from_typecode, to_typecode, label) in type_conversions {
@@ -812,6 +850,9 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 			println!("ERROR {:?}", diag); // TODO format error message!
 		}
 	}
+
+	// Handle $j ambiguous_prefix ` ( x e. A ` ` ( ph ` ; $)
+	//grammar.handle_common_prefixes(&[open_parens, x, e, a], &[open_parens, phi], nset, &mut names);
 
 	grammar.dump(nset);
 
