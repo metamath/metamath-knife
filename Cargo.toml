@@ -14,8 +14,12 @@ filetime = "0.1.10"
 fnv = "1.0.7"
 regex = "0.1.71"
 
+# Optional dependencies
+dot-writer = { version = "0.1.2", optional = true }
+
 [features]
 sysalloc = []
+dot = ["dot-writer"]
 
 [profile]
 

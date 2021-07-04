@@ -30,7 +30,30 @@ use crate::util::PairVec;
 use crate::util::HashMap;
 use crate::util::new_map;
 
+#[cfg(feature = "dot")]
+use dot_writer::{Attributes, Color, DotWriter, Shape};
+#[cfg(feature = "dot")]
+use crate::export::ExportError;
+#[cfg(feature = "dot")]
+use std::fmt::Write;
+#[cfg(feature = "dot")]
+use std::fs::File;
+
 type NodeId = usize;
+
+/// For the labels in DOT format
+#[cfg(feature = "dot")]
+fn as_string(node_id: NodeId) -> String {
+	format!("{}", node_id)
+}
+
+/// For the labels in DOT format
+#[cfg(feature = "dot")]
+fn escape(str: &str) -> String {
+	str
+		.replace("\\","\\\\ ")
+		.replace("\"","\\\"")
+}
 
 struct GrammarTree(Vec<GrammarNode>);
 
@@ -794,6 +817,50 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		for i in 0 .. self.nodes.len() {
 			self.dump_node(i, nset);
 		}
+	}
+	
+    #[cfg(feature = "dot")]
+	pub fn export_dot(&self, nset: &Arc<Nameset>, write: &mut File) -> Result<(), ExportError> {
+		let mut dot_writer = DotWriter::from(write);
+		let mut digraph = dot_writer.digraph();
+		for node_id in 0 .. self.nodes.len() {
+			match &self.nodes.0[node_id] {
+				GrammarNode::Leaf{reduce, typecode} => { 
+					digraph
+						.node_named(as_string(node_id))
+						.set_shape(Shape::Mdiamond)
+						.set_label(format!("{} {}", node_id, escape(as_str(nset.atom_name(reduce.label)))).as_str()); // , escape(as_str(nset.atom_name(*typecode))), reduce.var_count
+					},
+				GrammarNode::Branch{cst_map, var_map} => {
+					for (symbol, node) in cst_map {
+						let mut buf = String::new();
+						for reduce in node.leaf_label.into_iter() {
+							buf.write_fmt(format_args!("{}/", as_str(nset.atom_name(reduce.label)))).unwrap();
+						}
+						buf.write_str(escape(as_str(nset.atom_name(*symbol))).as_str());
+						digraph
+							.edge(as_string(node_id), as_string(node.next_node_id))
+							.attributes()
+							.set_label(buf.as_str())
+							.set_font("Courier");
+					}
+					for (typecode, node) in var_map {
+						let mut buf = String::new();
+						buf.write_str(escape(as_str(nset.atom_name(*typecode))).as_str());
+						for reduce in node.leaf_label.into_iter() {
+							buf.write_fmt(format_args!("/{}", as_str(nset.atom_name(reduce.label)))).unwrap();
+						}
+						digraph
+							.edge(as_string(node_id), as_string(node.next_node_id))
+							.attributes()
+							.set_label(buf.as_str())
+							.set_color(Color::Blue)
+							.set_font_color(Color::Blue);
+					}
+				},
+			}
+		}
+		Ok(())
 	}
 }
 

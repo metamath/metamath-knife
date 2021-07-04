@@ -64,6 +64,7 @@ fn main() {
         .arg(Arg::with_name("parse-stmt").help("Parse statements according to the databases grammar").long("parse-stmt").short("p"))
         .arg(Arg::with_name("print-grammar").help("Print the database's grammar").long("print-grammar").short("G"))
         .arg(Arg::with_name("print-formula").help("Parse all statements according to the database's grammar").long("print-formula").short("F"))
+        .arg(Arg::with_name("export-grammar-dot").help("Export the database's grammar in Graphviz DOT format for visualization").long("export-grammar-dot").short("E"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -99,6 +100,7 @@ fn main() {
         .expect("validator should check this");
     options.incremental |= matches.is_present("grammar") 
 		|| matches.is_present("parse-stmt") 
+		|| matches.is_present("export-grammar-dot") 
 		|| matches.is_present("print-grammar") 
 		|| matches.is_present("print-formula");
 
@@ -148,6 +150,14 @@ fn main() {
 
         if matches.is_present("print-grammar") {
             db.print_grammar();
+        }
+
+        if matches.is_present("export-grammar-dot") {
+			#[cfg(feature = "dot")]
+            db.export_grammar_dot();
+
+			#[cfg(not(feature = "dot"))]
+			println!("The program was not compiled with the `dot` feature. This is required to export in the DOT format.");
         }
 
         if matches.is_present("print-formula") {
