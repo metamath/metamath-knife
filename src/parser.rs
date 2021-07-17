@@ -411,6 +411,9 @@ pub struct HeadingDef {
     pub level: HeadingLevel,
 }
 
+/// Extra information residing in a $j comment
+pub type Command = Vec<Token>;
+
 /// A parsed segment, containing parsed statement data and some extractions.
 ///
 /// This is the main result of the parse which is provided to `segment_set`,
@@ -449,6 +452,8 @@ pub struct Segment {
     pub floats: Vec<FloatDef>,
     /// Top-level headings extracted for outline
     pub outline: Vec<HeadingDef>,
+	/// Parser commands provided in $j additional information comments.
+	pub commands: Vec<Command>,
 }
 
 /// A pointer to a segment which knows its identity.
@@ -519,6 +524,9 @@ pub enum StatementType {
     TypesettingComment,
     /// A comment corresponding to the head of a chapter or section in the outline
     HeadingComment(HeadingLevel),
+	/// A comment which starts with a `$j` token and must be interpreted
+	/// specially by the grammar parser
+	AdditionalInfoComment,
     /// A `$[` directive; we process these as statements, and disallow them
     /// inside other statements, which violates the published Metamath spec but
     /// is allowed behavior as an erratum.
@@ -1081,6 +1089,7 @@ impl<'a> Scanner<'a> {
                 let stype = match ctype {
                     CommentType::Typesetting => TypesettingComment,
                     CommentType::Heading(level) => HeadingComment(level),
+					CommentType::Extra => AdditionalInfoComment,
                     _ => Comment,
                 };
                 return Some(self.out_statement(stype, Span::new2(ftok.start, ftok.start)));
@@ -1381,6 +1390,7 @@ impl<'a> Scanner<'a> {
             diagnostics: Vec::new(),
             span_pool: Vec::new(),
             outline: Vec::new(),
+			commands: Vec::new(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -1526,6 +1536,18 @@ fn collect_definitions(seg: &mut Segment) {
 					level 
 				});
             }
+			AdditionalInfoComment => {
+				match commands(buf, stmt.span.start) {
+					Ok(commands) => {
+						for command in commands {
+							seg.commands.push(command);
+						}
+					},
+					Err(diag) => {
+						seg.diagnostics.push((index, diag));	
+					},
+				}
+			}
             _ => {}
         }
     }
@@ -1571,6 +1593,103 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
         eol -= 1;
     }
 	&buffer[index..eol]
+}
+
+/// Extract the parser commands out of a $j "additional information" comment
+fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter, Diagnostic> {
+	let mut iter = CommandIter { buffer, index: pos as usize };
+	iter.skip_white_spaces();
+	iter.expect(b'$')?;
+	iter.expect(b'(')?;
+	iter.skip_white_spaces();
+	iter.expect(b'$')?;
+	iter.expect(b'j')?;
+	Ok(iter)
+}
+
+struct CommandIter<'a> {
+    buffer: &'a[u8],
+    index: usize,
+}
+
+impl CommandIter<'_> {
+	fn has_more(&self) -> bool {
+		self.index < self.buffer.len()
+	}
+	
+	fn next_char(&self) -> u8 {
+		self.buffer[self.index]
+	}
+	
+	fn skip_white_spaces(&mut self) {
+		// Skip any white spaces and line feeds
+	    while self.has_more() && (self.next_char() == b' ' || self.next_char() == b'\n' || self.next_char() == b'\r') {
+		    self.index += 1;
+		}
+	}
+	
+	fn expect(&mut self, c: u8) -> Result<(), Diagnostic> {
+		if !self.has_more() {
+	        let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
+	        Err(Diagnostic::UnclosedComment(cspan))
+		} else {
+			if self.next_char() != c {
+		        let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
+				Err(Diagnostic::MalformedAdditionalInfo(cspan))
+			} else {
+				self.index += 1;
+				Ok(())
+			}
+		}
+	}
+}
+
+impl Iterator for CommandIter<'_> {
+    type Item = Command;
+
+    fn next(&mut self) -> Option<Self::Item> {
+	    while self.has_more() {
+			match self.next_char() {
+				b' ' | b'\n' | b'\r' => {},           // Skip white spaces and line feeds
+				b'$' => { return None; },             // End upon comment closing, $)
+				_ => { break; },                      // Else stop
+			}	
+			self.index += 1;
+		}
+
+		let mut command = Vec::new();
+	    while self.has_more() {
+			let quoted = self.next_char() == b'\'';
+			let token_start = self.index;
+		    while self.has_more() {
+				match self.next_char() {
+					b' ' | b'\n' | b'\r' | b';' => { if !quoted { break; } }, // Stop if unquoted white spaces, line feeds or semicolon
+					b'\'' => {                                             // Stop if quoted and end quote
+						if quoted && token_start != self.index {
+							self.index += 1; 
+							break;
+						}
+					},
+					_ => {},                              				   // Else continue
+				}
+				self.index += 1;
+			}
+			
+			// New token found - ignore quotes if any
+			let token = if quoted { &self.buffer[token_start+1..self.index-1] } else { &self.buffer[token_start..self.index] };
+			command.push(copy_token(token));
+
+		    while self.has_more() {
+				match self.next_char() {
+					b' ' | b'\n' | b'\r' => {},                            // Skip white spaces and line feeds
+					b';' => { self.index += 1; return Some(command); },    // Stop if unquoted semicolon $)
+					_ => { break; }                                        // Stop otherwise
+				}
+				self.index += 1;
+			}
+		}
+		None
+    }
 }
 
 /// Slightly set.mm specific hack to extract a section name from a byte buffer.

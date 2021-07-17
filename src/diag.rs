@@ -75,6 +75,7 @@ pub enum Diagnostic {
     IoError(String),
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
+	MalformedAdditionalInfo(Span),
     MidStatementCommentMarker(Span),
     MissingLabel,
     MissingProof(Span),
@@ -351,6 +352,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         }
         LocalLabelDuplicate(span) => {
             info.s = "Local label duplicates another label in the same proof";
+            ann(&mut info, span);
+        }
+        MalformedAdditionalInfo(span) => {
+            info.s = "Malformed additional information";
             ann(&mut info, span);
         }
         MidStatementCommentMarker(marker) => {

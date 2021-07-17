@@ -243,6 +243,13 @@ impl Default for Grammar {
 }
 
 impl Grammar {
+	/// Initializes the grammar using the parser commands
+	pub fn initialize(&mut self, sset: &Arc<SegmentSet>) {
+		for command in sset.parser_commands() {
+			println!("'{}'", as_str(&command[0]));
+		}
+	}
+
     /// Returns a list of errors that were generated during the grammar
     /// computation.
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
@@ -885,6 +892,8 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	grammar.typecodes.push(wff_type);
 	grammar.typecodes.push(setvar_type);
 	grammar.typecodes.push(class_type);
+
+	//grammar.initialize(sset);
 
 	grammar.root = grammar.nodes.create_branch();
 

@@ -54,6 +54,7 @@ use crate::database::Promise;
 use crate::diag::Diagnostic;
 use filetime::FileTime;
 use crate::parser;
+use crate::parser::Command;
 use crate::parser::Comparer;
 use crate::parser::Segment;
 use crate::parser::SegmentId;
@@ -223,6 +224,15 @@ impl SegmentSet {
         }
         out
     }
+
+	/// Returns the commands parsed from the $j comments
+	pub fn parser_commands(&self) -> Vec<Command> {
+        let mut out = Vec::new();
+        for sref in self.segments() {
+			out.extend(sref.commands.clone());
+        }
+        out
+	}
 
     /// Replaces the content of the `SegmentSet` with data loaded from disk
     /// files or memory.
