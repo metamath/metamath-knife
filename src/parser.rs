@@ -1650,7 +1650,7 @@ impl Iterator for CommandIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
 	    while self.has_more() {
 			match self.next_char() {
-				b' ' | b'\n' | b'\r' => {},           // Skip white spaces and line feeds
+				b' ' | b'\t' | b'\n' | b'\r' => {},   // Skip white spaces and line feeds
 				b'$' => { return None; },             // End upon comment closing, $)
 				_ => { break; },                      // Else stop
 			}	
@@ -1663,7 +1663,7 @@ impl Iterator for CommandIter<'_> {
 			let token_start = self.index;
 		    while self.has_more() {
 				match self.next_char() {
-					b' ' | b'\n' | b'\r' | b';' => { if !quoted { break; } }, // Stop if unquoted white spaces, line feeds or semicolon
+					b' ' | b'\t' | b'\n' | b'\r' | b';' => { if !quoted { break; } }, // Stop if unquoted white spaces, line feeds or semicolon
 					b'\'' => {                                             // Stop if quoted and end quote
 						if quoted && token_start != self.index {
 							self.index += 1; 
@@ -1681,7 +1681,7 @@ impl Iterator for CommandIter<'_> {
 
 		    while self.has_more() {
 				match self.next_char() {
-					b' ' | b'\n' | b'\r' => {},                            // Skip white spaces and line feeds
+					b' ' | b'\t' | b'\n' | b'\r' => {},                    // Skip white spaces and line feeds
 					b';' => { self.index += 1; return Some(command); },    // Stop if unquoted semicolon $)
 					_ => { break; }                                        // Stop otherwise
 				}
