@@ -258,7 +258,6 @@ impl Grammar {
 				}
 			}
 		}
-		self.root = self.nodes.create_branch();
 	}
 
     /// Returns a list of errors that were generated during the grammar
@@ -637,7 +636,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 				SymbolType::Variable => names.lookup_float(atom_name).unwrap().typecode_atom,
 			};
 			node_id = self.nodes.get(node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
-			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Shadowig prefix cannot be parsed!").next_node_id;
+			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Shadowing prefix cannot be parsed!").next_node_id;
 		}
 
 		println!("Shadowed token: {}", as_str(nset.atom_name(shadows[index])));
@@ -655,6 +654,14 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		Ok(())
 	}
 
+//  $( Warn the parser about which particular formula prefixes are ambiguous $)
+//  $( $j ambiguous_prefix ( A   =>   ( ph ;
+//        type_conversions;
+//        ambiguous_prefix ( x e. A   =>   ( ph ;
+//        ambiguous_prefix { <.   =>   { A ;
+//        ambiguous_prefixu { <. <.   =>   { A ;
+//  $)
+
 	/// Bake the lookahead into the grammar automaton.
 	/// This handles casses like the ambiguity between ` ( x e. A /\ ph ) ` and ` ( x e. A |-> B ) `
 	/// which share a common prefix, and can only be distinguished after the 5th token is read.
@@ -662,20 +669,42 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 	/// which lead to partial reduce. 
 	/// In the example case, at the 5th token "/\", this method modifies the grammar tree 
 	/// by adding the optional "wcel" reduce to the corresponding tree node.
-	fn bake_in_lookahead(&mut self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) {
-		let mut tokens = sref.math_iter().peekable();
-
-		// Atom for this axiom's label.
-		let _this_label = names.lookup_label(sref.label()).unwrap().atom;
-		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
-		let _this_typecode = nset.get_atom(tokens.next().unwrap().slice);
-
-		// In case of a non-syntax axiom, skip it.
-		if _this_typecode == self.provable_type { return; }
-
-		// Search a sub-string of this syntax axiom which is parseable itself.
-		
-		
+	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &Vec<(TypeCode,TypeCode,Label)>) {
+		for command in sset.parser_commands() {
+			assert!(command.len() > 0, "Empty parser command!");
+			//println!("{} ", as_str(&command[0]));
+			if &command[0].as_ref() == b"syntax" {
+				if command.len() == 4 && &command[2].as_ref() == b"as" {
+					// syntax '|-' as 'wff';
+					self.provable_type = nset.lookup_symbol(&command[1]).unwrap().atom;
+					self.typecodes.push(nset.lookup_symbol(&command[3]).unwrap().atom);
+				} else if command.len() == 2 {
+					// syntax 'setvar';
+					self.typecodes.push(nset.lookup_symbol(&command[1]).unwrap().atom);
+				}
+			}
+			if &command[0].as_ref() == b"ambiguous_prefix" {
+				let mut prefix = vec![];
+				let mut shadows = vec![];
+				let mut vec = &mut prefix;
+				for token in &command[1..] {
+					if token.as_ref() == b"=>" { vec = &mut shadows;
+					} else {
+						vec.push(nset.lookup_symbol(token.as_ref()).unwrap().atom);
+					}
+				}
+				self.handle_common_prefixes(prefix.as_slice(), shadows.as_slice(), nset, names);
+			}
+			if &command[0].as_ref() == b"type_conversions" {
+				// Handle replacement schemes
+				for (from_typecode, to_typecode, label) in type_conversions {
+					if let Err(diag) = self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset) {
+						//self.diagnostics.insert(sref.address(), diag);
+						println!("ERROR {:?}", diag); // TODO format error message!
+					}
+				}
+			}
+		}
 	}
 
 	fn do_shift(&self, sref: &StatementRef, ix: &mut TokenIndex, nset: &Arc<Nameset>, names: &mut NameReader) {
@@ -893,6 +922,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>) {
 	// Read information about the grammar from the parser commands
 	grammar.initialize(sset, nset);
+	grammar.root = grammar.nodes.create_branch();
 
 	let mut names = NameReader::new(nset);
 	let mut type_conversions = Vec::new();
@@ -911,48 +941,8 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	    }
 	}
 
-	let a = nset.lookup_symbol("A".as_bytes()).unwrap().atom;
-	let x = nset.lookup_symbol("x".as_bytes()).unwrap().atom;
-	let e = nset.lookup_symbol("e.".as_bytes()).unwrap().atom;
-	let bra = nset.lookup_symbol("<.".as_bytes()).unwrap().atom;
-	let ket = nset.lookup_symbol(">.".as_bytes()).unwrap().atom;
-	let phi = nset.lookup_symbol("ph".as_bytes()).unwrap().atom;
-	let coma = nset.lookup_symbol(",".as_bytes()).unwrap().atom;
-	let open_parens = nset.lookup_symbol("(".as_bytes()).unwrap().atom;
-	let open_bracket = nset.lookup_symbol("{".as_bytes()).unwrap().atom;
-
-	// Handle $j ambiguous_prefix ` ( A ` ` ( ph ` ; $)
-	grammar.handle_common_prefixes(&[open_parens, a], &[open_parens, phi], nset, &mut names);
-
-	// Handle replacement schemes
-	for (from_typecode, to_typecode, label) in type_conversions {
-		if let Err(diag) = grammar.perform_type_conversion(from_typecode, to_typecode, label, nset) {
-			//grammar.diagnostics.insert(sref.address(), diag);
-			println!("ERROR {:?}", diag); // TODO format error message!
-		}
-	}
-
-	// Handle $j ambiguous_prefix ` ( x e. A ` ` ( ph ` ; $)
-	grammar.handle_common_prefixes(&[open_parens, x, e, a], &[open_parens, phi], nset, &mut names);
-
-	// Handle $j ambiguous_prefix ` { <. ` ` { A ` ; $)
-	grammar.handle_common_prefixes(&[open_bracket, bra], &[open_bracket, a], nset, &mut names);
-
-	// Handle $j ambiguous_prefix ` { <. <. ` ` { A ` ; $)
-	//grammar.handle_common_prefixes(&[open_bracket, bra, bra], &[open_bracket, a], nset, &mut names);
-
+	grammar.handle_commands(sset, nset, &mut names, &type_conversions);
 	grammar.dump(nset);
-
-	let segments = sset.segments();
-	assert!(segments.len() > 0, "Parse returned no segment!");
-    for segment in segments.iter() {
-	    for sref in *segment {
-			match sref.statement_type() {
-		        StatementType::Axiom => grammar.bake_in_lookahead(&sref, nset, &mut names),
-				_ => {},
-			}
-	    }
-	}
 }
 
 /** The result of parsing all statements with the language grammar */
