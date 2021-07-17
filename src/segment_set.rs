@@ -229,6 +229,7 @@ impl SegmentSet {
 	pub fn parser_commands(&self) -> Vec<Command> {
         let mut out = Vec::new();
         for sref in self.segments() {
+			// Copying here is lazy and inefficient, but probably not deadly for performance
 			out.extend(sref.commands.clone());
         }
         out

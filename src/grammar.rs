@@ -244,10 +244,21 @@ impl Default for Grammar {
 
 impl Grammar {
 	/// Initializes the grammar using the parser commands
-	pub fn initialize(&mut self, sset: &Arc<SegmentSet>) {
+	pub fn initialize(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
 		for command in sset.parser_commands() {
-			println!("'{}'", as_str(&command[0]));
+			assert!(command.len() > 0, "Empty parser command!");
+			if &command[0].as_ref() == b"syntax" {
+				if command.len() == 4 && &command[2].as_ref() == b"as" {
+					// syntax '|-' as 'wff';
+					self.provable_type = nset.lookup_symbol(&command[1]).unwrap().atom;
+					self.typecodes.push(nset.lookup_symbol(&command[3]).unwrap().atom);
+				} else if command.len() == 2 {
+					// syntax 'setvar';
+					self.typecodes.push(nset.lookup_symbol(&command[1]).unwrap().atom);
+				}
+			}
 		}
+		self.root = self.nodes.create_branch();
 	}
 
     /// Returns a list of errors that were generated during the grammar
@@ -880,25 +891,10 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 /// The same applies for ` ( <. x , y >. e. A |-> B ) ` and so on.
 /// 
 pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>) {
-	// TODO make this configurable, or read in $j statements
-	let provable_type = nset.lookup_symbol("|-".as_bytes()).unwrap().atom;
-	let wff_type = nset.lookup_symbol("wff".as_bytes()).unwrap().atom;
-	let setvar_type = nset.lookup_symbol("setvar".as_bytes()).unwrap().atom;
-	let class_type = nset.lookup_symbol("class".as_bytes()).unwrap().atom;
-	grammar.provable_type = provable_type; 
-	grammar.logic_type = wff_type;
-
-	// TODO construct this from the Float $f statements
-	grammar.typecodes.push(wff_type);
-	grammar.typecodes.push(setvar_type);
-	grammar.typecodes.push(class_type);
-
-	//grammar.initialize(sset);
-
-	grammar.root = grammar.nodes.create_branch();
+	// Read information about the grammar from the parser commands
+	grammar.initialize(sset, nset);
 
 	let mut names = NameReader::new(nset);
-
 	let mut type_conversions = Vec::new();
 
 	let segments = sset.segments();
