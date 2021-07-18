@@ -103,6 +103,7 @@ impl GrammarTree {
 					if let Some(conflict_next_node) = to_cst_map.get(symbol) { // TODO later use map_try_insert #82766
 						// Skip error here, do nothing for now...
 						//return Err(conflict_next_node.next_node_id);
+						//panic!("Conflict when copying constant grammar branches!");
 					} else {
 						to_cst_map.insert(*symbol, next_node.with_reduce(add_reduce));
 					}
@@ -111,6 +112,7 @@ impl GrammarTree {
 					if let Some(conflict_next_node) = to_var_map.get(typecode) { // TODO later use map_try_insert #82766
 						// Skip error here, do nothing for now...
 						//return Err(conflict_next_node.next_node_id);
+						//panic!("Conflict when copying variable grammar branches!");
 					} else {
 						to_var_map.insert(*typecode, next_node.with_reduce(add_reduce));
 					}
@@ -156,6 +158,10 @@ struct NextNode {
 impl NextNode {
 	fn new(next_node_id: NodeId) -> Self {
 		NextNode { next_node_id, leaf_label: PairVec::Zero }
+	}
+	
+	fn new_with_reduce(next_node_id: NodeId, leaf_label: PairVec<Reduce>) -> Self {
+		NextNode { next_node_id, leaf_label }
 	}
 	
 	fn with_reduce(&self, reduce: Reduce) -> Self {
@@ -306,7 +312,8 @@ impl Grammar {
 	}
 	
 	/// Adds the symbol to the branch, and returns the next node
-	fn add_branch(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, leaf: Option<NextNode>) -> Result<NodeId, NodeId> {
+	// Warning - this is currently not very well done - if a leaf is provided, or if the branch already exists, then add_reduce is not used.
+	fn add_branch(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, leaf: Option<NextNode>, add_reduce: PairVec<Reduce>) -> Result<NodeId, NodeId> {
 		match self.nodes.get_mut(to_node) {
 			GrammarNode::Leaf{..} => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
 			GrammarNode::Branch{cst_map, var_map} => {
@@ -325,7 +332,7 @@ impl Grammar {
 								let new_node_id = self.nodes.create_branch();
 								if let GrammarNode::Branch{cst_map, var_map} = self.nodes.get_mut(to_node) {
 									let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
-									map.insert(symbol, NextNode::new(new_node_id));
+									map.insert(symbol, NextNode::new_with_reduce(new_node_id, add_reduce));
 									Ok(new_node_id)
 								} else {
 									panic!("Shall not happen!");
@@ -378,7 +385,7 @@ impl Grammar {
 				Some(_) => None,
 				None => Some(NextNode::new(self.nodes.create_leaf(Reduce::new(this_label, var_count), this_typecode))),
 			};
-			match self.add_branch(node, atom, symbol.stype, next_leaf) {
+			match self.add_branch(node, atom, symbol.stype, next_leaf, PairVec::Zero) {
 				Ok(next_node) => { node = next_node; },
 				Err(conflict_node) => { return Err(self.ambiguous(conflict_node, nset)); },
 			}
@@ -435,8 +442,8 @@ impl Grammar {
 								self.dump_node(node_id, nset);
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
-									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1)),
-								}));
+									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1))
+								}), PairVec::Zero);
 							},
 							Some(existing_next_node) => {
 								println!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
@@ -464,20 +471,22 @@ impl Grammar {
 		}
 	}
 
-	fn clone_branches(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, next_node_id: NodeId) { // make_leaf: F) where F: Fn(Reduce) -> NextNode + Copy {
+	/// Recursively clone the whole grammar tree starting from add_from_node_id
+	//  This implementation may needlessly duplicate some nodes: it creates new ones everytime, not checking if a duplicate was already created and could be reused.
+	//  A cleverer implementation would store the duplicates created, for example in a hashmap, and reuse them.
+	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, make_next: F) where F: Fn(Reduce, TypeCode) -> NextNode + Copy {
 		println!("Clone {} to {}", add_from_node_id, add_to_node_id);
 		self.dump_node(add_from_node_id, nset);
 		self.dump_node(add_to_node_id, nset);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
-				if let GrammarNode::Leaf { reduce: r, .. } = self.nodes.get(next_node.next_node_id) {
+				if next_node.next_node_id == add_to_node_id { continue; } // avoid infinite recursion
+				if let GrammarNode::Leaf { reduce: r, typecode } = self.nodes.get(next_node.next_node_id) {
 					let reduce = *r;
 					println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
-					match self.add_branch(add_to_node_id, *symbol, *stype, Some(NextNode { 
-						next_node_id,
-						leaf_label: PairVec::One(reduce),
-					 })) {
+					let final_node = make_next(*r, *typecode);
+					match self.add_branch(add_to_node_id, *symbol, *stype, Some(final_node), PairVec::Zero) {
 						Ok(_) => {},
 						Err(conflict_node_id) => {
 							println!("Conflict Node = {}", conflict_node_id);
@@ -485,20 +494,19 @@ impl Grammar {
 							// next_node_id = 16: CST={\/: 23, <->: 20, -/\: 35, /\: 26, ->: 17, \/_: 38, } VAR={}
 							// reduce = wbr 3
 							// expected result: 394 : CST={): 395, \/: (wbr 3) 23, <->: (wbr 3) 20, ...} VAR={}
-							self.clone_with_reduce(next_node_id, conflict_node_id, nset, reduce);
+							self.clone_with_reduce(final_node.next_node_id, conflict_node_id, nset, reduce);
 						}, 
 					}
 				} else {
-					match self.add_branch(add_to_node_id, *symbol, *stype, None) {
+					match self.add_branch(add_to_node_id, *symbol, *stype, None, next_node.leaf_label) {
 						Ok(new_next_node_id) | Err(new_next_node_id) => {
-							self.clone_branches(next_node.next_node_id, new_next_node_id, nset, next_node_id);
+							self.clone_branches(next_node.next_node_id, new_next_node_id, nset, make_next);
 						},
 					}
 				}
 			}
 		}
 	}
-
 
 	// compare this with "copy_branches"!
 	fn clone_with_reduce(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, reduce: Reduce) {
@@ -509,7 +517,7 @@ impl Grammar {
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
-				self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce))).expect("Double conflict!");
+				self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce)), PairVec::Zero).expect("Double conflict!");
 //				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
 //					panic!("Not yet implemented!");
 //				} else {
@@ -517,6 +525,18 @@ impl Grammar {
 //				}
 			}
 		}
+	}
+
+	/// Expand the tree at the given node, for the given symbol.  This means cloning/inserting from the root tree at that symbol, until a given typecode is obtained, into the given node
+	/// This is used in order to ensure that a given sequence is in the grammar tree, like `<. <.`, which does not correspond to a single syntax axiom
+	fn expand_tree(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, nset: &Arc<Nameset>) -> NodeId {
+		let next_node_id_from_root = self.nodes.get(self.root).next_node(symbol, stype).expect("Expanded formula cannot be parsed from root node!").next_node_id;
+		let node_from_root = self.nodes.get(next_node_id_from_root).clone();
+		let new_node_id = self.add_branch(to_node, symbol, stype, None, PairVec::Zero).unwrap();
+		self.clone_branches(next_node_id_from_root, new_node_id, nset, |r,t| {
+			node_from_root.next_node(t, SymbolType::Variable).expect("Expanded node's typecode not available!").with_reduce(r)
+		});
+		self.nodes.get(to_node).next_node(symbol, stype).unwrap().next_node_id
 	}
 
 	/// Handle common prefixes. 
@@ -562,7 +582,10 @@ impl Grammar {
 				SymbolType::Variable => names.lookup_float(token).unwrap().typecode_atom,
 			};
 			node_id = self.nodes.get(node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
-			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Shadowing prefix cannot be parsed!").next_node_id;
+			add_from_node_id = match self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype) {
+				Some(next_node) => { next_node.next_node_id },
+				None => { self.expand_tree(add_from_node_id, shadowing_atom, shadowing_stype, nset) },
+			}
 		}
 
 		println!("Shadowed token: {}", as_str(&shadows[index]));
@@ -573,7 +596,7 @@ impl Grammar {
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
 		match self.nodes.get(add_from_node_id) {
-			GrammarNode::Branch {..} => { self.clone_branches(add_from_node_id, node_id, nset, shadowed_next_node); }
+			GrammarNode::Branch {..} => { self.clone_branches(add_from_node_id, node_id, nset, |r,_| { NextNode { next_node_id: shadowed_next_node, leaf_label: PairVec::One(r) }}); }
 			GrammarNode::Leaf { reduce, .. } => { self.clone_with_reduce(shadowed_next_node, node_id, nset, *reduce); }
 		}
 
@@ -585,7 +608,7 @@ impl Grammar {
 //        type_conversions;
 //        ambiguous_prefix ( x e. A   =>   ( ph ;
 //        ambiguous_prefix { <.   =>   { A ;
-//        ambiguous_prefixu { <. <.   =>   { A ;
+//        ambiguous_prefix { <. <.   =>   { A ;
 //  $)
 
 	/// Bake the lookahead into the grammar automaton.
@@ -611,7 +634,7 @@ impl Grammar {
 			}
 			// Handle Ambiguous prefix commands
 			if &command[0].as_ref() == b"ambiguous_prefix" {
-				let mut split_index = command.iter().position(|t| t.as_ref() == b"=>").expect("'=>' not present in 'ambiguous_prefix' command!");
+				let split_index = command.iter().position(|t| t.as_ref() == b"=>").expect("'=>' not present in 'ambiguous_prefix' command!");
 				let (prefix, shadows) = command.split_at(split_index);
 				self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names)?;
 			}
