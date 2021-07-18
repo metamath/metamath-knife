@@ -15,6 +15,7 @@ use crate::parser::StatementAddress;
 use crate::parser::StatementType;
 use crate::parser::StatementRef;
 use crate::parser::SymbolType;
+use crate::parser::Token;
 use crate::parser::TokenIndex;
 use crate::parser::as_str;
 use crate::parser::copy_token;
@@ -453,82 +454,6 @@ impl Grammar {
 		Ok(())
 	}
 
-					
-/*
-						let add_to_node_id = match var_map.get(&from_typecode) {
-							None => self.add_branch(node_id, from_typecode, SymbolType::Variable, None),
-							Some(existing_next_node_id) => Ok(existing_next_node_id.next_node_id),
-						}.unwrap();
-						self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
-
-
-
-
-						match self.nodes.get2(next_node_id, add_to_node_id) {
-							(GrammarNode::Branch { cst_map, leaf_label: None,.. }, GrammarNode::Branch { cst_map: ref mut to_cst_map, leaf_label: ref mut to_leaf_label,.. }) => {
-								//cst_map.extend();
-								*to_leaf_label = Some((label, 1));
-								//continue here!...
-							},
-							_ => {
-								return Err(self.ambiguous(add_to_node_id,nset)); // TODO
-							}
-						}
-
-self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
-	
-	fn copy_branch(&mut self, copy_from_node_id: NodeId, copy_to_node_id: NodeId, set_leaf_label: Option<(Label, u8)>) {
-		match (self.get_mut(copy_to_node_id), self.get(copy_from_node_id)) {
-			(GrammarNode::Branch { cst_map: ref mut to_cst_map, leaf_label: ref mut to_leaf_label,.. }, GrammarNode::Branch { cst_map, leaf_label: None,.. }) => {
-				//cst_map.extend();
-				*to_leaf_label = set_leaf_label;
-				//continue here!...
-			},
-			_ => {
-				return; // Err(self.ambiguous(add_to_node_id,nset)); // TODO
-			}
-		}
-	}
-
-
-						fn create_branch_with(&mut self, cst_map: &HashMap<Symbol, NodeId>, var_map: &HashMap<TypeCode, NodeId>, leaf_label: Option<(Label, u8)>) -> NodeId {
-		let mut new_cst_map = new_map();
-		let mut new_var_map = new_map();
-		new_cst_map.extend(cst_map.iter());
-		new_var_map.extend(var_map.iter());
-	    self.0.push(GrammarNode::Branch{cst_map: new_cst_map, var_map: new_var_map, leaf_label});
-	    self.0.len() - 1
-	}
-	
-	/// Duplicate
-	fn dup_branch(&mut self, node_id: NodeId, label: Label, var_count: u8) -> Result<NodeId, NodeId> {
-		match self.nodes.get(node_id) {
-			GrammarNode::Leaf { .. } => Err(node_id), // Error: cannot duplicate a leaf node
-			GrammarNode::Branch { cst_map: _, var_map: _, leaf_label: Some(_) } => Err(node_id), // Error: cannot duplicate if there is already a leaf label
-			GrammarNode::Branch { ref cst_map, ref var_map, leaf_label: None } => Ok(self.nodes.create_branch_with(cst_map, var_map, Some((label, var_count)))),
-		}
-	}
-
-
-					match (var_map.get(&to_typecode), var_map.get(&from_typecode)) {
-						(Some(next_node_id), None) => {
-							println!("{} Only class", next_node_id);
-							match self.dup_branch(*next_node_id, label, 1) {
-								Ok(new_node_id) => {
-									var_map.insert(from_typecode, new_node_id);
-								},
-								Err(conflict_node) => { return Err(self.ambiguous(conflict_node, nset)); },
-							}
-						},
-						(Some(next_node), Some(next_node_2)) => {
-							println!("{} class {} setvar", next_node, next_node_2);
-						},
-						(None, _) => {}, // Nothing to do it from_typecode not in the var_map
-					}
-				},
-				_ => {},
-*/
-
 	fn next_var_node(&self, node_id: NodeId, typecode: TypeCode) -> Option<NodeId> {
 		match self.nodes.get(node_id) {
 			GrammarNode::Branch { var_map, .. } => match var_map.get(&typecode) {
@@ -598,9 +523,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 	/// For example in set.mm, ` (  A ` is a prefix common to ` ( A X. B ) ` and ` ( A e. B /\ T. ) `
 	/// The first is a notation, but would "shadow" the second option
 	// NOTES: 
-	//   it might be better/easier to use slices of TokenPtr instead of slices of Atoms. TBC
-	//   common prefix must be constant only, and diergence must be both variable
-	fn handle_common_prefixes(&mut self, prefix: &[Symbol], shadows: &[Symbol], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
+	//    Common prefix must be constant only, and both first differing symbols must be variables
+	fn handle_common_prefixes(&mut self, prefix: &[Token], shadows: &[Token], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<(), Diagnostic> {
 		let mut node_id = self.root;
 		let mut index = 0;
 		
@@ -609,7 +533,8 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 			if prefix[index] != shadows[index] { break; }
 			// TODO use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
 			if let GrammarNode::Branch { cst_map, .. } = self.nodes.get(node_id) {
-				let next_node = cst_map.get(&prefix[index]).expect("Prefix cannot be parsed!");
+				let prefix_symbol = nset.lookup_symbol(prefix[index].as_ref()).unwrap().atom;
+				let next_node = cst_map.get(&prefix_symbol).expect("Prefix cannot be parsed!");
 				node_id = next_node.next_node_id;
 				index += 1;
 			}
@@ -619,27 +544,26 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 		}
 
 		// We note the typecode and next branch of the "shadowed" prefix
-		let shadowed_typecode = names.lookup_float(nset.atom_name(shadows[index])).unwrap().typecode_atom;
+		let shadowed_typecode = names.lookup_float(&shadows[index]).unwrap().typecode_atom;
 		let shadowed_next_node = self.next_var_node(node_id, shadowed_typecode).expect("Shadowed prefix cannot be parsed!");
 		
 		// We note what comes after the shadowing typecode, both if we start from the prefix and if we start from the root
 		let mut add_from_node_id = self.root;
 		let mut shadowing_atom:Atom;
 		let mut shadowing_stype;
-		for symbol in &prefix[index..] {
-			let atom_name = nset.atom_name(*symbol);
-			let lookup_symbol = names.lookup_symbol(atom_name).unwrap();
-			println!("Following prefix {}, at {} / {}", as_str(atom_name), node_id, add_from_node_id);
+		for token in &prefix[index..] {
+			let lookup_symbol = names.lookup_symbol(token).unwrap();
+			println!("Following prefix {}, at {} / {}", as_str(token), node_id, add_from_node_id);
 			shadowing_stype = lookup_symbol.stype;
 			shadowing_atom = match shadowing_stype {
-				SymbolType::Constant => *symbol,
-				SymbolType::Variable => names.lookup_float(atom_name).unwrap().typecode_atom,
+				SymbolType::Constant => lookup_symbol.atom,
+				SymbolType::Variable => names.lookup_float(token).unwrap().typecode_atom,
 			};
 			node_id = self.nodes.get(node_id).next_node(shadowing_atom, shadowing_stype).expect("Prefix cannot be parsed!").next_node_id;
 			add_from_node_id = self.nodes.get(add_from_node_id).next_node(shadowing_atom, shadowing_stype).expect("Shadowing prefix cannot be parsed!").next_node_id;
 		}
 
-		println!("Shadowed token: {}", as_str(nset.atom_name(shadows[index])));
+		println!("Shadowed token: {}", as_str(&shadows[index]));
 		println!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
 		println!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
 		println!("Handle shadowing next node {}", node_id);
@@ -669,7 +593,7 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 	/// which lead to partial reduce. 
 	/// In the example case, at the 5th token "/\", this method modifies the grammar tree 
 	/// by adding the optional "wcel" reduce to the corresponding tree node.
-	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &Vec<(TypeCode,TypeCode,Label)>) {
+	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &Vec<(TypeCode,TypeCode,Label)>) -> Result<(), Diagnostic> {
 		for command in sset.parser_commands() {
 			assert!(command.len() > 0, "Empty parser command!");
 			//println!("{} ", as_str(&command[0]));
@@ -683,28 +607,20 @@ self.nodes.copy_branch(next_node_id, add_to_node_id, Some((label, 1)));
 					self.typecodes.push(nset.lookup_symbol(&command[1]).unwrap().atom);
 				}
 			}
+			// Handle Ambiguous prefix commands
 			if &command[0].as_ref() == b"ambiguous_prefix" {
-				let mut prefix = vec![];
-				let mut shadows = vec![];
-				let mut vec = &mut prefix;
-				for token in &command[1..] {
-					if token.as_ref() == b"=>" { vec = &mut shadows;
-					} else {
-						vec.push(nset.lookup_symbol(token.as_ref()).unwrap().atom);
-					}
-				}
-				self.handle_common_prefixes(prefix.as_slice(), shadows.as_slice(), nset, names);
+				let mut split_index = command.iter().position(|t| t.as_ref() == b"=>").expect("'=>' not present in 'ambiguous_prefix' command!");
+				let (prefix, shadows) = command.split_at(split_index);
+				self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names)?;
 			}
+			// Handle replacement schemes
 			if &command[0].as_ref() == b"type_conversions" {
-				// Handle replacement schemes
 				for (from_typecode, to_typecode, label) in type_conversions {
-					if let Err(diag) = self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset) {
-						//self.diagnostics.insert(sref.address(), diag);
-						println!("ERROR {:?}", diag); // TODO format error message!
-					}
+					self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset)?;
 				}
 			}
 		}
+		Ok(())
 	}
 
 	fn do_shift(&self, sref: &StatementRef, ix: &mut TokenIndex, nset: &Arc<Nameset>, names: &mut NameReader) {
@@ -941,7 +857,10 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	    }
 	}
 
-	grammar.handle_commands(sset, nset, &mut names, &type_conversions);
+	if let Err(diag) = grammar.handle_commands(sset, nset, &mut names, &type_conversions) {
+		//self.diagnostics.insert(sref.address(), diag);
+		println!("ERROR {:?}", diag); // TODO format error message!
+	}
 	grammar.dump(nset);
 }
 
