@@ -100,7 +100,7 @@ impl GrammarTree {
 			// TODO here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
 			(GrammarNode::Branch { cst_map, var_map }, GrammarNode::Branch { cst_map: ref mut to_cst_map, var_map: ref mut to_var_map }) => {
 				for (symbol, next_node) in cst_map.iter() {
-					if let Some(conflict_next_node) = to_cst_map.get(symbol) { // TODO later use map_try_insert #82766
+					if let Some(_) = to_cst_map.get(symbol) { // TODO later use map_try_insert #82766
 						// Skip error here, do nothing for now...
 						//return Err(conflict_next_node.next_node_id);
 						//panic!("Conflict when copying constant grammar branches!");
@@ -109,7 +109,7 @@ impl GrammarTree {
 					}
 				}
 				for (typecode, next_node) in var_map.iter() {
-					if let Some(conflict_next_node) = to_var_map.get(typecode) { // TODO later use map_try_insert #82766
+					if let Some(_) = to_var_map.get(typecode) { // TODO later use map_try_insert #82766
 						// Skip error here, do nothing for now...
 						//return Err(conflict_next_node.next_node_id);
 						//panic!("Conflict when copying variable grammar branches!");
@@ -420,7 +420,7 @@ impl Grammar {
 			// We ignore the ambiguity in floats, since they are actually frame dependent.
 			GrammarNode::Branch{cst_map, ..} => match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
 				None => Ok(()),
-				Some(conflict_node) => Ok(()), // Err(self.ambiguous(conflict_node.next_node_id, nset)), 
+				Some(_) => Ok(()), // Err(self.ambiguous(conflict_node.next_node_id, nset)), 
 			}
 			_ => panic!("Root node shall be a branch node!"),
 		}
@@ -443,14 +443,14 @@ impl Grammar {
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
 									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1))
-								}), PairVec::Zero);
+								}), PairVec::Zero).unwrap();
 							},
 							Some(existing_next_node) => {
 								println!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
 								self.dump_node(next_node_id, nset);
 								self.dump_node(existing_next_node.next_node_id, nset);
 								// A branch for the converted type already exist: add the conversion to that branch!
-								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1));
+								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1)).unwrap();
 							},
 						}
 					}

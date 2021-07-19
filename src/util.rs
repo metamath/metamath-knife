@@ -212,11 +212,11 @@ impl<T> Index<usize> for PairVec<T> {
 }
 
 impl<T: Copy+Debug> PairVec<T> {
+	/// Prepending a value at the beginning of a pair
 	pub fn prepend(&self, t: T) -> Self {
 		match self {
 			PairVec::Zero => PairVec::One(t),
 			PairVec::One(u) => { 
-				println!("+++ Prepending {:?} to {:?}", t, u);
 				PairVec::Two(t, *u)},
 			_ => panic!("PairVec overflow!"),
 		}
