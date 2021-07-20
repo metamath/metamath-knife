@@ -1,7 +1,7 @@
 //! Grammar processes a database, extracts a Grammar, which it also
 //! validates, and parses statements in the system.
 //!
-// TODO See EareyParser! / EarleyParseFunctionAlgorithm.html
+// See EareyParser! / EarleyParseFunctionAlgorithm.html
 
 // Possibly: Remove branch/leaf and keep only the optional leaf? (then final leaf = no next node id)
 
@@ -39,6 +39,18 @@ use crate::export::ExportError;
 use std::fmt::Write;
 #[cfg(feature = "dot")]
 use std::fs::File;
+
+#[cfg(feature = "debug_grammar")]
+macro_rules! debug_print {
+    ($( $args:expr ),*) => { print!( $( $args ),* ); }
+}
+
+#[cfg(not(feature = "debug_grammar"))]
+macro_rules! debug_print {
+    ($( $args:expr ),*) => {}
+}
+
+
 
 type NodeId = usize;
 
@@ -252,7 +264,7 @@ impl Default for Grammar {
 impl Grammar {
 	/// Initializes the grammar using the parser commands
 	pub fn initialize(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
-		for command in sset.parser_commands() {
+		for (_, command) in sset.parser_commands() {
 			assert!(command.len() > 0, "Empty parser command!");
 			if &command[0].as_ref() == b"syntax" {
 				if command.len() == 4 && &command[2].as_ref() == b"as" {
@@ -412,9 +424,7 @@ impl Grammar {
 		let token = tokens.next().unwrap();
 		let symbol = names.lookup_symbol(token.slice).unwrap();
 
-		if self.debug {
-			println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
-		}
+		debug_print!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
 
 		match self.nodes.get_mut(self.root) {
 			// We ignore the ambiguity in floats, since they are actually frame dependent.
@@ -438,7 +448,7 @@ impl Grammar {
 						let next_node_id = ref_next_node.next_node_id;
 						match var_map.get(&from_typecode) {
 							None => {
-								println!("Type Conv adding to {} node id {}", node_id, next_node_id);
+								debug_print!("Type Conv adding to {} node id {}", node_id, next_node_id);
 								self.dump_node(node_id, nset);
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
@@ -446,7 +456,7 @@ impl Grammar {
 								}), PairVec::Zero).unwrap();
 							},
 							Some(existing_next_node) => {
-								println!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
+								debug_print!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
 								self.dump_node(next_node_id, nset);
 								self.dump_node(existing_next_node.next_node_id, nset);
 								// A branch for the converted type already exist: add the conversion to that branch!
@@ -475,7 +485,7 @@ impl Grammar {
 	//  This implementation may needlessly duplicate some nodes: it creates new ones everytime, not checking if a duplicate was already created and could be reused.
 	//  A cleverer implementation would store the duplicates created, for example in a hashmap, and reuse them.
 	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, make_next: F) where F: Fn(Reduce, TypeCode) -> NextNode + Copy {
-		println!("Clone {} to {}", add_from_node_id, add_to_node_id);
+		debug_print!("Clone {} to {}", add_from_node_id, add_to_node_id);
 		self.dump_node(add_from_node_id, nset);
 		self.dump_node(add_to_node_id, nset);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
@@ -484,12 +494,12 @@ impl Grammar {
 				if next_node.next_node_id == add_to_node_id { continue; } // avoid infinite recursion
 				if let GrammarNode::Leaf { reduce: r, typecode } = self.nodes.get(next_node.next_node_id) {
 					let reduce = *r;
-					println!("LEAF label={:?} {}", reduce.label, reduce.var_count);
+					debug_print!("LEAF label={:?} {}", reduce.label, reduce.var_count);
 					let final_node = make_next(*r, *typecode);
 					match self.add_branch(add_to_node_id, *symbol, *stype, Some(final_node), PairVec::Zero) {
 						Ok(_) => {},
 						Err(conflict_node_id) => {
-							println!("Conflict Node = {}", conflict_node_id);
+							debug_print!("Conflict Node = {}", conflict_node_id);
 							// conflict node id = 394 : CST={): 395, } VAR={}
 							// next_node_id = 16: CST={\/: 23, <->: 20, -/\: 35, /\: 26, ->: 17, \/_: 38, } VAR={}
 							// reduce = wbr 3
@@ -511,18 +521,11 @@ impl Grammar {
 	// compare this with "copy_branches"!
 	fn clone_with_reduce(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, reduce: Reduce) {
 		if add_from_node_id == add_to_node_id { return; } // nothing to clone here!
-		println!("Clone with reduce {} to {}", add_from_node_id, add_to_node_id);
-		self.dump_node(add_from_node_id, nset);
-		self.dump_node(add_to_node_id, nset);
+		debug_print!("Clone with reduce {} to {}", add_from_node_id, add_to_node_id);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
 				self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce)), PairVec::Zero).expect("Double conflict!");
-//				if let GrammarNode::Leaf { reduce, .. } = self.nodes.get(next_node.next_node_id) {
-//					panic!("Not yet implemented!");
-//				} else {
-//					self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce))).expect("Double conflict!");
-//				}
 			}
 		}
 	}
@@ -575,7 +578,7 @@ impl Grammar {
 		let mut shadowing_stype;
 		for token in &prefix[index..] {
 			let lookup_symbol = names.lookup_symbol(token).unwrap();
-			println!("Following prefix {}, at {} / {}", as_str(token), node_id, add_from_node_id);
+			debug_print!("Following prefix {}, at {} / {}", as_str(token), node_id, add_from_node_id);
 			shadowing_stype = lookup_symbol.stype;
 			shadowing_atom = match shadowing_stype {
 				SymbolType::Constant => lookup_symbol.atom,
@@ -588,10 +591,10 @@ impl Grammar {
 			}
 		}
 
-		println!("Shadowed token: {}", as_str(&shadows[index]));
-		println!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
-		println!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
-		println!("Handle shadowing next node {}", node_id);
+		debug_print!("Shadowed token: {}", as_str(&shadows[index]));
+		debug_print!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
+		debug_print!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
+		debug_print!("Handle shadowing next node {}", node_id);
 
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
@@ -603,25 +606,27 @@ impl Grammar {
 		Ok(())
 	}
 
-//  $( Warn the parser about which particular formula prefixes are ambiguous $)
-//  $( $j ambiguous_prefix ( A   =>   ( ph ;
-//        type_conversions;
-//        ambiguous_prefix ( x e. A   =>   ( ph ;
-//        ambiguous_prefix { <.   =>   { A ;
-//        ambiguous_prefix { <. <.   =>   { A ;
-//  $)
-
 	/// Bake the lookahead into the grammar automaton.
 	/// This handles casses like the ambiguity between ` ( x e. A /\ ph ) ` and ` ( x e. A |-> B ) `
 	/// which share a common prefix, and can only be distinguished after the 5th token is read.
 	/// This is dealt with by introducing branch nodes where the optional leaf is set, 
 	/// which lead to partial reduce. 
-	/// In the example case, at the 5th token "/\", this method modifies the grammar tree 
+	/// In the example case, at the 5th token `/\`, this method modifies the grammar tree 
 	/// by adding the optional "wcel" reduce to the corresponding tree node.
-	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &Vec<(TypeCode,TypeCode,Label)>) -> Result<(), Diagnostic> {
-		for command in sset.parser_commands() {
+	/// 
+	/// Here is how the commands are to be included into the metamath file:
+	/// `
+	///   $( Warn the parser about which particular formula prefixes are ambiguous $)
+	///   $( $j ambiguous_prefix ( A   =>   ( ph ;
+	///         type_conversions;
+	///         ambiguous_prefix ( x e. A   =>   ( ph ;
+	///         ambiguous_prefix { <.   =>   { A ;
+	///         ambiguous_prefix { <. <.   =>   { A ;
+	///   $)
+	/// `
+	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &Vec<(TypeCode,TypeCode,Label)>) -> Result<(), (StatementAddress, Diagnostic)> {
+		for (address, command) in sset.parser_commands() {
 			assert!(command.len() > 0, "Empty parser command!");
-			//println!("{} ", as_str(&command[0]));
 			if &command[0].as_ref() == b"syntax" {
 				if command.len() == 4 && &command[2].as_ref() == b"as" {
 					// syntax '|-' as 'wff';
@@ -636,12 +641,18 @@ impl Grammar {
 			if &command[0].as_ref() == b"ambiguous_prefix" {
 				let split_index = command.iter().position(|t| t.as_ref() == b"=>").expect("'=>' not present in 'ambiguous_prefix' command!");
 				let (prefix, shadows) = command.split_at(split_index);
-				self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names)?;
+				match self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names) {
+					Err(diag) => { return Err((address, diag)) }
+					_ => {}
+				}
 			}
 			// Handle replacement schemes
 			if &command[0].as_ref() == b"type_conversions" {
 				for (from_typecode, to_typecode, label) in type_conversions {
-					self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset)?;
+					match self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset) {
+						Err(diag) => { return Err((address, diag)) }
+						_ => {}
+					}
 				}
 			}
 		}
@@ -652,19 +663,15 @@ impl Grammar {
 		if self.debug {
 			let token = sref.math_at(*ix);
 			let symbol = names.lookup_symbol(token.slice).unwrap();
-			println!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
+			debug_print!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
 		}
 		*ix += 1;
 	}
 
 	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
-		if self.debug {
-			println!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
-		}
+		debug_print!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
 		formula_builder.reduce(reduce.label, reduce.var_count);
-		if self.debug {
-			print!(" {:?} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count);
-		}
+		debug_print!(" {:?} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count);
 	}
 
 	fn parse_formula<'a>(&self, start_node: NodeId, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, _expected_typecodes: impl IntoIterator<Item = &'a TypeCode>, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
@@ -680,7 +687,7 @@ impl Grammar {
 					if *ix == sref.math_len() { return Err(Grammar::too_short(cst_map, nset)); }
 					let token = sref.math_at(*ix);
 					let symbol = names.lookup_symbol(token.slice).unwrap();
-					if self.debug { print!("   {:?}", as_str(nset.atom_name(symbol.atom))); }
+					debug_print!("   {:?}", as_str(nset.atom_name(symbol.atom)));
 
 					match cst_map.get(&symbol.atom) {
 						Some(NextNode { next_node_id, leaf_label }) => {
@@ -692,7 +699,7 @@ impl Grammar {
 							// Found an atom matching one of our next nodes: SHIFT, to the next node
 							self.do_shift(sref, ix, nset, names);
 							node = *next_node_id;
-							if self.debug { println!("   Next Node: {:?}", node); }
+							debug_print!("   Next Node: {:?}", node);
 						},
 						None => {
 							// No matching constant, search among variables
@@ -700,9 +707,9 @@ impl Grammar {
 								return Err(Diagnostic::UnparseableStatement(token.index()));
 							}
 
-							if self.debug { println!(" ++ Not in CST map, recursive call expecting {:?}", var_map.keys()); }
+							debug_print!(" ++ Not in CST map, recursive call expecting {:?}", var_map.keys());
 							let typecode = self.parse_formula(self.root, sref, ix, formula_builder, var_map.keys(), nset, names)?;
-							if self.debug { println!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node); }
+							debug_print!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
 							match var_map.get(&typecode) {
 								Some(NextNode { next_node_id, leaf_label }) => {
 									// Found a sub-formula: First optionally REDUCE and continue
@@ -711,7 +718,7 @@ impl Grammar {
 									}
 
 									node = *next_node_id;
-									if self.debug { println!("   Next Node: {:?}", node); }
+									debug_print!("   Next Node: {:?}", node);
 								},
 								None => {
 									// Here maybe we shall not always come back to root...
@@ -726,9 +733,9 @@ impl Grammar {
 											}
 		
 											// Found and reduced a sub-formula, to the next node
-											if self.debug { println!(" ++ Considering prefix, switching to {}", next_node_id_2); }
+											debug_print!(" ++ Considering prefix, switching to {}", next_node_id_2);
 											let typecode = self.parse_formula(*next_node_id_2, sref, ix, formula_builder, var_map.keys(), nset, names)?;
-											if self.debug { println!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node); }
+											debug_print!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
 											match var_map.get(&typecode) {
 												Some(NextNode { next_node_id, leaf_label }) => {
 													// Found a sub-formula: First optionally REDUCE and continue
@@ -737,23 +744,17 @@ impl Grammar {
 													}
 				
 													node = *next_node_id;
-													if self.debug { println!("   Next Node: {:?}", node); }
+													debug_print!("   Next Node: {:?}", node);
 												},
 												None => {
 													// Still no match found, error.
-													println!("EXIT 2 at node {} with token {:?}", node, as_str(nset.atom_name(symbol.atom)));
-													std::process::exit(1);
-													//return Err(Diagnostic::UnparseableStatement(token.index()));
-													//return Ok(None);
+													return Err(Diagnostic::UnparseableStatement(token.index()));
 												},
 											}
 										},
 										_ => {
 											// Still no match found, error.
-											println!("EXIT 3 at node {} with token {:?}", node, as_str(nset.atom_name(symbol.atom)));
-											std::process::exit(1);
-											//return Err(Diagnostic::UnparseableStatement(token.index()));
-											//return Ok(None);
+											return Err(Diagnostic::UnparseableStatement(token.index()));
 										}
 									}
 								}
@@ -767,12 +768,8 @@ impl Grammar {
 
 	fn parse_statement(&self, sref: &StatementRef, nset: &Arc<Nameset>, names: &mut NameReader) -> Result<Option<Formula>, Diagnostic> {
 		if sref.math_len() == 0 {
-			//println!("Statement #{}, {} has length 0", sref.index(), nset.lookup_label(sref.label()));
 			return Err(Diagnostic::ParsedStatementNoTypeCode);
 		}
-		// Atom for this statement's label. TODO: Safe to unwrap here?  
-		//let this_label = as_str(nset.atom_name(nset.lookup_label(sref.label()).unwrap().atom));
-		//println!("Parsing {:?}", this_label);
 
 		// Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
 		let typecode = nset.get_atom(sref.math_at(0).slice); 
@@ -787,9 +784,7 @@ impl Grammar {
 		// At the time of writing, there are only 3 statements which are not provable but "syntactic theorems": weq, wel and bj-0
 		let mut formula_builder = FormulaBuilder::default();
 
-		if self.debug {
-			println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
-		}
+		debug_print!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
 
 		self.parse_formula(self.root, sref, &mut 1, &mut formula_builder, vec![&expected_typecode], nset, names)?;
 		Ok(Some(formula_builder.build(typecode)))
@@ -868,6 +863,7 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	let mut names = NameReader::new(nset);
 	let mut type_conversions = Vec::new();
 
+	// Build the initial grammar tree, just form syntax axioms and floats.
 	let segments = sset.segments();
 	assert!(segments.len() > 0, "Parse returned no segment!");
     for segment in segments.iter() {
@@ -882,9 +878,9 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	    }
 	}
 
-	if let Err(diag) = grammar.handle_commands(sset, nset, &mut names, &type_conversions) {
-		//self.diagnostics.insert(sref.address(), diag);
-		println!("ERROR {:?}", diag); // TODO format error message!
+	// Post-treatement (type conversion and ambiguous prefix) as instructed by $j parser commands
+	if let Err((address, diag)) = grammar.handle_commands(sset, nset, &mut names, &type_conversions) {
+		grammar.diagnostics.insert(address, diag);
 	}
 	grammar.dump(nset);
 }
@@ -945,7 +941,7 @@ fn parse_statements_single<'a>(sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, n
             _ => Ok(None)
         } {
 			Err(diag) => {
-				if grammar.debug { println!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)))}
+				debug_print!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
 				diagnostics.insert(sref.address(), diag);
 				break; // inserted here to stop at first error!
 			},

@@ -453,7 +453,7 @@ pub struct Segment {
     /// Top-level headings extracted for outline
     pub outline: Vec<HeadingDef>,
 	/// Parser commands provided in $j additional information comments.
-	pub commands: Vec<Command>,
+	pub commands: Vec<(StatementIndex, Command)>,
 }
 
 /// A pointer to a segment which knows its identity.
@@ -1540,7 +1540,7 @@ fn collect_definitions(seg: &mut Segment) {
 				match commands(buf, stmt.span.start) {
 					Ok(commands) => {
 						for command in commands {
-							seg.commands.push(command);
+							seg.commands.push((index, command));
 						}
 					},
 					Err(diag) => {

@@ -226,11 +226,12 @@ impl SegmentSet {
     }
 
 	/// Returns the commands parsed from the $j comments
-	pub fn parser_commands(&self) -> Vec<Command> {
+	pub fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
         let mut out = Vec::new();
         for sref in self.segments() {
-			// Copying here is lazy and inefficient, but probably not deadly for performance
-			out.extend(sref.commands.clone());
+            for &(ix, ref command) in &sref.commands {
+				out.push((StatementAddress::new(sref.id, ix), command.clone()));
+			}
         }
         out
 	}
