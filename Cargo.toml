@@ -20,6 +20,7 @@ dot-writer = { version = "0.1.2", optional = true }
 [features]
 sysalloc = []
 dot = ["dot-writer"]
+debug_grammar = []
 
 [profile]
 

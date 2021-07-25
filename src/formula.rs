@@ -145,4 +145,9 @@ impl FormulaBuilder {
 		self.formula.typecode = typecode;
 		return self.formula;
 	}
+	
+	pub(crate) fn dump(&self, nset: &Arc<Nameset>) {
+		self.formula.dump(nset);
+		println!("Stack: {:?}", self.stack);
+	}
 }
