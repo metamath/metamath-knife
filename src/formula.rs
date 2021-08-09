@@ -128,11 +128,12 @@ pub(crate) struct FormulaBuilder {
 impl FormulaBuilder {
 	/// Every REDUCE pops `var_count` subformula items on the stack, 
 	/// and pushes one single new item, with the popped subformulas as children
-	pub(crate) fn reduce(&mut self, label: Label, var_count: u8) {
-		assert!(self.stack.len()>=var_count.into());
-		let new_length = self.stack.len().saturating_sub(var_count.into());
+	pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8) {
+		assert!(self.stack.len()>=(var_count + offset).into());
+		let new_length = self.stack.len().saturating_sub((var_count + offset).into());
+		let new_end = self.stack.len().saturating_sub(offset.into());
 		let new_node_id = {
-			let children = self.stack.drain(new_length..);
+			let children = self.stack.drain(new_length..new_end);
 			self.formula.tree.add_node(label, children.as_slice())
 		};
 		self.stack.push(new_node_id);

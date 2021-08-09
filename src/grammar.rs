@@ -153,11 +153,12 @@ pub struct Grammar {
 struct Reduce {
 	label: Label,
 	var_count: u8,
+	offset: u8,
 }
 
 impl Reduce {
-	fn new(label: Label, var_count: u8) -> Self {
-		Reduce { label, var_count }
+	fn new(label: Label, var_count: u8, offset: u8) -> Self {
+		Reduce { label, var_count, offset }
 	}
 }
 
@@ -396,7 +397,7 @@ impl Grammar {
 			};
 			let next_leaf = match &tokens.peek() {
 				Some(_) => None,
-				None => Some(NextNode::new(self.nodes.create_leaf(Reduce::new(this_label, var_count), this_typecode))),
+				None => Some(NextNode::new(self.nodes.create_leaf(Reduce::new(this_label, var_count, 0), this_typecode))),
 			};
 			match self.add_branch(node, atom, symbol.stype, next_leaf, PairVec::Zero) {
 				Ok(next_node) => { node = next_node; },
@@ -419,7 +420,7 @@ impl Grammar {
 		if this_typecode == self.provable_type { return Err(Diagnostic::GrammarProvableFloat); }
 
 		// We will add this floating declaration to the grammar tree
-		let leaf_node = self.nodes.create_leaf(Reduce::new(this_label, 0), this_typecode);
+		let leaf_node = self.nodes.create_leaf(Reduce::new(this_label, 0, 0), this_typecode);
 
 		// If is safe to unwrap here since parser has already checked.
 		let token = tokens.next().unwrap();
@@ -453,7 +454,7 @@ impl Grammar {
 								self.dump_node(node_id, nset);
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
-									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1))
+									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1, 0))
 								}), PairVec::Zero).unwrap();
 							},
 							Some(existing_next_node) => {
@@ -461,7 +462,7 @@ impl Grammar {
 								self.dump_node(next_node_id, nset);
 								self.dump_node(existing_next_node.next_node_id, nset);
 								// A branch for the converted type already exist: add the conversion to that branch!
-								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1)).unwrap();
+								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1, 0)).unwrap();
 							},
 						}
 					}
@@ -671,9 +672,9 @@ impl Grammar {
 
 	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
 		debug_print!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
-		formula_builder.reduce(reduce.label, reduce.var_count);
+		formula_builder.reduce(reduce.label, reduce.var_count, reduce.offset);
 		//formula_builder.dump(nset);
-		debug_print!(" {:?} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count);
+		debug_print!(" {:?} {} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count, reduce.offset);
 	}
 
 	fn parse_formula<'a>(&self, start_node: NodeId, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, expected_typecodes: &'a[&'a TypeCode], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
@@ -815,7 +816,7 @@ impl Grammar {
 	
     #[cfg(feature = "dot")]
 	/// Exports the grammar tree in the "dot" format. See https://www.graphviz.org/doc/info/lang.html
-	/// This dot file can then be converted to an SVG image using ` dot -Tsvg grammar.svg grammar.dot `
+	/// This dot file can then be converted to an SVG image using ` dot -Tsvg -o grammar.svg grammar.dot `
 	pub fn export_dot(&self, nset: &Arc<Nameset>, write: &mut File) -> Result<(), ExportError> {
 		let mut dot_writer = DotWriter::from(write);
 		let mut digraph = dot_writer.digraph();
