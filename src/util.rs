@@ -4,11 +4,9 @@ use fnv::FnvHasher;
 use std::collections;
 use std::hash::BuildHasherDefault;
 use std::hash::Hash;
-use std::ops::Index;
 use std::ops::Range;
 use std::ptr;
 use std::slice;
-use core::fmt::Debug;
 
 /// Type alias for hashmaps to allow swapping out the implementation.
 pub type HashMap<K, V> = collections::HashMap<K, V, BuildHasherDefault<FnvHasher>>;
@@ -189,87 +187,3 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
     }
 }
 
-/// Emulating Vec over a pair
-#[derive(Clone, Copy, Debug)]
-pub enum PairVec<T> {
-	/// Empty vec
-	Zero,
-	/// Vec with one element
-	One (T),
-	/// Vec with two elements
-	Two (T, T),
-}
-
-impl<T> PairVec<T> {
-	fn len(&self) -> usize {
-		match self {
-			PairVec::Zero => 0,
-			PairVec::One(_) => 1, 
-			PairVec::Two(_,_) => 2,
-		}
-	}
-}
-
-impl<T> Index<usize> for PairVec<T> {
-	type Output = T;
-
-    fn index(&self, index: usize) -> &Self::Output {
-		match (self, index) {
-			(PairVec::One(t), 0) | (PairVec::Two(t, _), 0) | (PairVec::Two(_, t), 1) => t,
-			_ => panic!("Index out of range in PairVec!"),
-		}
-    }
-}
-
-impl<T: PartialEq> PartialEq for PairVec<T> {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(PairVec::Zero, PairVec::Zero) => true,
-			(PairVec::One(t), PairVec::One(u)) => t == u,
-			(PairVec::Two(s, t), PairVec::Two(u, v)) => s == u && t == v,
-			_ => false,
-		}
-	}
-}
-
-impl<T: Copy+Debug> PairVec<T> {
-	/// Prepending a value at the beginning of a pair
-	pub fn prepend(&self, t: T) -> Self {
-		match self {
-			PairVec::Zero => PairVec::One(t),
-			PairVec::One(u) => { 
-				PairVec::Two(t, *u)},
-			_ => panic!("PairVec overflow!"),
-		}
-	}
-}
-
-/// An iterator for the Vec over a pair emulation
-pub struct PairVecIter<'a, T> {
-	data: &'a PairVec<T>,
-    index: usize,
-}
-
-impl<'a, T> IntoIterator for &'a PairVec<T> {
-    type Item = &'a T;
-    type IntoIter = PairVecIter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        PairVecIter {
-            data: self,
-            index: 0,
-        }
-    }
-}
-
-impl<'a, T> Iterator for PairVecIter<'a, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-		self.index += 1;
-		match self {
-			PairVecIter { data: PairVec::One(t), index: 1 } | PairVecIter { data: PairVec::Two(t,_), index: 1 } | PairVecIter { data: PairVec::Two(_,t), index: 2 } => Some(t),
-			_ => None,
-		}
-    }
-}
