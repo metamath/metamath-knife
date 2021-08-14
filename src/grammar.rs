@@ -73,6 +73,7 @@ struct GrammarTree(Vec<GrammarNode>);
 impl GrammarTree {
 	fn create_branch(&mut self) -> NodeId {
 	    self.0.push(GrammarNode::Branch{cst_map: new_map(), var_map: new_map()});
+		//if self.0.len() - 1 == 1413 { panic!("Created 1413!"); }
 	    self.0.len() - 1
 	}
 
@@ -149,7 +150,7 @@ pub struct Grammar {
 	debug: bool,
 }
 
-#[derive(Clone,Copy,Debug)]
+#[derive(Clone,Copy,Debug,PartialEq)]
 struct Reduce {
 	label: Label,
 	var_count: u8,
@@ -324,36 +325,46 @@ impl Grammar {
 			panic!("Expected branch for node {}!", node_id);
 		}
 	}
-	
-	/// Adds the symbol to the branch, and returns the next node
-	// Warning - this is currently not very well done - if a leaf is provided, or if the branch already exists, then add_reduce is not used.
-	fn add_branch(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, leaf: Option<NextNode>, add_reduce: PairVec<Reduce>) -> Result<NodeId, NodeId> {
+
+	/// Adds the symbol to the branch, providing the next node, and returns that next node
+	fn add_branch(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, leaf: &NextNode) -> Result<NodeId, NodeId> {
 		match self.nodes.get_mut(to_node) {
 			GrammarNode::Leaf{..} => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
 			GrammarNode::Branch{cst_map, var_map} => {
 				let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
-				match leaf {
-					Some(ref leaf_node) => {
-						match map.get(&symbol) {
-							Some(prev_node) => Err(prev_node.next_node_id), // Error : We want to add a leaf note, but there is already a branch.
-							None => { map.insert(symbol, *leaf_node); Ok(leaf_node.next_node_id) },
+				match map.get(&symbol) {
+					Some(prev_node) => Err(prev_node.next_node_id), // Error : We want to add a leaf note, but there is already a branch.
+					None => { map.insert(symbol, *leaf); Ok(leaf.next_node_id) },
+				}
+			}
+		}
+	}
+
+	/// Adds the symbol to the branch, providing a reduce, and returns the next node
+	fn add_branch_with_reduce(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, add_reduce: PairVec<Reduce>) -> Result<NodeId, NodeId> {
+		match self.nodes.get_mut(to_node) {
+			GrammarNode::Leaf{..} => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
+			GrammarNode::Branch{cst_map, var_map} => {
+				let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
+				match map.get(&symbol) {
+					Some(prev_node) => {
+						if prev_node.leaf_label != add_reduce {
+							Err(prev_node.next_node_id)
+						} else {
+							Ok(prev_node.next_node_id)
 						}
 					},
 					None => {
-						match map.get(&symbol) {
-							Some(prev_node) => Ok(prev_node.next_node_id),
-							None => {
-								let new_node_id = self.nodes.create_branch();
-								if let GrammarNode::Branch{cst_map, var_map} = self.nodes.get_mut(to_node) {
-									let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
-									map.insert(symbol, NextNode::new_with_reduce(new_node_id, add_reduce));
-									Ok(new_node_id)
-								} else {
-									panic!("Shall not happen!");
-								}
-							},
+						let new_node_id = self.nodes.create_branch();
+						// here we have to re-borrow from self after the creation, because the previous var_map and cst_map may not be valid pointers anymore
+						if let GrammarNode::Branch{cst_map, var_map} = self.nodes.get_mut(to_node) {
+							let map = match stype { SymbolType::Constant => { cst_map }, SymbolType::Variable => { var_map } };
+							map.insert(symbol, NextNode::new_with_reduce(new_node_id, add_reduce));
+							Ok(new_node_id)
+						} else {
+							panic!("Shall not happen!");
 						}
-					}
+					},
 				}
 			}
 		}
@@ -395,11 +406,13 @@ impl Grammar {
 					names.lookup_float(token.slice).unwrap().typecode_atom
 				}
 			};
-			let next_leaf = match &tokens.peek() {
-				Some(_) => None,
-				None => Some(NextNode::new(self.nodes.create_leaf(Reduce::new(this_label, var_count, 0), this_typecode))),
-			};
-			match self.add_branch(node, atom, symbol.stype, next_leaf, PairVec::Zero) {
+			match match &tokens.peek() {
+				Some(_) => self.add_branch_with_reduce(node, atom, symbol.stype, PairVec::Zero),
+				None => {
+					let leaf_node_id = self.nodes.create_leaf(Reduce::new(this_label, var_count, 0), this_typecode);
+					self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
+					},
+			} {
 				Ok(next_node) => { node = next_node; },
 				Err(conflict_node) => { return Err(self.ambiguous(conflict_node, nset)); },
 			}
@@ -453,9 +466,9 @@ impl Grammar {
 								debug_print!("Type Conv adding to {} node id {}", node_id, next_node_id);
 								self.dump_node(node_id, nset);
 								// No branch exist for the converted type: create one, with a leaf label.
-								self.add_branch(node_id, from_typecode, SymbolType::Variable, Some(NextNode{
+								self.add_branch(node_id, from_typecode, SymbolType::Variable, &NextNode{
 									next_node_id, leaf_label: ref_next_node.leaf_label.prepend(Reduce::new(label, 1, 0))
-								}), PairVec::Zero).unwrap();
+								}).unwrap();
 							},
 							Some(existing_next_node) => {
 								debug_print!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
@@ -486,7 +499,9 @@ impl Grammar {
 	/// Recursively clone the whole grammar tree starting from add_from_node_id
 	//  This implementation may needlessly duplicate some nodes: it creates new ones everytime, not checking if a duplicate was already created and could be reused.
 	//  A cleverer implementation would store the duplicates created, for example in a hashmap, and reuse them.
-	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, make_next: F) where F: Fn(Reduce, TypeCode) -> NextNode + Copy {
+	//  Branch nodes are recursively copied.
+	//  The `make_final` argument is a function building the final node from the reduce of the found leaf node and the final typecode.
+	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, stored_reduces: &mut Vec<Reduce>, make_final: F) where F: Fn(Reduce, TypeCode) -> NextNode + Copy {
 		debug_print!("Clone {} to {}", add_from_node_id, add_to_node_id);
 		self.dump_node(add_from_node_id, nset);
 		self.dump_node(add_to_node_id, nset);
@@ -496,9 +511,9 @@ impl Grammar {
 				if next_node.next_node_id == add_to_node_id { continue; } // avoid infinite recursion
 				if let GrammarNode::Leaf { reduce: r, typecode } = self.nodes.get(next_node.next_node_id) {
 					let reduce = *r;
-					debug_print!("LEAF label={:?} {}", reduce.label, reduce.var_count);
-					let final_node = make_next(*r, *typecode);
-					match self.add_branch(add_to_node_id, *symbol, *stype, Some(final_node), PairVec::Zero) {
+					debug_print!("LEAF for {} to {} label={:?} {}", add_from_node_id, add_to_node_id, reduce.label, reduce.var_count);
+					let final_node = make_final(*r, *typecode);
+					match self.add_branch(add_to_node_id, *symbol, *stype, &final_node) {
 						Ok(_) => {},
 						Err(conflict_node_id) => {
 							debug_print!("Conflict Node = {}", conflict_node_id);
@@ -510,11 +525,19 @@ impl Grammar {
 						}, 
 					}
 				} else {
-					match self.add_branch(add_to_node_id, *symbol, *stype, None, next_node.leaf_label) {
-						Ok(new_next_node_id) | Err(new_next_node_id) => {
-							self.clone_branches(next_node.next_node_id, new_next_node_id, nset, make_next);
+					debug_print!("BRANCH for {} to {} {:?}", add_from_node_id, add_to_node_id, next_node.leaf_label);
+					let new_next_node_id = match self.add_branch_with_reduce(add_to_node_id, *symbol, *stype, next_node.leaf_label) {
+						Ok(new_next_node_id) => new_next_node_id,
+						Err(new_next_node_id) => {
+							// This is the case where there is already a branch, with a different reduce.
+							// In that case, we have to store the reduce until the copy is finished.
+							//let reduce = 
+							//stored_reduces.push(Reduce::);
+							
+							new_next_node_id
 						},
-					}
+					};
+					self.clone_branches(next_node.next_node_id, new_next_node_id, nset, stored_reduces, make_final);
 				}
 			}
 		}
@@ -527,7 +550,7 @@ impl Grammar {
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
-				self.add_branch(add_to_node_id, *symbol, *stype, Some(next_node.with_reduce(reduce)), PairVec::Zero).expect("Double conflict!");
+				self.add_branch(add_to_node_id, *symbol, *stype, &next_node.with_reduce(reduce)).expect("Double conflict!");
 			}
 		}
 	}
@@ -537,8 +560,8 @@ impl Grammar {
 	fn expand_tree(&mut self, to_node: NodeId, symbol: Symbol, stype: SymbolType, nset: &Arc<Nameset>) -> NodeId {
 		let next_node_id_from_root = self.nodes.get(self.root).next_node(symbol, stype).expect("Expanded formula cannot be parsed from root node!").next_node_id;
 		let node_from_root = self.nodes.get(next_node_id_from_root).clone();
-		let new_node_id = self.add_branch(to_node, symbol, stype, None, PairVec::Zero).unwrap();
-		self.clone_branches(next_node_id_from_root, new_node_id, nset, |r,t| {
+		let new_node_id = self.add_branch_with_reduce(to_node, symbol, stype, PairVec::Zero).unwrap();
+		self.clone_branches(next_node_id_from_root, new_node_id, nset, &mut Vec::new(),|r,t| {
 			node_from_root.next_node(t, SymbolType::Variable).expect("Expanded node's typecode not available!").with_reduce(r)
 		});
 		self.nodes.get(to_node).next_node(symbol, stype).unwrap().next_node_id
@@ -601,7 +624,7 @@ impl Grammar {
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
 		match self.nodes.get(add_from_node_id) {
-			GrammarNode::Branch {..} => { self.clone_branches(add_from_node_id, node_id, nset, |r,_| { NextNode { next_node_id: shadowed_next_node, leaf_label: PairVec::One(r) }}); }
+			GrammarNode::Branch {..} => { self.clone_branches(add_from_node_id, node_id, nset, &mut Vec::new(), |r,_| { NextNode { next_node_id: shadowed_next_node, leaf_label: PairVec::One(r) }}); }
 			GrammarNode::Leaf { reduce, .. } => { self.clone_with_reduce(shadowed_next_node, node_id, *reduce); }
 		}
 

@@ -200,6 +200,16 @@ pub enum PairVec<T> {
 	Two (T, T),
 }
 
+impl<T> PairVec<T> {
+	fn len(&self) -> usize {
+		match self {
+			PairVec::Zero => 0,
+			PairVec::One(_) => 1, 
+			PairVec::Two(_,_) => 2,
+		}
+	}
+}
+
 impl<T> Index<usize> for PairVec<T> {
 	type Output = T;
 
@@ -209,6 +219,17 @@ impl<T> Index<usize> for PairVec<T> {
 			_ => panic!("Index out of range in PairVec!"),
 		}
     }
+}
+
+impl<T: PartialEq> PartialEq for PairVec<T> {
+	fn eq(&self, other: &Self) -> bool {
+		match (self, other) {
+			(PairVec::Zero, PairVec::Zero) => true,
+			(PairVec::One(t), PairVec::One(u)) => t == u,
+			(PairVec::Two(s, t), PairVec::Two(u, v)) => s == u && t == v,
+			_ => false,
+		}
+	}
 }
 
 impl<T: Copy+Debug> PairVec<T> {
