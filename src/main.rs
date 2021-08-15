@@ -44,6 +44,7 @@ use crate::line_cache::LineCache;
 use std::io;
 use std::mem;
 use std::str::FromStr;
+use simple_logger::SimpleLogger;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{}", e))
@@ -65,6 +66,7 @@ fn main() {
         .arg(Arg::with_name("print-grammar").help("Print the database's grammar").long("print-grammar").short("G"))
         .arg(Arg::with_name("print-formula").help("Parse all statements according to the database's grammar").long("print-formula").short("F"))
         .arg(Arg::with_name("export-grammar-dot").help("Export the database's grammar in Graphviz DOT format for visualization").long("export-grammar-dot").short("E"))
+        .arg(Arg::with_name("debug").help("Activate debug logs, including for the grammar building and statement parsing").long("debug"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -103,6 +105,10 @@ fn main() {
 		|| matches.is_present("export-grammar-dot") 
 		|| matches.is_present("print-grammar") 
 		|| matches.is_present("print-formula");
+
+	if matches.is_present("debug") {
+		SimpleLogger::new().init().unwrap();
+	}
 
     let mut db = Database::new(options);
 

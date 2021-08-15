@@ -30,6 +30,9 @@ use std::sync::Arc;
 use tinyvec::ArrayVec;
 use crate::util::HashMap;
 use crate::util::new_map;
+use std::fmt;
+use std::fmt::Formatter;
+use log::{debug,warn};
 
 #[cfg(feature = "dot")]
 use dot_writer::{Attributes, Color, DotWriter, Shape};
@@ -39,26 +42,6 @@ use crate::export::ExportError;
 use std::fmt::Write;
 #[cfg(feature = "dot")]
 use std::fs::File;
-
-#[cfg(feature = "debug_grammar")]
-macro_rules! debug_print {
-    ($( $args:expr ),*) => { print!( $( $args ),* ); }
-}
-#[cfg(feature = "debug_grammar")]
-macro_rules! debug_println {
-    ($( $args:expr ),*) => { println!( $( $args ),* ); }
-}
-
-#[cfg(not(feature = "debug_grammar"))]
-macro_rules! debug_print {
-    ($( $args:expr ),*) => {}
-}
-#[cfg(not(feature = "debug_grammar"))]
-macro_rules! debug_println {
-    ($( $args:expr ),*) => {}
-}
-
-
 
 type NodeId = usize;
 
@@ -185,7 +168,7 @@ fn increment_offsets(rv: &mut ReduceVec) {
 	}
 }
 
-#[derive(Clone,Copy,Debug)]
+#[derive(Clone,Copy)]
 struct NextNode {
 	next_node_id: NodeId,
 	leaf_label: ReduceVec,          // This deals with ambiguity in the grammar, performing one or several reduce then continuing
@@ -215,7 +198,7 @@ impl NextNode {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum GrammarNode {
 	Leaf {
 		reduce: Reduce,
@@ -253,31 +236,46 @@ impl GrammarNode {
 			}
 		}
 	}
-	
+}
+
+struct GrammarNodeDebug<'a>(&'a GrammarNode, &'a Arc<Nameset>);
+impl fmt::Debug for GrammarNodeDebug<'_> {
 	/// Lists the contents of the grammar node
-	pub fn dump(&self, node_id: NodeId, nset: &Arc<Nameset>) {
-		match self {
-			GrammarNode::Leaf{reduce, typecode} => { println!("{:?}: {} {} ({} vars)", node_id, as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(reduce.label)), reduce.var_count); },
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		let nset = self.1;
+		match self.0 {
+			GrammarNode::Leaf{reduce, typecode} => { write!(f, "Leaf {} {} ({} vars)", as_str(nset.atom_name(*typecode)), as_str(nset.atom_name(reduce.label)), reduce.var_count) },
 			GrammarNode::Branch{cst_map, var_map} => {
-				debug_print!("{:?}: CST={{", node_id);
+				write!(f, "Branch CST={{")?;
 				for (symbol, node) in cst_map {
-					debug_print!("{}: {:?}", as_str(nset.atom_name(*symbol)), node.next_node_id);
+					write!(f, "{}: {:?}", as_str(nset.atom_name(*symbol)), node.next_node_id)?;
 					for reduce in node.leaf_label.into_iter() {
-						debug_print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
+						write!(f, "({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count)?;
 					}
-					debug_print!(", ");
+					write!(f, ", ")?;
 				}
-				debug_print!("}} VAR={{");
+				write!(f, "}} VAR={{")?;
 				for (typecode, node) in var_map {
-					debug_print!("{}: {:?}", as_str(nset.atom_name(*typecode)), node.next_node_id);
+					write!(f, "{}: {:?}", as_str(nset.atom_name(*typecode)), node.next_node_id)?;
 					for reduce in node.leaf_label.into_iter() {
-						debug_print!("({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count);
+						write!(f, "({:?} {})", as_str(nset.atom_name(reduce.label)), reduce.var_count)?;
 					}
-					debug_print!(", ");
+					write!(f, ", ")?;
 				}
-				debug_println!("}}");
+				write!(f, "}}")
 			},
 		}
+	}
+}
+
+struct GrammarNodeIdDebug<'a>(&'a Grammar, NodeId, &'a Arc<Nameset>);
+impl fmt::Debug for GrammarNodeIdDebug<'_> {
+	/// Lists the contents of the grammar node, given the grammar and a node id
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		let grammar = self.0;
+		let node_id = self.1;
+		let nset = self.2;
+		write!(f, "{}: {:?}", node_id, GrammarNodeDebug(&grammar.nodes.0[node_id], nset))
 	}
 }
 
@@ -471,7 +469,7 @@ impl Grammar {
 		let token = tokens.next().unwrap();
 		let symbol = names.lookup_symbol(token.slice).unwrap();
 
-		debug_println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
+		debug!("========== Statement {:?} ==========", as_str(nset.statement_name(sref)));
 
 		match self.nodes.get_mut(self.root) {
 			// We ignore the ambiguity in floats, since they are actually frame dependent.
@@ -495,17 +493,17 @@ impl Grammar {
 						let next_node_id = ref_next_node.next_node_id;
 						match var_map.get(&from_typecode) {
 							None => {
-								debug_println!("Type Conv adding to {} node id {}", node_id, next_node_id);
-								self.dump_node(node_id, nset);
+								debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
+								debug!("{:?}", GrammarNodeIdDebug(self, node_id, nset));
 								let mut leaf_label = ref_next_node.leaf_label;
 								leaf_label.insert(0, Reduce::new(label, 1, 0));
 								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, &NextNode{ next_node_id, leaf_label }).unwrap();
 							},
 							Some(existing_next_node) => {
-								debug_println!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
-								self.dump_node(next_node_id, nset);
-								self.dump_node(existing_next_node.next_node_id, nset);
+								debug!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
+								debug!("{:?}", GrammarNodeIdDebug(self, next_node_id, nset));
+								debug!("{:?}", GrammarNodeIdDebug(self, existing_next_node.next_node_id, nset));
 								// A branch for the converted type already exist: add the conversion to that branch!
 								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1, 0)).unwrap();
 							},
@@ -534,9 +532,9 @@ impl Grammar {
 	//  Branch nodes are recursively copied.
 	//  The `make_final` argument is a function building the final node from the reduce of the found leaf node and the final typecode.
 	fn clone_branches<F>(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, nset: &Arc<Nameset>, mut stored_reduces: ReduceVec, make_final: F) where F: FnOnce(&ReduceVec, TypeCode) -> NextNode + Copy {
-		debug_println!("Clone {} to {}", add_from_node_id, add_to_node_id);
-		self.dump_node(add_from_node_id, nset);
-		self.dump_node(add_to_node_id, nset);
+		debug!("Clone {} to {}", add_from_node_id, add_to_node_id);
+		debug!("{:?}", GrammarNodeIdDebug(self, add_from_node_id, nset));
+		debug!("{:?}", GrammarNodeIdDebug(self, add_to_node_id, nset));
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			if *stype == SymbolType::Variable { increment_offsets(&mut stored_reduces); }
@@ -546,12 +544,12 @@ impl Grammar {
 					let mut reduce_vec = ReduceVec::new();
 					for reduce in stored_reduces { reduce_vec.push(reduce); }
 					reduce_vec.push(*r);
-					debug_println!("LEAF for {} to {} {:?}", add_from_node_id, add_to_node_id, reduce_vec);
+					debug!("LEAF for {} to {} {:?}", add_from_node_id, add_to_node_id, reduce_vec);
 					let final_node = make_final(&reduce_vec, *typecode);
 					match self.add_branch(add_to_node_id, *symbol, *stype, &final_node) {
 						Ok(_) => {},
 						Err(conflict_node_id) => {
-							debug_println!("Conflict Node = {}", conflict_node_id);
+							debug!("Conflict Node = {}", conflict_node_id);
 							// conflict node id = 394 : CST={): 395, } VAR={}
 							// next_node_id = 16: CST={\/: 23, <->: 20, -/\: 35, /\: 26, ->: 17, \/_: 38, } VAR={}
 							// reduce = wbr 3
@@ -560,14 +558,14 @@ impl Grammar {
 						}, 
 					}
 				} else {
-					debug_println!("BRANCH for {} to {} {:?}", add_from_node_id, add_to_node_id, next_node.leaf_label);
+					debug!("BRANCH for {} to {} {:?}", add_from_node_id, add_to_node_id, next_node.leaf_label);
 					let new_next_node_id = match self.add_branch_with_reduce(add_to_node_id, *symbol, *stype, next_node.leaf_label) {
 						Ok(new_next_node_id) => new_next_node_id,
 						Err(new_next_node_id) => {
 							// This is the case where there is already a branch, with a different reduce.
 							// In that case, we have to store the reduce until the copy is finished.
 							for reduce in next_node.leaf_label {
-								debug_println!(">> Storing {:?}", reduce);
+								debug!(">> Storing {:?}", reduce);
 								stored_reduces.push(reduce);
 							}
 							new_next_node_id
@@ -582,7 +580,7 @@ impl Grammar {
 	// compare this with "copy_branches"!
 	fn clone_with_reduce_vec(&mut self, add_from_node_id: NodeId, add_to_node_id: NodeId, reduce_vec: &ReduceVec) {
 		if add_from_node_id == add_to_node_id { return; } // nothing to clone here!
-		debug_println!("Clone with reduce {} to {}", add_from_node_id, add_to_node_id);
+		debug!("Clone with reduce {} to {}", add_from_node_id, add_to_node_id);
 		for stype in &[SymbolType::Constant, SymbolType::Variable] {
 			let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
 			for (symbol, next_node) in map {
@@ -639,7 +637,7 @@ impl Grammar {
 		let mut shadowing_stype;
 		for token in &prefix[index..] {
 			let lookup_symbol = names.lookup_symbol(token).unwrap();
-			debug_println!("Following prefix {}, at {} / {}", as_str(token), node_id, add_from_node_id);
+			debug!("Following prefix {}, at {} / {}", as_str(token), node_id, add_from_node_id);
 			shadowing_stype = lookup_symbol.stype;
 			shadowing_atom = match shadowing_stype {
 				SymbolType::Constant => lookup_symbol.atom,
@@ -652,10 +650,10 @@ impl Grammar {
 			}
 		}
 
-		debug_println!("Shadowed token: {}", as_str(&shadows[index]));
-		debug_println!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
-		debug_println!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
-		debug_println!("Handle shadowing next node {}", node_id);
+		debug!("Shadowed token: {}", as_str(&shadows[index]));
+		debug!("Handle shadowed next node {}, typecode {:?}", shadowed_next_node, shadowed_typecode);
+		debug!("Handle shadowed next node from root {}, typecode {:?}", add_from_node_id, shadowed_typecode);
+		debug!("Handle shadowing next node {}", node_id);
 
 		// Then we copy each of the next branch of the shadowed string to the shadowing branch
 		// If the next node is a leaf, instead, we add a leaf label, and point to the next
@@ -727,16 +725,16 @@ impl Grammar {
 		if self.debug {
 			let token = sref.math_at(*ix);
 			let symbol = names.lookup_symbol(token.slice).unwrap();
-			debug_println!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
+			debug!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
 		}
 		*ix += 1;
 	}
 
 	fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
-		debug_println!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
+		debug!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
 		formula_builder.reduce(reduce.label, reduce.var_count, reduce.offset);
 		//formula_builder.dump(nset);
-		debug_println!(" {:?} {} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count, reduce.offset);
+		debug!(" {:?} {} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count, reduce.offset);
 	}
 
 	fn parse_formula<'a>(&self, start_node: NodeId, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, expected_typecodes: &'a[&'a TypeCode], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
@@ -749,7 +747,7 @@ impl Grammar {
 					if expected_typecodes.iter().any(|&t| *t==*typecode) {
 						return Ok(*typecode);
 					} else {
-						debug_println!(" ++ Wrong type obtained, continue.");
+						debug!(" ++ Wrong type obtained, continue.");
 						let (next_node_id, leaf_label) = self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
 						for reduce in leaf_label.into_iter() {
 							self.do_reduce(formula_builder, *reduce, nset);
@@ -761,7 +759,7 @@ impl Grammar {
 					if *ix == sref.math_len() { return Err(Grammar::too_short(cst_map, nset)); }
 					let token = sref.math_at(*ix);
 					let symbol = names.lookup_symbol(token.slice).unwrap();
-					debug_println!("   {:?}", as_str(nset.atom_name(symbol.atom)));
+					debug!("   {:?}", as_str(nset.atom_name(symbol.atom)));
 
 					match cst_map.get(&symbol.atom) {
 						Some(NextNode { next_node_id, leaf_label }) => {
@@ -773,7 +771,7 @@ impl Grammar {
 							// Found an atom matching one of our next nodes: SHIFT, to the next node
 							self.do_shift(sref, ix, nset, names);
 							node = *next_node_id;
-							debug_println!("   Next Node: {:?}", node);
+							debug!("   Next Node: {:?}", node);
 						},
 						None => {
 							// No matching constant, search among variables
@@ -781,9 +779,9 @@ impl Grammar {
 								return Err(Diagnostic::UnparseableStatement(token.index()));
 							}
 
-							debug_println!(" ++ Not in CST map, recursive call expecting {:?}", var_map.keys());
+							debug!(" ++ Not in CST map, recursive call expecting {:?}", var_map.keys());
 							let typecode = self.parse_formula(self.root, sref, ix, formula_builder, var_map.keys().collect::<Vec<&TypeCode>>().as_slice(), nset, names)?;
-							debug_println!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
+							debug!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
 							match var_map.get(&typecode) {
 								Some(NextNode { next_node_id, leaf_label }) => {
 									// Found a sub-formula: First optionally REDUCE and continue
@@ -792,7 +790,7 @@ impl Grammar {
 									}
 
 									node = *next_node_id;
-									debug_println!("   Next Node: {:?}", node);
+									debug!("   Next Node: {:?}", node);
 								},
 								None => {
 									// Here maybe we shall not always come back to root...
@@ -807,9 +805,9 @@ impl Grammar {
 											}
 		
 											// Found and reduced a sub-formula, to the next node
-											debug_println!(" ++ Considering prefix, switching to {}", next_node_id_2);
+											debug!(" ++ Considering prefix, switching to {}", next_node_id_2);
 											let typecode = self.parse_formula(*next_node_id_2, sref, ix, formula_builder, var_map.keys().collect::<Vec<&TypeCode>>().as_slice(), nset, names)?;
-											debug_println!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
+											debug!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
 											match var_map.get(&typecode) {
 												Some(NextNode { next_node_id, leaf_label }) => {
 													// Found a sub-formula: First optionally REDUCE and continue
@@ -818,7 +816,7 @@ impl Grammar {
 													}
 				
 													node = *next_node_id;
-													debug_println!("   Next Node: {:?}", node);
+													debug!("   Next Node: {:?}", node);
 												},
 												None => {
 													// Still no match found, error.
@@ -858,21 +856,17 @@ impl Grammar {
 		// At the time of writing, there are only 3 statements which are not provable but "syntactic theorems": weq, wel and bj-0
 		let mut formula_builder = FormulaBuilder::default();
 
-		debug_println!("\nStatement {:?}\n---------", as_str(nset.statement_name(sref)));
+		debug!("--------- Statement {:?} ---------", as_str(nset.statement_name(sref)));
 
 		self.parse_formula(self.root, sref, &mut 1, &mut formula_builder, vec![&expected_typecode].as_slice(), nset, names)?;
 		Ok(Some(formula_builder.build(typecode)))
-	}
-
-	fn dump_node(&self, node_id: NodeId, nset: &Arc<Nameset>) {
-		self.nodes.0[node_id].dump(node_id, nset);
 	}
 
 	/// Lists the contents of the grammar
 	pub fn dump(&self, nset: &Arc<Nameset>) {
 		println!("Grammar tree has {:?} nodes.", self.nodes.len());
 		for i in 0 .. self.nodes.len() {
-			self.dump_node(i, nset);
+			println!("{:?}", GrammarNodeIdDebug(self, i, nset));
 		}
 	}
 	
@@ -1018,7 +1012,7 @@ fn parse_statements_single<'a>(sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, n
             _ => Ok(None)
         } {
 			Err(diag) => {
-				debug_println!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
+				warn!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
 				diagnostics.insert(sref.address(), diag);
 				break; // inserted here to stop at first error!
 			},

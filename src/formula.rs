@@ -146,7 +146,8 @@ impl FormulaBuilder {
 		self.formula.typecode = typecode;
 		return self.formula;
 	}
-	
+
+	/// Traces the current status of the formula and of the stack.
 	pub(crate) fn dump(&self, nset: &Arc<Nameset>) {
 		self.formula.dump(nset);
 		println!("Stack: {:?}", self.stack);
