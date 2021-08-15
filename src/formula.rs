@@ -130,13 +130,13 @@ impl FormulaBuilder {
 	/// and pushes one single new item, with the popped subformulas as children
 	pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8) {
 		assert!(self.stack.len()>=(var_count + offset).into());
-		let new_length = self.stack.len().saturating_sub((var_count + offset).into());
-		let new_end = self.stack.len().saturating_sub(offset.into());
+		let reduce_start = self.stack.len().saturating_sub((var_count + offset).into());
+		let reduce_end = self.stack.len().saturating_sub(offset.into());
 		let new_node_id = {
-			let children = self.stack.drain(new_length..new_end);
+			let children = self.stack.drain(reduce_start..reduce_end);
 			self.formula.tree.add_node(label, children.as_slice())
 		};
-		self.stack.push(new_node_id);
+		self.stack.insert(reduce_start,new_node_id);
 	}
 
 	pub(crate) fn build(mut self, typecode: TypeCode) -> Formula {
