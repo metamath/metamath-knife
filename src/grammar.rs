@@ -1038,16 +1038,24 @@ fn parse_statements_single<'a>(sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, n
 
 /// Parses all the statements in the database
 /// 
-pub fn parse_statements<'a>(stmt_parse: &mut StmtParse, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, grammar: &Arc<Grammar>) {
-	let mut names = NameReader::new(nset);
-	let segments = sset.segments();
-	assert!(segments.len() > 0, "Parse returned no segment!");
-
-	// TODO make this parallel using segments.exec.exec()!
-	stmt_parse.segments.clear();
-    for segment in segments.iter() {
-		let id = segment.id;
-		let arc = Arc::new(parse_statements_single(sset, nset, &mut names, grammar, id));
-		stmt_parse.segments.insert(id, arc);
+pub fn parse_statements<'a>(stmt_parse: &mut StmtParse, segments: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, grammar: &Arc<Grammar>) {
+    let mut ssrq = Vec::new();
+    for sref in segments.segments() {
+        let segments2 = segments.clone();
+        let nset = nset.clone();
+        let grammar = grammar.clone();
+        let id = sref.id;
+		ssrq.push(segments.exec.exec(sref.bytes(), move || {
+			let sref = segments2.segment(id);
+			let mut names = NameReader::new(&nset);
+			let id = sref.id;
+			(id, Arc::new(parse_statements_single(&segments2, &nset, &mut names, &grammar, id)))
+		}));
 	}
+
+	stmt_parse.segments.clear();
+    for promise in ssrq {
+        let (id, arc) = promise.wait();
+		stmt_parse.segments.insert(id, arc);
+    }
 }

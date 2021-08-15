@@ -55,7 +55,7 @@ impl Formula {
 		return str;
 	}
 
-	/// Debug only, dumps the internal structure of the fomula.
+	/// Debug only, dumps the internal structure of the formula.
 	pub fn dump(&self, nset: &Arc<Nameset>) {
 		println!("  Root: {}", self.root);
 		self.tree.dump(|atom| as_str(nset.atom_name(*atom)));
