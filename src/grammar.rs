@@ -493,19 +493,20 @@ impl Grammar {
 						let next_node_id = ref_next_node.next_node_id;
 						match var_map.get(&from_typecode) {
 							None => {
+								// No branch exist for the converted type: create one, with a leaf label.
 								debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
 								debug!("{:?}", GrammarNodeIdDebug(self, node_id, nset));
 								let mut leaf_label = ref_next_node.leaf_label;
 								leaf_label.insert(0, Reduce::new(label, 1, 0));
-								// No branch exist for the converted type: create one, with a leaf label.
 								self.add_branch(node_id, from_typecode, SymbolType::Variable, &NextNode{ next_node_id, leaf_label }).unwrap();
 							},
 							Some(existing_next_node) => {
+								// A branch for the converted type already exist: add the conversion to that branch!
 								debug!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
 								debug!("{:?}", GrammarNodeIdDebug(self, next_node_id, nset));
 								debug!("{:?}", GrammarNodeIdDebug(self, existing_next_node.next_node_id, nset));
-								// A branch for the converted type already exist: add the conversion to that branch!
-								self.nodes.copy_branches(next_node_id, existing_next_node.next_node_id, Reduce::new(label, 1, 0)).unwrap();
+								let existing_next_node_id = existing_next_node.next_node_id;
+								self.nodes.copy_branches(next_node_id, existing_next_node_id, Reduce::new(label, 1, 0)).unwrap();
 							},
 						}
 					}
