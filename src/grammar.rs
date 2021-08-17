@@ -104,7 +104,7 @@ impl GrammarTree {
 			// TODO here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
 			(GrammarNode::Branch { cst_map, var_map }, GrammarNode::Branch { cst_map: ref mut to_cst_map, var_map: ref mut to_var_map }) => {
 				for (symbol, next_node) in cst_map.iter() {
-					if let Some(_) = to_cst_map.get(symbol) { // TODO later use map_try_insert #82766
+					if to_cst_map.get(symbol).is_some() { // TODO later use map_try_insert #82766
 						// Skip error here, do nothing for now...
 						//return Err(conflict_next_node.next_node_id);
 						//panic!("Conflict when copying constant grammar branches!");
@@ -113,7 +113,7 @@ impl GrammarTree {
 					}
 				}
 				for (typecode, next_node) in var_map.iter() {
-					if let Some(_) = to_var_map.get(typecode) { // TODO later use map_try_insert #82766
+					if to_var_map.get(typecode).is_some() { // TODO later use map_try_insert #82766
 						// Skip error here, do nothing for now...
 						//return Err(conflict_next_node.next_node_id);
 						//panic!("Conflict when copying variable grammar branches!");
@@ -297,7 +297,7 @@ impl Grammar {
 	/// Initializes the grammar using the parser commands
 	pub fn initialize(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
 		for (_, command) in sset.parser_commands() {
-			assert!(command.len() > 0, "Empty parser command!");
+			assert!(!command.is_empty(), "Empty parser command!");
 			if &command[0].as_ref() == b"syntax" {
 				if command.len() == 4 && &command[2].as_ref() == b"as" {
 					// syntax '|-' as 'wff';
@@ -686,9 +686,9 @@ impl Grammar {
 	///         ambiguous_prefix { <. <.   =>   { A ;
 	///   $)
 	/// `
-	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &Vec<(TypeCode,TypeCode,Label)>) -> Result<(), (StatementAddress, Diagnostic)> {
+	fn handle_commands(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>, names: &mut NameReader, type_conversions: &[(TypeCode,TypeCode,Label)]) -> Result<(), (StatementAddress, Diagnostic)> {
 		for (address, command) in sset.parser_commands() {
-			assert!(command.len() > 0, "Empty parser command!");
+			assert!(!command.is_empty(), "Empty parser command!");
 			if &command[0].as_ref() == b"syntax" {
 				if command.len() == 4 && &command[2].as_ref() == b"as" {
 					// syntax '|-' as 'wff';
@@ -703,18 +703,12 @@ impl Grammar {
 			if &command[0].as_ref() == b"ambiguous_prefix" {
 				let split_index = command.iter().position(|t| t.as_ref() == b"=>").expect("'=>' not present in 'ambiguous_prefix' command!");
 				let (prefix, shadows) = command.split_at(split_index);
-				match self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names) {
-					Err(diag) => { return Err((address, diag)) }
-					_ => {}
-				}
+				if let Err(diag) = self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names) { return Err((address, diag)) }
 			}
 			// Handle replacement schemes
 			if &command[0].as_ref() == b"type_conversions" {
 				for (from_typecode, to_typecode, label) in type_conversions {
-					match self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset) {
-						Err(diag) => { return Err((address, diag)) }
-						_ => {}
-					}
+					if let Err(diag) = self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset) { return Err((address, diag)) }
 				}
 			}
 		}
@@ -937,7 +931,7 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 
 	// Build the initial grammar tree, just form syntax axioms and floats.
 	let segments = sset.segments();
-	assert!(segments.len() > 0, "Parse returned no segment!");
+	assert!(!segments.is_empty(), "Parse returned no segment!");
     for segment in segments.iter() {
 	    for sref in *segment {
 	        if let Err(diag) = match sref.statement_type() {

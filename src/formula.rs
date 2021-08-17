@@ -49,10 +49,10 @@ impl Formula {
 		let mut str = String::new();
 		str.push_str(as_str(nset.atom_name(self.typecode)));
 		for symbol in self.iter(sset, nset) {
-			str.push_str(" ");
+			str.push(' ');
 			str.push_str(as_str(nset.atom_name(symbol)));
 		}
-		return str;
+		str
 	}
 
 	/// Debug only, dumps the internal structure of the formula.
@@ -144,7 +144,7 @@ impl FormulaBuilder {
 		assert!(self.stack.len() == 1, "Final formula building state does not have one root - {:?}", self.stack); 
 		self.formula.root = self.stack[0];
 		self.formula.typecode = typecode;
-		return self.formula;
+		self.formula
 	}
 
 	/// Traces the current status of the formula and of the stack.
