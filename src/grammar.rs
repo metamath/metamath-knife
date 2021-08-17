@@ -661,8 +661,13 @@ impl Grammar {
 			NextNode { next_node_id: shadowed_next_node, leaf_label: *rv }
 		};
 		match self.nodes.get(add_from_node_id) {
-			GrammarNode::Branch {..} => { self.clone_branches(add_from_node_id, node_id, nset, ReduceVec::new(), make_final); }
-			GrammarNode::Leaf { reduce, .. } => { self.clone_with_reduce_vec(shadowed_next_node, node_id, &single_reduce(*reduce)); }
+			GrammarNode::Branch {..} => {
+				self.clone_branches(add_from_node_id, node_id, nset, ReduceVec::new(), make_final);
+			}
+			GrammarNode::Leaf { reduce, .. } => {
+				let rv = single_reduce(*reduce);
+				self.clone_with_reduce_vec(shadowed_next_node, node_id, &rv); 
+			}
 		}
 
 		Ok(())
