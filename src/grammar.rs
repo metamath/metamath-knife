@@ -1,7 +1,5 @@
 //! Grammar processes a database, extracts a Grammar, which it also
 //! validates, and parses statements in the system.
-//!
-// See EareyParser! / EarleyParseFunctionAlgorithm.html
 
 // Possibly: Remove branch/leaf and keep only the optional leaf? (then final leaf = no next node id)
 
@@ -130,7 +128,25 @@ impl GrammarTree {
 	}
 }
 
-/** The Grammar built from the database's syntactic axioms */
+/// The grammar built from the database's syntactic axioms
+///
+/// It is used to parse metamath statements into [Formula].
+/// 
+/// Example
+/// ```
+/// use metamath_knife::database::{Database, DbOptions};
+/// 
+///	// Setup the required options
+/// let mut options = DbOptions::default();
+///	options.autosplit = true;
+///	options.jobs = 8;
+///	options.incremental = true;
+///
+///	// Create an empty database and load any file provided
+///	let mut db = Database::new(options);
+/// db.parse("set.mm".to_string(), vec![]);
+/// let grammar = db.grammar_result();
+/// ```
 pub struct Grammar {
 	provable_type: TypeCode,
 	logic_type: TypeCode,
@@ -295,7 +311,7 @@ impl Default for Grammar {
 
 impl Grammar {
 	/// Initializes the grammar using the parser commands
-	pub fn initialize(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
+	fn initialize(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
 		for (_, command) in sset.parser_commands() {
 			assert!(!command.is_empty(), "Empty parser command!");
 			if &command[0].as_ref() == b"syntax" {
@@ -745,7 +761,8 @@ impl Grammar {
 					// We found a leaf: REDUCE
 					self.do_reduce(formula_builder, *reduce, nset);
 					if expected_typecodes.iter().any(|&t| *t==*typecode) {
-						return Ok(*typecode);
+						if *ix == sref.math_len() { return Ok(*typecode); }
+						else { println!("Check this out! {} < {} for {:?}", *ix, sref.math_len(), as_str(nset.statement_name(sref))); return Ok(*typecode); }
 					} else {
 						debug!(" ++ Wrong type obtained, continue.");
 						let (next_node_id, leaf_label) = self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
@@ -793,8 +810,6 @@ impl Grammar {
 									debug!("   Next Node: {:?}", node);
 								},
 								None => {
-									// Here maybe we shall not always come back to root...
-									
 									// No match found, try as a prefix of a larger formula
 									let (_, var_map_2) = self.get_branch(self.root);
 									match var_map_2.get(&typecode) {
@@ -862,7 +877,7 @@ impl Grammar {
 		Ok(Some(formula_builder.build(typecode)))
 	}
 
-	/// Lists the contents of the grammar
+	/// Lists the contents of the grammar's parse table. This can be used for debugging.
 	pub fn dump(&self, nset: &Arc<Nameset>) {
 		println!("Grammar tree has {:?} nodes.", self.nodes.len());
 		for i in 0 .. self.nodes.len() {
@@ -878,7 +893,7 @@ impl Grammar {
 		let mut digraph = dot_writer.digraph();
 		for node_id in 0 .. self.nodes.len() {
 			match &self.nodes.0[node_id] {
-				GrammarNode::Leaf{reduce, typecode} => { 
+				GrammarNode::Leaf{reduce,..} => { 
 					digraph
 						.node_named(as_string(node_id))
 						.set_shape(Shape::Mdiamond)
@@ -888,10 +903,10 @@ impl Grammar {
 					for (symbol, node) in cst_map {
 						let mut buf = String::new();
 						for reduce in node.leaf_label.into_iter() {
-							if reduce.offset > 0 { buf.write_fmt(format_args!("{}({}) / ", as_str(nset.atom_name(reduce.label)),reduce.offset)).unwrap(); }
-							else { buf.write_fmt(format_args!("{} / ", as_str(nset.atom_name(reduce.label)))).unwrap(); }
+							if reduce.offset > 0 { write!(buf, "{}({}) / ", as_str(nset.atom_name(reduce.label)), reduce.offset)?; }
+							else { write!(buf, "{} / ", as_str(nset.atom_name(reduce.label)))?; }
 						}
-						buf.write_str(escape(as_str(nset.atom_name(*symbol))).as_str());
+						write!(buf, escape(as_str(nset.atom_name(*symbol))).as_str())?;
 						digraph
 							.edge(as_string(node_id), as_string(node.next_node_id))
 							.attributes()
@@ -900,10 +915,10 @@ impl Grammar {
 					}
 					for (typecode, node) in var_map {
 						let mut buf = String::new();
-						buf.write_str(escape(as_str(nset.atom_name(*typecode))).as_str());
+						buf.write_str(escape(as_str(nset.atom_name(*typecode))).as_str())?;
 						for reduce in node.leaf_label.into_iter() {
-							if reduce.offset > 0 { buf.write_fmt(format_args!(" / {}({})", as_str(nset.atom_name(reduce.label)),reduce.offset)).unwrap(); }
-							else { buf.write_fmt(format_args!(" / {}", as_str(nset.atom_name(reduce.label)))).unwrap(); }
+							if reduce.offset > 0 { write!(buf, " / {}({})", as_str(nset.atom_name(reduce.label)),reduce.offset)?; }
+							else { write(buf, " / {}", as_str(nset.atom_name(reduce.label)))?; }
 						}
 						digraph
 							.edge(as_string(node_id), as_string(node.next_node_id))
@@ -927,7 +942,7 @@ impl Grammar {
 /// When parsed, this shall generate a double reduce, to both the full expression and x e. A.
 /// The same applies for ` ( <. x , y >. e. A |-> B ) ` and so on.
 /// 
-pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>) {
+pub(crate) fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>) {
 	// Read information about the grammar from the parser commands
 	grammar.initialize(sset, nset);
 	grammar.root = grammar.nodes.create_branch();
@@ -956,7 +971,23 @@ pub fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset:
 	}
 }
 
-/** The result of parsing all statements with the language grammar */
+/// The result of parsing all statements of the database with the language grammar
+/// 
+/// Example
+/// ```
+/// use metamath_knife::database::{Database, DbOptions};
+/// 
+///	// Setup the required options
+/// let mut options = DbOptions::default();
+///	options.autosplit = true;
+///	options.jobs = 8;
+///	options.incremental = true;
+///
+///	// Create an empty database and load any file provided
+///	let mut db = Database::new(options);
+/// db.parse("set.mm".to_string(), vec![]);
+/// let stmt_parse = db.stmt_parse_result();
+/// ```
 pub struct StmtParse {
     segments: HashMap<SegmentId, Arc<StmtParseSegment>>,
 }
@@ -990,6 +1021,12 @@ impl StmtParse {
 				println!("{}: {}", as_str(nset.statement_name(&sref)), formula.display(sset, nset));
             }
         }
+	}
+
+	/// Returns the formula for a given statement
+	pub fn get_formula(&self, sref: &StatementRef) -> Option<&Formula> {
+		let stmt_parse_segment = self.segments.get(&sref.segment().id)?;
+		stmt_parse_segment.formulas.get(&sref.address())
 	}
 }
 

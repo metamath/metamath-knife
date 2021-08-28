@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "metamath-knife"
-version = "3.1.0-1"
+version = "3.1.2"
 dependencies = [
  "clap",
  "dot-writer",
