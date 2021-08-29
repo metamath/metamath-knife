@@ -19,7 +19,8 @@ pub struct Tree<TreeItem> {
 impl<TreeItem: Copy> Tree<TreeItem> {
 	/// Create a new node with the given item and children (previously added to the tree)
 	/// This way of constructing the tree forces to use a bottom-up approach, 
-	/// where the leafs are added first, followed by  
+	/// where the leafs are added first, followed by the branch nodes.
+	/// The root node is added last, and is therefore not at a fixed index.
 	pub fn add_node(&mut self, item: TreeItem, children: &[NodeId]) -> NodeId {
 		let mut new_node = TreeNode {
 			item,
