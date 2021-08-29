@@ -101,14 +101,14 @@ fn main() {
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
     options.incremental |= matches.is_present("grammar") 
-		|| matches.is_present("parse-stmt") 
-		|| matches.is_present("export-grammar-dot") 
-		|| matches.is_present("print-grammar") 
-		|| matches.is_present("print-formula");
+        || matches.is_present("parse-stmt") 
+        || matches.is_present("export-grammar-dot") 
+        || matches.is_present("print-grammar") 
+        || matches.is_present("print-formula");
 
-	if matches.is_present("debug") {
-		SimpleLogger::new().init().unwrap();
-	}
+    if matches.is_present("debug") {
+        SimpleLogger::new().init().unwrap();
+    }
 
     let mut db = Database::new(options);
 
@@ -159,11 +159,11 @@ fn main() {
         }
 
         if matches.is_present("export-grammar-dot") {
-			#[cfg(feature = "dot")]
+            #[cfg(feature = "dot")]
             db.export_grammar_dot();
 
-			#[cfg(not(feature = "dot"))]
-			println!("The program was not compiled with the `dot` feature. This is required to export in the DOT format.");
+            #[cfg(not(feature = "dot"))]
+            println!("The program was not compiled with the `dot` feature. This is required to export in the DOT format.");
         }
 
         if matches.is_present("print-formula") {

@@ -225,16 +225,16 @@ impl SegmentSet {
         out
     }
 
-	/// Returns the commands parsed from the $j comments
-	pub fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
+    /// Returns the commands parsed from the $j comments
+    pub fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
         let mut out = Vec::new();
         for sref in self.segments() {
             for &(ix, ref command) in &sref.commands {
-				out.push((StatementAddress::new(sref.id, ix), command.clone()));
-			}
+                out.push((StatementAddress::new(sref.id, ix), command.clone()));
+            }
         }
         out
-	}
+    }
 
     /// Replaces the content of the `SegmentSet` with data loaded from disk
     /// files or memory.

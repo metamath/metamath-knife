@@ -610,8 +610,8 @@ impl Database {
     }
 
     /// Export the grammar of this database in DOT format.
-	#[cfg(feature = "dot")]
-	pub fn export_grammar_dot(&mut self) {
+    #[cfg(feature = "dot")]
+    pub fn export_grammar_dot(&mut self) {
         time(&self.options.clone(), "export_grammar_dot", || {
             let name = self.name_result().clone();
             let grammar = self.grammar_result().clone();
@@ -621,7 +621,7 @@ impl Database {
                 .and_then(|mut file| grammar.export_dot(&name, &mut file))
                 .unwrap()
         })
-	}
+    }
 
     /// Dump the grammar of this database.
     pub fn print_grammar(&mut self) {

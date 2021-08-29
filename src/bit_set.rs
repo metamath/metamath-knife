@@ -42,14 +42,14 @@ impl Clone for Bitset {
 }
 
 impl PartialEq for Bitset {
-	#[inline]
-	fn eq(&self, other: &Self) -> bool { 
-		self.head == other.head && match (self.tail.as_ref(), other.tail.as_ref()) {
-			(None, None) => true,
-			(Some(ref self_tail), Some(ref other_tail)) => self_tail == other_tail,
-			_ => false,
-		}
-	}
+    #[inline]
+    fn eq(&self, other: &Self) -> bool { 
+        self.head == other.head && match (self.tail.as_ref(), other.tail.as_ref()) {
+            (None, None) => true,
+            (Some(ref self_tail), Some(ref other_tail)) => self_tail == other_tail,
+            _ => false,
+        }
+    }
 }
 
 impl Bitset {
