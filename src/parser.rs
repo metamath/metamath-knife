@@ -400,6 +400,17 @@ pub struct LocalVarDef {
     pub ordinal: TokenIndex,
 }
 
+/// Extracted information for outline heading statements.
+#[derive(Debug)]
+pub struct HeadingDef {
+    /// The name of the heading (this is not strictly speaking a token)
+    pub name: Token,
+    /// Local inder of the heading statement.
+    pub index: StatementIndex,
+    /// Level of this outline
+    pub level: HeadingLevel,
+}
+
 /// A parsed segment, containing parsed statement data and some extractions.
 ///
 /// This is the main result of the parse which is provided to `segment_set`,
@@ -436,6 +447,8 @@ pub struct Segment {
     pub labels: Vec<LabelDef>,
     /// Global `$f` statements extracted for nameck.
     pub floats: Vec<FloatDef>,
+    /// Top-level headings extracted for outline
+    pub outline: Vec<HeadingDef>,
 }
 
 /// A pointer to a segment which knows its identity.
@@ -504,6 +517,8 @@ pub enum StatementType {
     /// A comment which starts with a `$t` token and must be interpreted
     /// specially by the HTML generator.
     TypesettingComment,
+    /// A comment corresponding to the head of a chapter or section in the outline
+    HeadingComment(HeadingLevel),
     /// A `$[` directive; we process these as statements, and disallow them
     /// inside other statements, which violates the published Metamath spec but
     /// is allowed behavior as an erratum.
@@ -861,12 +876,33 @@ fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
 
-// TODO: add outline comment detection
+#[derive(Debug,Eq,PartialEq,Ord,PartialOrd,Copy,Clone)]
+/// The different types of heading markers, as defined in the Metamath book, section 4.4.1
+pub enum HeadingLevel {
+    /// Virtual top-level heading, used as a root node
+    Database,
+    /// Major part
+    MajorPart,
+    /// Section
+    Section,
+    /// Subsection
+    SubSection,
+    /// Subsubsection
+    SubSubSection,
+}
+
+impl Default for HeadingLevel {
+    fn default() -> Self {
+        HeadingLevel::Database
+    }
+}
+
 #[derive(Eq,PartialEq,Copy,Clone)]
 enum CommentType {
     Normal,
     Typesetting,
     Extra,
+    Heading(HeadingLevel),
 }
 
 impl<'a> Scanner<'a> {
@@ -943,8 +979,7 @@ impl<'a> Scanner<'a> {
     /// Assuming that a `$(` token has just been read, read and skip a comment.
     ///
     /// If the comment appears to be special, notice that.  This currently
-    /// detects `$j` and `$t` comments, it will later be responsible for
-    /// detecting outline comments.
+    /// detects `$j`, `$t` comments, and outline comments.
     fn get_comment(&mut self, opener: Span, mid_statement: bool) -> CommentType {
         let mut ctype = CommentType::Normal;
         let mut first = true;
@@ -976,8 +1011,17 @@ impl<'a> Scanner<'a> {
                 if tok_str.contains("$(") {
                     self.diag(Diagnostic::NestedComment(tok, opener));
                 }
+            } else if tok_ref.len() >= 4 {
+                if tok_ref[0..4] == b"####"[0..4] {
+                    ctype = CommentType::Heading(HeadingLevel::MajorPart,);
+                } else if tok_ref[0..4] == b"#*#*"[0..4] {
+                    ctype = CommentType::Heading(HeadingLevel::Section);
+                } else if tok_ref[0..4] == b"=-=-"[0..4] {
+                    ctype = CommentType::Heading(HeadingLevel::SubSection);
+                } else if tok_ref[0..4] == b"-.-."[0..4] {
+                    ctype = CommentType::Heading(HeadingLevel::SubSubSection);
+                }
             }
-
             first = false;
         }
 
@@ -1034,10 +1078,10 @@ impl<'a> Scanner<'a> {
             let ftok_ref = ftok.as_ref(self.buffer);
             if ftok_ref == b"$(" {
                 let ctype = self.get_comment(ftok, false);
-                let stype = if ctype == CommentType::Typesetting {
-                    TypesettingComment
-                } else {
-                    Comment
+                let stype = match ctype {
+                    CommentType::Typesetting => TypesettingComment,
+                    CommentType::Heading(level) => HeadingComment(level),
+                    _ => Comment,
                 };
                 return Some(self.out_statement(stype, Span::new2(ftok.start, ftok.start)));
             } else {
@@ -1336,6 +1380,7 @@ impl<'a> Scanner<'a> {
             buffer: self.buffer_ref.clone(),
             diagnostics: Vec::new(),
             span_pool: Vec::new(),
+            outline: Vec::new(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -1474,6 +1519,13 @@ fn collect_definitions(seg: &mut Segment) {
                     name: copy_token(math[1].as_ref(buf)),
                 });
             }
+            HeadingComment(level) => {
+                seg.outline.push(HeadingDef { 
+					name: copy_token(get_heading_name(buf,stmt.span.start)),
+					index, 
+					level 
+				});
+            }
             _ => {}
         }
     }
@@ -1487,14 +1539,9 @@ fn is_valid_label(label: &[u8]) -> bool {
     })
 }
 
-/// Slightly set.mm specific hack to extract a section name from a byte buffer.
-///
-/// This is run before parsing so it can't take advantage of comment extraction;
-/// instead we look for the first indented line, within a heuristic limit of 500
-/// bytes.
-pub fn guess_buffer_name(buffer: &[u8]) -> &str {
-    let buffer = &buffer[0..cmp::min(500, buffer.len())];
-    let mut index = 0;
+/// Extract a section name from a comment
+fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
+	let mut index = pos as usize;
     while index < buffer.len() {
         // is this line indented?
         if buffer[index] == b' ' {
@@ -1523,12 +1570,23 @@ pub fn guess_buffer_name(buffer: &[u8]) -> &str {
     while eol > index && (buffer[eol - 1] == b'\r' || buffer[eol - 1] == b' ') {
         eol -= 1;
     }
+	&buffer[index..eol]
+}
+
+/// Slightly set.mm specific hack to extract a section name from a byte buffer.
+///
+/// This is run before parsing so it can't take advantage of comment extraction;
+/// instead we look for the first indented line, within a heuristic limit of 500
+/// bytes.
+pub fn guess_buffer_name(buffer: &[u8]) -> &str {
+    let buffer = &buffer[0..cmp::min(500, buffer.len())];
+    let ptr = get_heading_name(buffer, 0);
 
     // fail gracefully, this is a debugging aid only
-    if eol == index {
+    if ptr.is_empty() {
         "<no section name found>"
     } else {
-        str::from_utf8(&buffer[index..eol]).unwrap_or("<invalid UTF-8 in section name>")
+        str::from_utf8(ptr).unwrap_or("<invalid UTF-8 in section name>")
     }
 }
 

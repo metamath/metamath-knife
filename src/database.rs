@@ -102,6 +102,8 @@ use diag::DiagnosticClass;
 use diag::Notation;
 use export;
 use nameck::Nameset;
+use outline;
+use outline::OutlineNode;
 use parser::StatementRef;
 use scopeck;
 use scopeck::ScopeResult;
@@ -136,6 +138,8 @@ pub struct DbOptions {
     /// `parser::guess_buffer_name`) of segments which are recalculated in each
     /// pass.
     pub trace_recalc: bool,
+    /// True to record database outline with parts, chapters, and sections.
+    pub outline: bool,
     /// True to record detailed usage data needed for incremental operation.
     ///
     /// This will slow down the initial analysis, so don't set it if you won't
@@ -353,6 +357,7 @@ pub struct Database {
     scopes: Option<Arc<ScopeResult>>,
     prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
+    outline: Option<OutlineNode>,
 }
 
 fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
@@ -375,6 +380,7 @@ impl Drop for Database {
             self.prev_nameset = None;
             self.nameset = None;
             self.segments = None;
+            self.outline = None;
         });
     }
 }
@@ -393,6 +399,7 @@ impl Database {
             nameset: None,
             scopes: None,
             verify: None,
+            outline: None,
             prev_nameset: None,
             prev_scopes: None,
             prev_verify: None,
@@ -434,6 +441,7 @@ impl Database {
             self.nameset = None;
             self.scopes = None;
             self.verify = None;
+            self.outline = None;
         });
     }
 
@@ -516,6 +524,18 @@ impl Database {
         self.verify.as_ref().unwrap()
     }
 
+    /// Returns the root node of the outline
+    pub fn outline_result(&mut self) -> &OutlineNode {
+        if self.outline.is_none() {
+            time(&self.options.clone(), "outline", || {
+                let parse = self.parse_result().clone();
+                self.outline = Some(OutlineNode::default());
+                outline::build_outline(&mut self.outline.as_mut().unwrap(), &parse);
+            })
+        }
+        self.outline.as_ref().unwrap()
+    }
+
     /// Get a statement by label.
     pub fn statement(&mut self, name: &str) -> Option<StatementRef> {
         match self.name_result().lookup_label(name.as_bytes()) {
@@ -540,6 +560,23 @@ impl Database {
                 .and_then(|mut file| export::export_mmp(&parse, &name, &scope, sref, &mut file))
                 .unwrap()
         })
+    }
+
+    /// Dump the outline of this database.
+    pub fn print_outline(&mut self) {
+        time(&self.options.clone(), "print_outline", || {
+            let root_node = self.outline_result().clone();
+            self.print_outline_node(&root_node, 0);
+        })
+    }
+
+    /// Dump the outline of this database.
+    fn print_outline_node(&mut self, node: &OutlineNode, indent: usize) {
+        // let indent = (node.level as usize) * 3
+        println!("{:indent$} {:?} {:?}", "", node.level, node.get_name(), indent = indent);
+        for child in node.children.iter() {
+            self.print_outline_node(&child, indent + 1);
+        }        
     }
 
     /// Runs one or more passes and collects all errors they generate.

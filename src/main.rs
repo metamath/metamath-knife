@@ -18,6 +18,7 @@ pub mod diag;
 pub mod export;
 pub mod line_cache;
 pub mod nameck;
+pub mod outline;
 pub mod parser;
 pub mod proof;
 pub mod scopeck;
@@ -55,6 +56,7 @@ fn main() {
             .long("split"))
         .arg(Arg::with_name("timing").help("Print milliseconds after each stage").long("timing"))
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
+        .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("o"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -84,6 +86,7 @@ fn main() {
     let mut options = DbOptions::default();
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
+    options.outline = matches.is_present("outline");
     options.trace_recalc = matches.is_present("trace-recalc");
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
@@ -116,6 +119,10 @@ fn main() {
         let mut lc = LineCache::default();
         for notation in db.diag_notations(types) {
             print_annotation(&mut lc, notation);
+        }
+
+        if matches.is_present("outline") {
+            db.print_outline();
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
