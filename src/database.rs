@@ -141,6 +141,8 @@ pub struct DbOptions {
     /// `parser::guess_buffer_name`) of segments which are recalculated in each
     /// pass.
     pub trace_recalc: bool,
+    /// True to record database outline with parts, chapters, and sections.
+    pub outline: bool,
     /// True to record detailed usage data needed for incremental operation.
     ///
     /// This will slow down the initial analysis, so don't set it if you won't

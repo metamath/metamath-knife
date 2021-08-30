@@ -96,6 +96,7 @@ fn main() {
     let mut options = DbOptions::default();
     options.autosplit = matches.is_present("split");
     options.timing = matches.is_present("timing");
+    options.outline = matches.is_present("outline");
     options.trace_recalc = matches.is_present("trace-recalc");
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
@@ -168,6 +169,10 @@ fn main() {
 
         if matches.is_present("print-formula") {
             db.print_formula();
+        }
+
+        if matches.is_present("outline") {
+            db.print_outline();
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
