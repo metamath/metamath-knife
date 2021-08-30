@@ -71,11 +71,11 @@ pub enum Diagnostic {
     FloatNotVariable(TokenIndex),
     FloatRedeclared(StatementAddress),
     GrammarAmbiguous(StatementAddress),
-	GrammarProvableFloat,
+    GrammarProvableFloat,
     IoError(String),
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
-	MalformedAdditionalInfo(Span),
+    MalformedAdditionalInfo(Span),
     MidStatementCommentMarker(Span),
     MissingLabel,
     MissingProof(Span),
@@ -337,10 +337,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.level = Note;
             ann(&mut info, Span::null());
         }
-		GrammarProvableFloat => {
+        GrammarProvableFloat => {
             info.s = "Floating declaration of provable type";
             ann(&mut info, stmt.span());
-		}
+        }
         IoError(ref err) => {
             info.s = "Source file could not be read (error: {error})";
             info.args.push(("error", err.clone()));
