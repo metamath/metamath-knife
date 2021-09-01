@@ -41,6 +41,7 @@ use std::fmt::Write;
 #[cfg(feature = "dot")]
 use std::fs::File;
 
+/// An index to address [GrammarNode]'s
 type NodeId = usize;
 
 /// For the labels in DOT format
@@ -57,33 +58,41 @@ fn escape(str: &str) -> String {
         .replace("\"","\\\"")
 }
 
+/// The grammar tree represents a Moore/Mealy Machine, where each node is a state of the automaton, 
+/// and transitions are made between node based on the input tokens read from the math string to parse.
 struct GrammarTree(Vec<GrammarNode>);
 
 impl GrammarTree {
+    /// Create a new, empty branch node
     fn create_branch(&mut self) -> NodeId {
         self.0.push(GrammarNode::Branch{cst_map: new_map(), var_map: new_map()});
         //if self.0.len() - 1 == 1413 { panic!("Created 1413!"); }
         self.0.len() - 1
     }
 
+    /// Create a new leaf node, with the given [Reduce], and producing the given [Typecode]
     fn create_leaf(&mut self, reduce: Reduce, typecode: TypeCode) -> NodeId {
         self.0.push(GrammarNode::Leaf{reduce, typecode});
         self.0.len() - 1
     }
     
+    /// Retrieves a [GrammarNode] structure, given its [NodeId].
     fn get(&self, node_id: NodeId) -> &GrammarNode {
         &self.0[node_id]
     }
 
+    /// Retrieves a mutable [GrammarNode] structure, given its [NodeId].
     fn get_mut(&mut self, node_id: NodeId) -> &mut GrammarNode {
         &mut self.0[node_id]
     }
 
+    /// Returns the total number of nodes in this grammar tree.
     fn len(&self) -> usize {
         self.0.len()
     }
 
-    // 
+    /// A utility function to return two nodes, one being a mutable one.
+    /// This is used to avoid double-borrowing issues when copying grammar tree branches.
     fn get_two_nodes_mut(&mut self, from_node_id: NodeId, to_node_id: NodeId) -> (&GrammarNode, &mut GrammarNode) {
         if from_node_id < to_node_id {
             let slice = &mut self.0[from_node_id .. to_node_id+1];
@@ -131,19 +140,20 @@ impl GrammarTree {
 /// The grammar built from the database's syntactic axioms
 ///
 /// It is used to parse metamath statements into [Formula].
+/// See [StmtParse] for getting the formula for statements from the database.
 /// 
-/// Example
+/// Example:
 /// ```
 /// use metamath_knife::database::{Database, DbOptions};
 /// 
-///    // Setup the required options
+/// // Setup the required options
 /// let mut options = DbOptions::default();
-///    options.autosplit = true;
-///    options.jobs = 8;
-///    options.incremental = true;
+/// options.autosplit = true;
+/// options.jobs = 8;
+/// options.incremental = true;
 ///
-///    // Create an empty database and load any file provided
-///    let mut db = Database::new(options);
+/// // Create an empty database and load any file provided
+/// let mut db = Database::new(options);
 /// db.parse("set.mm".to_string(), vec![]);
 /// let grammar = db.grammar_result();
 /// ```
@@ -157,6 +167,12 @@ pub struct Grammar {
     debug: bool,
 }
 
+/// A `Reduce` step applies a completed grammar rule to some of the recent parse trees, 
+/// joining them together as one tree with a new root symbol.
+/// 
+/// - `label` is the syntax axiom being applied.
+/// - `var_count` is the number of variables this syntax axiom requires. This tells how many of the parse trees will be joined.
+/// - `offset` says how far in the stack of yet un-joined parse trees the reduce will join. The cases when this is non-zero are rare.
 #[derive(Clone,Copy,Debug,Default,PartialEq)]
 struct Reduce {
     label: Label,
@@ -170,14 +186,18 @@ impl Reduce {
     }
 }
 
+/// With the current implementation, up to 5 reduce steps can be done in a single transition.
+/// This limit is hard-coded here.
 type ReduceVec = ArrayVec::<[Reduce; 5]>;
 
+/// Builds a list of `reduce`s with a single entry.
 fn single_reduce(r: Reduce) -> ReduceVec {
     let mut reduce_vec = ReduceVec::new();
     reduce_vec.push(r);
     reduce_vec 
 }
 
+/// Increments the offets of the `reduce`s in the given list.
 fn increment_offsets(rv: &mut ReduceVec) {
     for ref mut reduce in rv {
         reduce.offset += 1;
@@ -934,15 +954,13 @@ impl Grammar {
     }
 }
 
-/// Builds the grammar from the syntax axioms in the database, and parse all other statements
-/// Then, search for shorter sequences like ` x e. A ` in the longer ones like ` ( x e. A |-> B ) `
+/// Called by [crate::Database] to build the grammar from the syntax axioms in the database.
 /// 
-/// If there is a match, generate new rules for each rule starting with ` ( ph ... `,
-/// like ` ( A e. B /\ ps ) ` , ` ( A e. B \/ ps ) `, etc. 
-/// When parsed, this shall generate a double reduce, to both the full expression and x e. A.
-/// The same applies for ` ( <. x , y >. e. A |-> B ) ` and so on.
-/// 
-pub(crate) fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>) {
+/// The provided `sset`, and `nset` shall be the result of previous phases over the database.
+/// The provided `grammar` will be updated with the results of the grammar build.
+/// The grammar can then be used to parse the statements of the database (see [parse_statements]), or to parse a single statement.
+/// Use [Grammar::default] to get an initial state.
+pub(crate)  fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>) {
     // Read information about the grammar from the parser commands
     grammar.initialize(sset, nset);
     grammar.root = grammar.nodes.create_branch();
@@ -973,21 +991,23 @@ pub(crate) fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>
 
 /// The result of parsing all statements of the database with the language grammar
 /// 
-/// Example
+/// Example:
 /// ```
 /// use metamath_knife::database::{Database, DbOptions};
 /// 
-///    // Setup the required options
+/// // Setup the required options
 /// let mut options = DbOptions::default();
-///    options.autosplit = true;
-///    options.jobs = 8;
-///    options.incremental = true;
+/// options.autosplit = true;
+/// options.jobs = 8;
+/// options.incremental = true;
 ///
-///    // Create an empty database and load any file provided
-///    let mut db = Database::new(options);
+/// // Create an empty database and load any file provided
+/// let mut db = Database::new(options);
 /// db.parse("set.mm".to_string(), vec![]);
 /// let stmt_parse = db.stmt_parse_result();
 /// ```
+/// 
+/// The parse tree for a given statement can then be obtained through [StmtParse::get_formula].
 pub struct StmtParse {
     segments: HashMap<SegmentId, Arc<StmtParseSegment>>,
 }
@@ -1067,9 +1087,13 @@ fn parse_statements_single<'a>(sset: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, n
     }
 }
 
-/// Parses all the statements in the database
+/// Called by [crate::Database] to parse all the statements in the database
 /// 
-pub fn parse_statements<'a>(stmt_parse: &mut StmtParse, segments: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, grammar: &Arc<Grammar>) {
+/// The provided `segments`, `nset`, and `grammar` shall be the result of previous phases over the database.
+/// The provided `stmt_parse` will be updated with the results of the parse.
+/// The parse tree for a given statement can then be obtained through [StmtParse::get_formula].
+/// Use [StmtParse::default] to get an initial state. Like for several other phases, this occurs in parallel.
+pub(crate) fn parse_statements<'a>(stmt_parse: &mut StmtParse, segments: &'a Arc<SegmentSet>, nset: &Arc<Nameset>, grammar: &Arc<Grammar>) {
     let mut ssrq = Vec::new();
     for sref in segments.segments() {
         let segments2 = segments.clone();
