@@ -1,14 +1,14 @@
 //! The proof object model for RPN proofs used in Metamath.
 
-use diag::Diagnostic;
-use nameck::Nameset;
-use parser::as_str;
-use parser::StatementAddress;
-use parser::StatementRef;
-use parser::StatementType::*;
-use parser::TokenPtr;
-use scopeck::ScopeResult;
-use segment_set::SegmentSet;
+use crate::diag::Diagnostic;
+use crate::nameck::Nameset;
+use crate::parser::as_str;
+use crate::parser::StatementAddress;
+use crate::parser::StatementRef;
+use crate::parser::StatementType::*;
+use crate::parser::TokenPtr;
+use crate::scopeck::ScopeResult;
+use crate::segment_set::SegmentSet;
 use std::cmp::max;
 use std::cmp::Ord;
 use std::cmp::Ordering;
@@ -22,10 +22,10 @@ use std::hash::Hasher;
 use std::collections::hash_map::DefaultHasher;
 use std::ops::Range;
 use std::u16;
-use util::HashMap;
-use util::new_map;
-use verify::ProofBuilder;
-use verify::verify_one;
+use crate::util::HashMap;
+use crate::util::new_map;
+use crate::verify::ProofBuilder;
+use crate::verify::verify_one;
 
 /// A tree structure for storing proofs and grammar derivations.
 #[derive(Clone,Debug,Eq)]

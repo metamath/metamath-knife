@@ -48,20 +48,20 @@
 //! would make changing the beginning and end at the same time faster, and is
 //! attractive future work.
 
-use database::DbOptions;
-use database::Executor;
-use database::Promise;
-use diag::Diagnostic;
+use crate::database::DbOptions;
+use crate::database::Executor;
+use crate::database::Promise;
+use crate::diag::Diagnostic;
 use filetime::FileTime;
-use parser;
-use parser::Comparer;
-use parser::Segment;
-use parser::SegmentId;
-use parser::SegmentOrder;
-use parser::SegmentRef;
-use parser::Span;
-use parser::StatementAddress;
-use parser::StatementRef;
+use crate::parser;
+use crate::parser::Comparer;
+use crate::parser::Segment;
+use crate::parser::SegmentId;
+use crate::parser::SegmentOrder;
+use crate::parser::SegmentRef;
+use crate::parser::Span;
+use crate::parser::StatementAddress;
+use crate::parser::StatementRef;
 use std::collections::VecDeque;
 use std::fs;
 use std::fs::File;
@@ -72,12 +72,12 @@ use std::io::Read;
 use std::mem;
 use std::str;
 use std::sync::Arc;
-use util::find_chapter_header;
-use util::HashMap;
-use util::HashSet;
-use util::new_map;
-use util::new_set;
-use util::ptr_eq;
+use crate::util::find_chapter_header;
+use crate::util::HashMap;
+use crate::util::HashSet;
+use crate::util::new_map;
+use crate::util::new_set;
+use crate::util::ptr_eq;
 
 /// Memory buffer wrapper which hashes by length.
 ///

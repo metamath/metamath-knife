@@ -4,15 +4,15 @@
 //! to be instantiated through `Database`.  It is not considered a stable API,
 //! although a stable wrapper may be added in `Database`.
 
-use parser::as_str;
-use parser::copy_token;
-use parser::Token;
-use parser::HeadingLevel;
-use parser::HeadingDef;
-use parser::SegmentId;
-use parser::SegmentRef;
-use parser::StatementAddress;
-use segment_set::SegmentSet;
+use crate::parser::as_str;
+use crate::parser::copy_token;
+use crate::parser::Token;
+use crate::parser::HeadingLevel;
+use crate::parser::HeadingDef;
+use crate::parser::SegmentId;
+use crate::parser::SegmentRef;
+use crate::parser::StatementAddress;
+use crate::segment_set::SegmentSet;
 use std::sync::Arc;
 
 #[derive(Debug,Default,Clone)]

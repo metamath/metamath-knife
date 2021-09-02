@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use util;
+use crate::util;
 
 #[test]
 fn test_ptr_eq() {

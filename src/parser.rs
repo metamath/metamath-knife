@@ -45,7 +45,7 @@
 //! `SegmentId` and `SegmentRef` cover the same use cases for segments, although
 //! it makes no sense to have a segment-local segment reference.
 
-use diag::Diagnostic;
+use crate::diag::Diagnostic;
 use std::cmp;
 use std::cmp::Ordering;
 use std::mem;
