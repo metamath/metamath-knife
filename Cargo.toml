@@ -6,11 +6,12 @@ readme = "README.md"
 version = "3.1.0-1"
 description = "A parallel and incremental verifier for Metamath databases"
 repository = "https://github.com/david-a-wheeler/metamath-knife"
+edition = "2018"
 
 [dependencies]
 clap = "2.5.2"
 filetime = "0.1.10"
-fnv = "1.0.2"
+fnv = "1.0.7"
 regex = "0.1.71"
 
 [features]

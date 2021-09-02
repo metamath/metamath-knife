@@ -17,28 +17,28 @@
 //!
 //! The nameset is also responsible for maintaining the `Atom` table.
 
-use database::DbOptions;
-use parser::Comparer;
-use parser::copy_token;
-use parser::Segment;
-use parser::SegmentId;
-use parser::SegmentOrder;
-use parser::SegmentRef;
-use parser::StatementAddress;
-use parser::StatementRef;
-use parser::SymbolType;
-use parser::Token;
-use parser::TokenAddress;
-use parser::TokenPtr;
-use segment_set::SegmentSet;
+use crate::database::DbOptions;
+use crate::parser::Comparer;
+use crate::parser::copy_token;
+use crate::parser::Segment;
+use crate::parser::SegmentId;
+use crate::parser::SegmentOrder;
+use crate::parser::SegmentRef;
+use crate::parser::StatementAddress;
+use crate::parser::StatementRef;
+use crate::parser::SymbolType;
+use crate::parser::Token;
+use crate::parser::TokenAddress;
+use crate::parser::TokenPtr;
+use crate::segment_set::SegmentSet;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::u32;
-use util;
-use util::HashMap;
-use util::HashSet;
-use util::new_set;
+use crate::util;
+use crate::util::HashMap;
+use crate::util::HashSet;
+use crate::util::new_set;
 
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup

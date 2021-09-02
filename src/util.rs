@@ -33,7 +33,7 @@ pub fn new_set<K>() -> HashSet<K>
 /// order to force `Deref` coercions to run.
 ///
 ///   ```
-///   # use util;
+///   # use metamath_knife::util;
 ///   # use std::sync::Arc;
 ///   let a1 = Arc::new("Hello, world".to_string());
 ///   let a2 = a1.clone();

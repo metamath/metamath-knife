@@ -1,12 +1,12 @@
-use database::Database;
-use database::DbOptions;
-use diag::Diagnostic;
-use parser::SegmentOrder;
-use parser::StatementAddress;
-use parser::StatementType;
-use parser::Span;
-use parser::NO_STATEMENT;
-use parser::Comparer;
+use crate::database::Database;
+use crate::database::DbOptions;
+use crate::diag::Diagnostic;
+use crate::parser::SegmentOrder;
+use crate::parser::StatementAddress;
+use crate::parser::StatementType;
+use crate::parser::Span;
+use crate::parser::NO_STATEMENT;
+use crate::parser::Comparer;
 use std::cmp::Ordering;
 
 #[test]
