@@ -33,6 +33,8 @@ mod tree;
 mod util_tests;
 #[cfg(test)]
 mod parser_tests;
+#[cfg(test)]
+mod grammar_tests;
 
 use clap::Arg;
 use clap::App;

@@ -60,6 +60,17 @@ impl Formula {
         println!("  Root: {}", self.root);
         self.tree.dump(|atom| as_str(nset.atom_name(*atom)));
     }
+
+    /// Returns the label obtained when following the given path.
+    /// Each element of the path gives the index of the child to retrieve.
+    /// For example, the empty 
+    pub fn get_by_path(&self, path: &[usize]) -> Option<Label> {
+        let mut node_id = self.root;
+        for index in path {
+            node_id = self.tree.nth_child(node_id, *index)?;
+        }
+        Some(self.tree[node_id])
+    }
 }
 
 /// An iterator going through each symbol in a formula

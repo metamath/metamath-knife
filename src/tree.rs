@@ -47,6 +47,16 @@ impl<TreeItem: Copy> Tree<TreeItem> {
             current_id: node.first_child,
         }
     }
+
+    /// iterator through the children of the given node
+    pub fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
+        let mut iter = self.children_iter(node_id);
+        let mut nth_node_id = node_id;
+        for _ in 0..index {
+            nth_node_id = iter.next()?;
+        }
+        Some(nth_node_id)
+    }
     
     /// returns whether the given node has children or not
     pub fn has_children(&self, node_id: NodeId) -> bool {

@@ -587,10 +587,8 @@ impl Database {
 
     /// Get a statement by label.
     pub fn statement(&mut self, name: &str) -> Option<StatementRef> {
-        match self.name_result().lookup_label(name.as_bytes()) {
-            None => None,
-            Some(lookup) => Some(self.parse_result().statement(lookup.address)),
-        }
+        let lookup = self.name_result().lookup_label(name.as_bytes())?;
+        Some(self.parse_result().statement(lookup.address))
     }
 
     /// Export an mmp file for a given statement.
