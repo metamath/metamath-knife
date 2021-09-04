@@ -1521,10 +1521,10 @@ fn collect_definitions(seg: &mut Segment) {
             }
             HeadingComment(level) => {
                 seg.outline.push(HeadingDef { 
-					name: copy_token(get_heading_name(buf,stmt.span.start)),
-					index, 
-					level 
-				});
+                    name: copy_token(get_heading_name(buf,stmt.span.start)),
+                    index, 
+                    level 
+                });
             }
             _ => {}
         }
@@ -1541,7 +1541,7 @@ fn is_valid_label(label: &[u8]) -> bool {
 
 /// Extract a section name from a comment
 fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
-	let mut index = pos as usize;
+    let mut index = pos as usize;
     while index < buffer.len() {
         // is this line indented?
         if buffer[index] == b' ' {
@@ -1570,7 +1570,7 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
     while eol > index && (buffer[eol - 1] == b'\r' || buffer[eol - 1] == b' ') {
         eol -= 1;
     }
-	&buffer[index..eol]
+    &buffer[index..eol]
 }
 
 /// Slightly set.mm specific hack to extract a section name from a byte buffer.
