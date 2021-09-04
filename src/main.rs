@@ -38,11 +38,11 @@ mod grammar_tests;
 
 use clap::Arg;
 use clap::App;
-use crate::database::Database;
-use crate::database::DbOptions;
-use crate::diag::DiagnosticClass;
-use crate::diag::Notation;
-use crate::line_cache::LineCache;
+use database::Database;
+use database::DbOptions;
+use diag::DiagnosticClass;
+use diag::Notation;
+use line_cache::LineCache;
 use std::io;
 use std::mem;
 use std::str::FromStr;
