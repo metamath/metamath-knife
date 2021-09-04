@@ -357,7 +357,7 @@ pub struct Database {
     scopes: Option<Arc<ScopeResult>>,
     prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
-    outline: Option<OutlineNode>,
+    outline: Option<Arc<OutlineNode>>,
 }
 
 fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
@@ -525,12 +525,13 @@ impl Database {
     }
 
     /// Returns the root node of the outline
-    pub fn outline_result(&mut self) -> &OutlineNode {
+    pub fn outline_result(&mut self) -> &Arc<OutlineNode> {
         if self.outline.is_none() {
             time(&self.options.clone(), "outline", || {
                 let parse = self.parse_result().clone();
-                self.outline = Some(OutlineNode::default());
-                outline::build_outline(&mut self.outline.as_mut().unwrap(), &parse);
+                let mut outline = OutlineNode::default();
+                outline::build_outline(&mut outline, &parse);
+                self.outline = Some(Arc::new(outline));
             })
         }
         self.outline.as_ref().unwrap()
