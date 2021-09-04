@@ -186,4 +186,3 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
         }
     }
 }
-
