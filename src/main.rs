@@ -35,6 +35,8 @@ mod util_tests;
 mod parser_tests;
 #[cfg(test)]
 mod grammar_tests;
+#[cfg(test)]
+mod formula_tests;
 
 use clap::Arg;
 use clap::App;

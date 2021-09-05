@@ -178,11 +178,16 @@ struct Reduce {
     label: Label,
     var_count: u8,
     offset: u8,
+    is_variable: bool,
 }
 
 impl Reduce {
-    fn new(label: Label, var_count: u8, offset: u8) -> Self {
-        Reduce { label, var_count, offset }
+    fn new(label: Label, var_count: u8) -> Self {
+        Reduce { label, var_count, offset: 0, is_variable: false }
+    }
+
+    fn new_variable(label: Label) -> Self {
+        Reduce { label, var_count: 0, offset: 0, is_variable: true }
     }
 }
 
@@ -475,7 +480,7 @@ impl Grammar {
             match match &tokens.peek() {
                 Some(_) => self.add_branch_with_reduce(node, atom, symbol.stype, ReduceVec::new()),
                 None => {
-                    let leaf_node_id = self.nodes.create_leaf(Reduce::new(this_label, var_count, 0), this_typecode);
+                    let leaf_node_id = self.nodes.create_leaf(Reduce::new(this_label, var_count), this_typecode);
                     self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
                     },
             } {
@@ -499,7 +504,7 @@ impl Grammar {
         if this_typecode == self.provable_type { return Err(Diagnostic::GrammarProvableFloat); }
 
         // We will add this floating declaration to the grammar tree
-        let leaf_node = self.nodes.create_leaf(Reduce::new(this_label, 0, 0), this_typecode);
+        let leaf_node = self.nodes.create_leaf(Reduce::new_variable(this_label), this_typecode);
 
         // If is safe to unwrap here since parser has already checked.
         let token = tokens.next().unwrap();
@@ -533,7 +538,7 @@ impl Grammar {
                                 debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
                                 debug!("{:?}", GrammarNodeIdDebug(self, node_id, nset));
                                 let mut leaf_label = ref_next_node.leaf_label;
-                                leaf_label.insert(0, Reduce::new(label, 1, 0));
+                                leaf_label.insert(0, Reduce::new(label, 1));
                                 self.add_branch(node_id, from_typecode, SymbolType::Variable, &NextNode{ next_node_id, leaf_label }).unwrap();
                             },
                             Some(existing_next_node) => {
@@ -542,7 +547,7 @@ impl Grammar {
                                 debug!("{:?}", GrammarNodeIdDebug(self, next_node_id, nset));
                                 debug!("{:?}", GrammarNodeIdDebug(self, existing_next_node.next_node_id, nset));
                                 let existing_next_node_id = existing_next_node.next_node_id;
-                                self.nodes.copy_branches(next_node_id, existing_next_node_id, Reduce::new(label, 1, 0)).unwrap();
+                                self.nodes.copy_branches(next_node_id, existing_next_node_id, Reduce::new(label, 1)).unwrap();
                             },
                         }
                     }
@@ -768,7 +773,7 @@ impl Grammar {
 
     fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
         debug!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
-        formula_builder.reduce(reduce.label, reduce.var_count, reduce.offset);
+        formula_builder.reduce(reduce.label, reduce.var_count, reduce.offset, reduce.is_variable);
         //formula_builder.dump(nset);
         debug!(" {:?} {} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count, reduce.offset);
     }
