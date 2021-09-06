@@ -25,7 +25,7 @@ pub struct OutlineNode {
     /// Statement address
     pub stmt_address: StatementAddress,
     /// A list of children subsections
-    pub children: Vec<OutlineNode>,
+    pub children: Vec<Arc<OutlineNode>>,
 }
 
 impl OutlineNode {
@@ -55,14 +55,14 @@ impl OutlineNode {
         match self.children.last_mut() {
             None => {
                 // this is our first child
-                self.children.push(child);
+                self.children.push(Arc::new(child));
             },
             Some(last_child) => {
                 // Append to our last child
                 if child.level > last_child.level {
-                    last_child.add_child(child);
+                    Arc::make_mut(last_child).add_child(child);
                 } else {
-                    self.children.push(child);
+                    self.children.push(Arc::new(child));
                 }
             },
         }
