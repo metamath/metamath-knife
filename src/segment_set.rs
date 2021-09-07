@@ -54,6 +54,7 @@ use crate::database::Promise;
 use crate::diag::Diagnostic;
 use filetime::FileTime;
 use crate::parser;
+use crate::parser::Command;
 use crate::parser::Comparer;
 use crate::parser::Segment;
 use crate::parser::SegmentId;
@@ -219,6 +220,17 @@ impl SegmentSet {
         for sref in self.segments() {
             for &(ix, ref d) in &sref.diagnostics {
                 out.push((StatementAddress::new(sref.id, ix), d.clone()));
+            }
+        }
+        out
+    }
+
+    /// Returns the commands parsed from the $j comments
+    pub fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
+        let mut out = Vec::new();
+        for sref in self.segments() {
+            for &(ix, ref command) in &sref.commands {
+                out.push((StatementAddress::new(sref.id, ix), command.clone()));
             }
         }
         out

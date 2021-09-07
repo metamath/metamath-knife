@@ -33,6 +33,10 @@ pub enum DiagnosticClass {
     /// Verify errors do not invalidate the interpretation of statements, but
     /// affect only proofs.
     Verify,
+    /// Grammar errors reflect whether the database is unambiguous
+    Grammar,
+    /// Statement Parsing result
+    StmtParse,
 }
 
 /// List of all diagnostic codes.  For a description of each, see the source of
@@ -66,14 +70,21 @@ pub enum Diagnostic {
     FloatNotConstant(TokenIndex),
     FloatNotVariable(TokenIndex),
     FloatRedeclared(StatementAddress),
+    GrammarAmbiguous(StatementAddress),
+    GrammarProvableFloat,
     IoError(String),
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
+    MalformedAdditionalInfo(Span),
     MidStatementCommentMarker(Span),
     MissingLabel,
     MissingProof(Span),
     NestedComment(Span, Span),
     NotActiveSymbol(TokenIndex),
+    NotAProvableStatement,
+    ParsedStatementTooShort(Token),
+    ParsedStatementNoTypeCode,
+    ParsedStatementWrongTypeCode(Token),
     ProofDvViolation,
     ProofExcessEnd,
     ProofIncomplete,
@@ -104,6 +115,7 @@ pub enum Diagnostic {
     UnclosedProof,
     UnknownKeyword(Span),
     UnmatchedCloseGroup,
+    UnparseableStatement(TokenIndex),
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
 }
@@ -317,6 +329,18 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
             info.level = Note;
             ann(&mut info, Span::null());
         }
+        GrammarAmbiguous(prevstmt) => {
+            info.s = "Grammar is ambiguous; ";
+            ann(&mut info, stmt.span());
+            info.stmt = sset.statement(prevstmt);
+            info.s = "Collision with this statement:";
+            info.level = Note;
+            ann(&mut info, Span::null());
+        }
+        GrammarProvableFloat => {
+            info.s = "Floating declaration of provable type";
+            ann(&mut info, stmt.span());
+        }
         IoError(ref err) => {
             info.s = "Source file could not be read (error: {error})";
             info.args.push(("error", err.clone()));
@@ -328,6 +352,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         }
         LocalLabelDuplicate(span) => {
             info.s = "Local label duplicates another label in the same proof";
+            ann(&mut info, span);
+        }
+        MalformedAdditionalInfo(span) => {
+            info.s = "Malformed additional information";
             ann(&mut info, span);
         }
         MidStatementCommentMarker(marker) => {
@@ -355,6 +383,24 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         NotActiveSymbol(index) => {
             info.s = "Token used here must be active in the current scope";
             ann(&mut info, stmt.math_span(index));
+        }
+        NotAProvableStatement => {
+            info.s = "Statement does not start with the provable constant type";
+            ann(&mut info, stmt.span());
+        }
+        ParsedStatementNoTypeCode => {
+            info.s = "Empty statement";
+            ann(&mut info, stmt.span());
+        }
+        ParsedStatementTooShort(ref tok) => {
+            info.s = "Statement is too short, expecting for example {expected}";
+            info.args.push(("expected", t(tok)));
+            ann(&mut info, stmt.span());
+        }
+        ParsedStatementWrongTypeCode(ref found) => {
+            info.s = "Type code {found} is not among the expected type codes";
+            info.args.push(("found", t(found)));
+            ann(&mut info, stmt.span());
         }
         ProofDvViolation => {
             info.s = "Disjoint variable constraint violated";
@@ -498,6 +544,10 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         UnmatchedCloseGroup => {
             info.s = "This $} does not match any open ${";
             ann(&mut info, stmt.span());
+        }
+        UnparseableStatement(index) => {
+            info.s = "Could not parse this statement";
+            ann(&mut info, stmt.math_span(index));
         }
         VariableMissingFloat(index) => {
             info.s = "Variable token used in statement must have an active $f";

@@ -9,6 +9,7 @@ pub use regex;
 
 mod bit_set;
 mod segment_set;
+mod tree;
 
 pub mod util;
 pub mod database;
@@ -16,6 +17,8 @@ pub mod diag;
 pub mod export;
 pub mod nameck;
 pub mod outline;
+pub mod grammar;
+pub mod formula;
 pub mod parser;
 pub mod proof;
 pub mod scopeck;

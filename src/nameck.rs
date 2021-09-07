@@ -353,8 +353,13 @@ impl Nameset {
     }
 
     /// Looks up the atom from a $f statement.
-    pub fn var_atom(&self, stmt: StatementRef) -> Option<Atom> {
-        self.lookup_symbol(&stmt.math_at(1)).map(|lookup| lookup.atom)
+    pub fn var_atom(&self, sref: StatementRef) -> Option<Atom> {
+        self.lookup_symbol(&sref.math_at(1)).map(|lookup| lookup.atom)
+    }
+
+    /// The name of a statement - utility function to easily print statement names
+    pub fn statement_name(&self, sref: &StatementRef) -> TokenPtr {
+        self.atom_name(self.lookup_label(sref.label()).map_or(Atom::default(), |l| l.atom))
     }
 }
 

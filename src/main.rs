@@ -16,6 +16,8 @@ pub mod bit_set;
 pub mod database;
 pub mod diag;
 pub mod export;
+pub mod grammar;
+pub mod formula;
 pub mod line_cache;
 pub mod nameck;
 pub mod outline;
@@ -25,11 +27,14 @@ pub mod scopeck;
 pub mod segment_set;
 pub mod util;
 pub mod verify;
+mod tree;
 
 #[cfg(test)]
 mod util_tests;
 #[cfg(test)]
 mod parser_tests;
+#[cfg(test)]
+mod grammar_tests;
 
 use clap::Arg;
 use clap::App;
@@ -41,6 +46,7 @@ use line_cache::LineCache;
 use std::io;
 use std::mem;
 use std::str::FromStr;
+use simple_logger::SimpleLogger;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{}", e))
@@ -56,7 +62,13 @@ fn main() {
             .long("split"))
         .arg(Arg::with_name("timing").help("Print milliseconds after each stage").long("timing"))
         .arg(Arg::with_name("verify").help("Check proof validity").long("verify").short("v"))
-        .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("o"))
+        .arg(Arg::with_name("outline").help("Show database outline").long("outline").short("O"))
+        .arg(Arg::with_name("grammar").help("Check grammar").long("grammar").short("g"))
+        .arg(Arg::with_name("parse-stmt").help("Parse statements according to the databases grammar").long("parse-stmt").short("p"))
+        .arg(Arg::with_name("print-grammar").help("Print the database's grammar").long("print-grammar").short("G"))
+        .arg(Arg::with_name("print-formula").help("Parse all statements according to the database's grammar").long("print-formula").short("F"))
+        .arg(Arg::with_name("export-grammar-dot").help("Export the database's grammar in Graphviz DOT format for visualization").long("export-grammar-dot").short("E"))
+        .arg(Arg::with_name("debug").help("Activate debug logs, including for the grammar building and statement parsing").long("debug"))
         .arg(Arg::with_name("trace-recalc")
             .help("Print segments as they are recalculated")
             .long("trace-recalc"))
@@ -91,6 +103,15 @@ fn main() {
     options.incremental = matches.is_present("repeat");
     options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
         .expect("validator should check this");
+    options.incremental |= matches.is_present("grammar") 
+        || matches.is_present("parse-stmt") 
+        || matches.is_present("export-grammar-dot") 
+        || matches.is_present("print-grammar") 
+        || matches.is_present("print-formula");
+
+    if matches.is_present("debug") {
+        SimpleLogger::new().init().unwrap();
+    }
 
     let mut db = Database::new(options);
 
@@ -116,9 +137,40 @@ fn main() {
             types.push(DiagnosticClass::Verify);
         }
 
+        if matches.is_present("grammar") {
+            types.push(DiagnosticClass::Grammar);
+        }
+
+        if matches.is_present("parse-stmt") {
+            types.push(DiagnosticClass::StmtParse);
+        }
+
         let mut lc = LineCache::default();
+        let mut count = 0;
         for notation in db.diag_notations(types) {
             print_annotation(&mut lc, notation);
+            count += 1;
+        }
+        println!("{} diagnostics issued.", count);
+
+        if matches.is_present("outline") {
+            db.print_outline();
+        }
+
+        if matches.is_present("print-grammar") {
+            db.print_grammar();
+        }
+
+        if matches.is_present("export-grammar-dot") {
+            #[cfg(feature = "dot")]
+            db.export_grammar_dot();
+
+            #[cfg(not(feature = "dot"))]
+            println!("The program was not compiled with the `dot` feature. This is required to export in the DOT format.");
+        }
+
+        if matches.is_present("print-formula") {
+            db.print_formula();
         }
 
         if matches.is_present("outline") {
