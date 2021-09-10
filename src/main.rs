@@ -2,15 +2,11 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 #![warn(missing_docs)]
-#![cfg_attr(feature = "sysalloc", feature(alloc_system))]
 #[macro_use]
 extern crate clap;
 extern crate filetime;
 extern crate fnv;
 extern crate regex;
-
-#[cfg(feature = "sysalloc")]
-extern crate alloc_system;
 
 pub mod bit_set;
 pub mod database;
