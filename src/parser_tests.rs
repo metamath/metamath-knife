@@ -10,6 +10,7 @@ use crate::parser::Comparer;
 use std::cmp::Ordering;
 
 #[test]
+#[allow(clippy::many_single_char_names)]
 fn test_segment_order() {
     let mut so = SegmentOrder::new();
     let f = so.start();
