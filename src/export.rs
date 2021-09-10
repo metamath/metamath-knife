@@ -25,6 +25,8 @@ pub enum ExportError {
     Io(io::Error),
     /// Proof verification error
     Verify(Diagnostic),
+    /// Formatting error
+    Format(fmt::Error),
 }
 
 impl From<io::Error> for ExportError {
@@ -37,12 +39,18 @@ impl From<Diagnostic> for ExportError {
         ExportError::Verify(err)
     }
 }
+impl From<fmt::Error> for ExportError {
+    fn from(err: fmt::Error) -> ExportError {
+        ExportError::Format(err)
+    }
+}
 
 impl fmt::Display for ExportError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             ExportError::Io(ref err) => write!(f, "IO error: {}", err),
             ExportError::Verify(ref err) => write!(f, "{:?}", err),
+            ExportError::Format(ref err) => write!(f, "Format error: {:?}", err),
         }
     }
 }
@@ -52,6 +60,7 @@ impl error::Error for ExportError {
         match *self {
             ExportError::Io(ref err) => Some(err),
             ExportError::Verify(_) => None,
+            ExportError::Format(ref err) => Some(err),
         }
     }
 }

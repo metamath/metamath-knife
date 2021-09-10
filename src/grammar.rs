@@ -930,7 +930,7 @@ impl Grammar {
                             if reduce.offset > 0 { write!(buf, "{}({}) / ", as_str(nset.atom_name(reduce.label)), reduce.offset)?; }
                             else { write!(buf, "{} / ", as_str(nset.atom_name(reduce.label)))?; }
                         }
-                        write!(buf, escape(as_str(nset.atom_name(*symbol))).as_str())?;
+                        write!(buf, "{}", escape(as_str(nset.atom_name(*symbol))).as_str())?;
                         digraph
                             .edge(as_string(node_id), as_string(node.next_node_id))
                             .attributes()
@@ -942,7 +942,7 @@ impl Grammar {
                         buf.write_str(escape(as_str(nset.atom_name(*typecode))).as_str())?;
                         for reduce in node.leaf_label.into_iter() {
                             if reduce.offset > 0 { write!(buf, " / {}({})", as_str(nset.atom_name(reduce.label)),reduce.offset)?; }
-                            else { write(buf, " / {}", as_str(nset.atom_name(reduce.label)))?; }
+                            else { write!(buf, " / {}", as_str(nset.atom_name(reduce.label)))?; }
                         }
                         digraph
                             .edge(as_string(node_id), as_string(node.next_node_id))
