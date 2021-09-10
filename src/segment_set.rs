@@ -434,16 +434,14 @@ impl SegmentSet {
                 }
             }
             for seg in segments {
-                #[allow(clippy::branches_sharing_code)]
-                if seg.0.next_file != Span::null() {
-                    state.segments.push(seg);
+                let has_next = seg.0.next_file != Span::null();
+                state.segments.push(seg);
+                if has_next {
                     // wait for include to be done parsing, incorporate it and
                     // recurse
                     let pp = promises.pop_front().unwrap().wait();
                     let nsegs = flat(state, pp);
                     recurse(state, nsegs);
-                } else {
-                    state.segments.push(seg);
                 }
             }
         }

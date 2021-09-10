@@ -20,6 +20,7 @@ use std::fmt::Write;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::u16;
 use crate::util::HashMap;
@@ -490,16 +491,16 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
 
     fn init_stmt_lookup(&mut self) {
         for tree in &self.p.arr.trees {
-            #[allow(clippy::map_entry)]
-            if !self.stmt_lookup.contains_key(&tree.address) {
-                let label = self.p.sset.statement(tree.address).label();
-                let hyps = if self.p.style.explicit() {
-                    match self.p.scope.get(label) {
+            let p = &self.p;
+            if let Entry::Vacant(entry) = self.stmt_lookup.entry(tree.address) {
+                let label = p.sset.statement(tree.address).label();
+                let hyps = if p.style.explicit() {
+                    match p.scope.get(label) {
                         Some(frame) => {
                             frame.hypotheses
                                 .iter()
                                 .map(|hyp| {
-                                    as_str(self.p
+                                    as_str(p
                                         .sset
                                         .statement(hyp.address())
                                         .label())
@@ -511,7 +512,7 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                 } else {
                     vec![]
                 };
-                self.stmt_lookup.insert(tree.address, (as_str(label), hyps));
+                entry.insert((as_str(label), hyps));
             }
         }
     }
