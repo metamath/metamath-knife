@@ -13,7 +13,7 @@ const GRAMMAR_DB : &[u8] = b"
     ax-com $a |- ( A + B ) = ( B + A ) $.
 ";
 
-fn mkdb(text: &[u8]) -> Database {
+pub fn mkdb(text: &[u8]) -> Database {
     let mut options = DbOptions::default();
     options.incremental = true;
     let mut db = Database::new(options);

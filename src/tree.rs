@@ -79,6 +79,20 @@ impl<TreeItem> Index<NodeId> for Tree<TreeItem> {
     }
 }
 
+// TODO: remove and avoid cloning trees
+impl <TreeItem: Clone> Clone for TreeNode<TreeItem> {
+    fn clone(&self) -> Self { 
+        TreeNode { item: self.item.clone(), first_child: self.first_child, next_sibling: self.next_sibling }
+    }
+}
+
+// TODO: remove and avoid cloning trees
+impl<TreeItem: Clone> Clone for Tree<TreeItem> {
+    fn clone(&self) -> Self {
+        Tree { nodes: self.nodes.clone() }
+    }
+}
+
 /// An iterator through sibling nodes
 pub struct SiblingIter<'a, TreeItem> {
     tree: &'a Tree<TreeItem>,
