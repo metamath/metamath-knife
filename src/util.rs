@@ -80,7 +80,7 @@ pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
 #[inline(always)]
 pub fn copy_portion(vec: &mut Vec<u8>, from: Range<usize>) {
     let Range { start: copy_start, end: copy_end } = from;
-    assert!(vec.get(from).is_some());
+    assert!(vec.get(from).is_some(), "out of range");
     unsafe {
         let copy_len = copy_end - copy_start;
         vec.reserve(copy_len);
