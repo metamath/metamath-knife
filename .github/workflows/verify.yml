@@ -41,18 +41,5 @@ jobs:
       # (or disable those warnings, preferably as specifically as we can).
       - name: Run tests
         run: cargo test --verbose
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Install
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        profile: minimal
-        components: clippy
-        default: true
-    - name: Clippy
+      - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
