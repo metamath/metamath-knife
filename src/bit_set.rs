@@ -21,6 +21,7 @@ pub struct Bitset {
     // of small bitsets at the expense of large ones, as Option<Box> only
     // consumes one word of storage if empty, while Vec and Option<Vec> take
     // three.
+    #[allow(clippy::box_vec)]
     tail: Option<Box<Vec<usize>>>,
 }
 
@@ -33,10 +34,7 @@ impl Clone for Bitset {
     fn clone(&self) -> Bitset {
         Bitset {
             head: self.head,
-            tail: match self.tail {
-                None => None,
-                Some(ref tail) => Some(tail.clone()),
-            },
+            tail: self.tail.clone(),
         }
     }
 }
@@ -65,7 +63,7 @@ impl Bitset {
     fn tail(&self) -> &[usize] {
         match self.tail {
             None => Default::default(),
-            Some(ref bx) => &bx,
+            Some(ref bx) => bx,
         }
     }
 

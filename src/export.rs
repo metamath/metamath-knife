@@ -153,17 +153,17 @@ pub fn export_mmp<W: Write>(sset: &SegmentSet,
         for _ in 0..(spaces + indent[cur] - line.len() as u16) {
             line.push(' ')
         }
-        line.push_str(&str::from_utf8(&tc).unwrap());
+        line.push_str(str::from_utf8(&tc).unwrap());
         line.push_str(&String::from_utf8_lossy(&arr.exprs[cur]));
         writeln!(out, "{}", line)?;
     }
     writeln!(out,
                   "\n$={}",
                   ProofTreePrinter {
-                      sset: sset,
-                      nset: nset,
-                      scope: scope,
-                      thm_label: thm_label,
+                      sset,
+                      nset,
+                      scope,
+                      thm_label,
                       style: ProofStyle::Compressed,
                       arr: &arr,
                       initial_chr: 2,

@@ -85,12 +85,18 @@ use crate::util::ptr_eq;
 /// We don't want to repeatedly hash tens of MBs of source text; but the
 /// segments are long enough that their lengths are likely to contain enough
 /// entropy already.
-#[derive(Eq,PartialEq,Clone,Debug)]
+#[derive(Eq,Clone,Debug)]
 struct LongBuf(Arc<Vec<u8>>);
 
 impl Hash for LongBuf {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.len().hash(state);
+    }
+}
+
+impl PartialEq for LongBuf {
+    fn eq(&self, other: &Self) -> bool {
+        self == other
     }
 }
 
@@ -178,7 +184,7 @@ impl SegmentSet {
             .map(|(&seg_id, &(ref seg, ref _sinfo))| {
                 SegmentRef {
                     id: seg_id,
-                    segment: &seg,
+                    segment: seg,
                 }
             })
             .collect();
@@ -199,7 +205,7 @@ impl SegmentSet {
         self.segments.get(&seg_id).map(|&(ref seg, ref _srcinfo)| {
             SegmentRef {
                 id: seg_id,
-                segment: &seg,
+                segment: seg,
             }
         })
     }
@@ -428,6 +434,7 @@ impl SegmentSet {
                 }
             }
             for seg in segments {
+                #[allow(clippy::branches_sharing_code)]
                 if seg.0.next_file != Span::null() {
                     state.segments.push(seg);
                     // wait for include to be done parsing, incorporate it and

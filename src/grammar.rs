@@ -525,34 +525,32 @@ impl Grammar {
     /// Handle type conversion:
     /// Go through each node and everywhere there is to_typecode(`class`), put a from_typecode(`setvar`), 
     /// pointing to a copy of the next node with a leaf to first do a `cv`
+    #[allow(clippy::too_many_arguments)]
     fn perform_type_conversion(&mut self, from_typecode: TypeCode, to_typecode: TypeCode, label: Label, nset: &Arc<Nameset>) -> Result<(), Diagnostic> {
         let len = self.nodes.len();
         for node_id in 0 .. len {
-            match self.nodes.get(node_id) {
-                GrammarNode::Branch { var_map, .. } => {
-                    if let Some(ref_next_node) = var_map.get(&to_typecode) {
-                        let next_node_id = ref_next_node.next_node_id;
-                        match var_map.get(&from_typecode) {
-                            None => {
-                                // No branch exist for the converted type: create one, with a leaf label.
-                                debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
-                                debug!("{:?}", GrammarNodeIdDebug(self, node_id, nset));
-                                let mut leaf_label = ref_next_node.leaf_label;
-                                leaf_label.insert(0, Reduce::new(label, 1));
-                                self.add_branch(node_id, from_typecode, SymbolType::Variable, &NextNode{ next_node_id, leaf_label }).unwrap();
-                            },
-                            Some(existing_next_node) => {
-                                // A branch for the converted type already exist: add the conversion to that branch!
-                                debug!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
-                                debug!("{:?}", GrammarNodeIdDebug(self, next_node_id, nset));
-                                debug!("{:?}", GrammarNodeIdDebug(self, existing_next_node.next_node_id, nset));
-                                let existing_next_node_id = existing_next_node.next_node_id;
-                                self.nodes.copy_branches(next_node_id, existing_next_node_id, Reduce::new(label, 1)).unwrap();
-                            },
-                        }
+            if let GrammarNode::Branch { var_map, .. } = self.nodes.get(node_id) {
+                if let Some(ref_next_node) = var_map.get(&to_typecode) {
+                    let next_node_id = ref_next_node.next_node_id;
+                    match var_map.get(&from_typecode) {
+                        None => {
+                            // No branch exist for the converted type: create one, with a leaf label.
+                            debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
+                            debug!("{:?}", GrammarNodeIdDebug(self, node_id, nset));
+                            let mut leaf_label = ref_next_node.leaf_label;
+                            leaf_label.insert(0, Reduce::new(label, 1));
+                            self.add_branch(node_id, from_typecode, SymbolType::Variable, &NextNode{ next_node_id, leaf_label }).unwrap();
+                        },
+                        Some(existing_next_node) => {
+                            // A branch for the converted type already exist: add the conversion to that branch!
+                            debug!("Type Conv copying to {} node id {}", next_node_id, existing_next_node.next_node_id);
+                            debug!("{:?}", GrammarNodeIdDebug(self, next_node_id, nset));
+                            debug!("{:?}", GrammarNodeIdDebug(self, existing_next_node.next_node_id, nset));
+                            let existing_next_node_id = existing_next_node.next_node_id;
+                            self.nodes.copy_branches(next_node_id, existing_next_node_id, Reduce::new(label, 1)).unwrap();
+                        },
                     }
-                },
-                _ => {}, // Nothing to do for leafs
+                }
             }
         }
         Ok(())
@@ -778,6 +776,7 @@ impl Grammar {
         debug!(" {:?} {} {}", as_str(nset.atom_name(reduce.label)), reduce.var_count, reduce.offset);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_formula<'a>(&self, start_node: NodeId, sref: &StatementRef, ix: &mut TokenIndex, formula_builder: &mut FormulaBuilder, expected_typecodes: &'a[&'a TypeCode], nset: &Arc<Nameset>, names: &mut NameReader) -> Result<TypeCode, Diagnostic> {
         let mut node = start_node;
         loop {
@@ -786,8 +785,8 @@ impl Grammar {
                     // We found a leaf: REDUCE
                     self.do_reduce(formula_builder, *reduce, nset);
                     if expected_typecodes.iter().any(|&t| *t==*typecode) {
-                        if *ix == sref.math_len() { return Ok(*typecode); }
-                        else { println!("Check this out! {} < {} for {:?}", *ix, sref.math_len(), as_str(nset.statement_name(sref))); return Ok(*typecode); }
+                        if *ix != sref.math_len() { println!("Check this out! {} < {} for {:?}", *ix, sref.math_len(), as_str(nset.statement_name(sref))); }
+                        return Ok(*typecode);
                     } else {
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) = self.next_var_node(self.root, *typecode).unwrap(); // TODO error case

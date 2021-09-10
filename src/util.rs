@@ -42,6 +42,7 @@ pub fn new_set<K>() -> HashSet<K>
 ///   // GOOD: forcing deref to String, we have only one of those
 ///   assert!(util::ptr_eq::<String>(&a1, &a2));
 ///   ```
+#[allow(clippy::ptr_eq)]
 pub fn ptr_eq<T>(x: &T, y: &T) -> bool {
     x as *const _ == y as *const _
 }
@@ -79,14 +80,15 @@ pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
 #[inline(always)]
 pub fn copy_portion(vec: &mut Vec<u8>, from: Range<usize>) {
     let Range { start: copy_start, end: copy_end } = from;
+    #[allow(clippy::no_effect)]
     &vec[from]; // for the bounds check
     unsafe {
         let copy_len = copy_end - copy_start;
         vec.reserve(copy_len);
 
         let old_len = vec.len();
-        let copy_from = vec.as_ptr().offset(copy_start as isize);
-        let copy_to = vec.as_mut_ptr().offset(old_len as isize);
+        let copy_from = vec.as_ptr().add(copy_start);
+        let copy_to = vec.as_mut_ptr().add(old_len);
         short_copy(copy_from, copy_to, copy_len);
         vec.set_len(old_len + copy_len);
     }
@@ -134,10 +136,10 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
             pp += 19;
         }
 
-        return None;
+        None
     }
 
-    const LANDING_STRIP: &'static [u8] =
+    const LANDING_STRIP: &[u8] =
         b"#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#";
 
     fn is_real(buffer: &[u8], mut midp: usize) -> Option<usize> {
