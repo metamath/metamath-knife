@@ -11,9 +11,8 @@ use std::mem::size_of;
 use std::ops::BitOrAssign;
 use std::slice;
 
-
 /// A set of variable indices.
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 pub struct Bitset {
     head: usize,
     // You can take out the Box here and it will still compile (and, with more
@@ -41,12 +40,13 @@ impl Clone for Bitset {
 
 impl PartialEq for Bitset {
     #[inline]
-    fn eq(&self, other: &Self) -> bool { 
-        self.head == other.head && match (self.tail.as_ref(), other.tail.as_ref()) {
-            (None, None) => true,
-            (Some(ref self_tail), Some(ref other_tail)) => self_tail == other_tail,
-            _ => false,
-        }
+    fn eq(&self, other: &Self) -> bool {
+        self.head == other.head
+            && match (self.tail.as_ref(), other.tail.as_ref()) {
+                (None, None) => true,
+                (Some(ref self_tail), Some(ref other_tail)) => self_tail == other_tail,
+                _ => false,
+            }
     }
 }
 

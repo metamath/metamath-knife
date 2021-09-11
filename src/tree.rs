@@ -18,7 +18,7 @@ pub struct Tree<TreeItem> {
 
 impl<TreeItem: Copy> Tree<TreeItem> {
     /// Create a new node with the given item and children (previously added to the tree)
-    /// This way of constructing the tree forces to use a bottom-up approach, 
+    /// This way of constructing the tree forces to use a bottom-up approach,
     /// where the leafs are added first, followed by the branch nodes.
     /// The root node is added last, and is therefore not at a fixed index.
     pub fn add_node(&mut self, item: TreeItem, children: &[NodeId]) -> NodeId {
@@ -30,8 +30,11 @@ impl<TreeItem: Copy> Tree<TreeItem> {
         let mut pointer = &mut new_node.first_child;
         for child_index in children {
             *pointer = *child_index;
-            pointer = &mut self.nodes[*child_index-1].next_sibling;
-            assert!(*pointer == 0, "Children added to a node shall not be chained yet!");
+            pointer = &mut self.nodes[*child_index - 1].next_sibling;
+            assert!(
+                *pointer == 0,
+                "Children added to a node shall not be chained yet!"
+            );
         }
         self.nodes.push(new_node);
         self.nodes.len()
@@ -40,8 +43,11 @@ impl<TreeItem: Copy> Tree<TreeItem> {
     /// iterator through the children of the given node
     pub fn children_iter(&self, node_id: NodeId) -> SiblingIter<TreeItem> {
         assert!(node_id > 0, "Cannot iterate null node!");
-        assert!(node_id <= self.nodes.len(), "Cannot iterate outside of tree!");
-        let node = &self.nodes[node_id-1];
+        assert!(
+            node_id <= self.nodes.len(),
+            "Cannot iterate outside of tree!"
+        );
+        let node = &self.nodes[node_id - 1];
         SiblingIter {
             tree: self,
             current_id: node.first_child,
@@ -57,16 +63,24 @@ impl<TreeItem: Copy> Tree<TreeItem> {
         }
         Some(nth_node_id)
     }
-    
+
     /// returns whether the given node has children or not
     pub fn has_children(&self, node_id: NodeId) -> bool {
-        self.nodes[node_id-1].first_child != 0
+        self.nodes[node_id - 1].first_child != 0
     }
 
     /// Debug only, dumps the internal structure of the tree.
-    pub fn dump<'a, D>(&'a self, display: D) where D: Fn(&'a TreeItem) -> &str {
+    pub fn dump<'a, D>(&'a self, display: D)
+    where
+        D: Fn(&'a TreeItem) -> &str,
+    {
         for node in &self.nodes {
-            println!("  - {:?} fc={}, ns={}", display(&node.item), node.first_child, node.next_sibling);
+            println!(
+                "  - {:?} fc={}, ns={}",
+                display(&node.item),
+                node.first_child,
+                node.next_sibling
+            );
         }
     }
 }
@@ -75,21 +89,27 @@ impl<TreeItem> Index<NodeId> for Tree<TreeItem> {
     type Output = TreeItem;
 
     fn index(&self, node_id: NodeId) -> &Self::Output {
-        &self.nodes[node_id-1].item
+        &self.nodes[node_id - 1].item
     }
 }
 
 // TODO: remove and avoid cloning trees
-impl <TreeItem: Clone> Clone for TreeNode<TreeItem> {
-    fn clone(&self) -> Self { 
-        TreeNode { item: self.item.clone(), first_child: self.first_child, next_sibling: self.next_sibling }
+impl<TreeItem: Clone> Clone for TreeNode<TreeItem> {
+    fn clone(&self) -> Self {
+        TreeNode {
+            item: self.item.clone(),
+            first_child: self.first_child,
+            next_sibling: self.next_sibling,
+        }
     }
 }
 
 // TODO: remove and avoid cloning trees
 impl<TreeItem: Clone> Clone for Tree<TreeItem> {
     fn clone(&self) -> Self {
-        Tree { nodes: self.nodes.clone() }
+        Tree {
+            nodes: self.nodes.clone(),
+        }
     }
 }
 
@@ -107,9 +127,9 @@ impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
             0 => None, // end of the iteration
             _ => {
                 let current_id = self.current_id;
-                self.current_id = self.tree.nodes[current_id-1].next_sibling;
+                self.current_id = self.tree.nodes[current_id - 1].next_sibling;
                 Some(current_id)
-            },
+            }
         }
     }
 }

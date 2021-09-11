@@ -52,7 +52,6 @@ use crate::database::DbOptions;
 use crate::database::Executor;
 use crate::database::Promise;
 use crate::diag::Diagnostic;
-use filetime::FileTime;
 use crate::parser;
 use crate::parser::Command;
 use crate::parser::Comparer;
@@ -63,6 +62,13 @@ use crate::parser::SegmentRef;
 use crate::parser::Span;
 use crate::parser::StatementAddress;
 use crate::parser::StatementRef;
+use crate::util::find_chapter_header;
+use crate::util::new_map;
+use crate::util::new_set;
+use crate::util::ptr_eq;
+use crate::util::HashMap;
+use crate::util::HashSet;
+use filetime::FileTime;
 use std::collections::VecDeque;
 use std::fs;
 use std::fs::File;
@@ -73,19 +79,13 @@ use std::io::Read;
 use std::mem;
 use std::str;
 use std::sync::Arc;
-use crate::util::find_chapter_header;
-use crate::util::HashMap;
-use crate::util::HashSet;
-use crate::util::new_map;
-use crate::util::new_set;
-use crate::util::ptr_eq;
 
 /// Memory buffer wrapper which hashes by length.
 ///
 /// We don't want to repeatedly hash tens of MBs of source text; but the
 /// segments are long enough that their lengths are likely to contain enough
 /// entropy already.
-#[derive(Eq,Clone,Debug)]
+#[derive(Eq, Clone, Debug)]
 struct LongBuf(Arc<Vec<u8>>);
 
 impl Hash for LongBuf {
@@ -124,11 +124,11 @@ pub struct SourceInfo {
 /// use for inserting into the second cache.  If this parsing result applies to
 /// an I/O error, then it will not be inserted into the second cache as the
 /// "source" is not discriminating in that case (it will be empty).
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct SliceSR(Option<LongBuf>, Vec<Arc<Segment>>, Arc<SourceInfo>);
 /// The result of parsing an actual source file is one or more slice results,
 /// and a key for the first cache if successful.
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct FileSR(Option<(String, FileTime)>, Vec<SliceSR>);
 
 /// SegmentSet is a container for parsed databases.
@@ -144,7 +144,7 @@ struct FileSR(Option<(String, FileTime)>, Vec<SliceSR>);
 /// currently also a convenient access point for analysis passes to get the
 /// option block and the work queue executor, although those responsibilities
 /// may be moved.
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct SegmentSet {
     /// The option block controlling this database.
     pub options: Arc<DbOptions>,
@@ -179,13 +179,12 @@ impl SegmentSet {
     /// Iterates over all loaded segments in logical order.
     pub fn segments(&self) -> Vec<SegmentRef> {
         // this might be an actual iterator in the future if needs be
-        let mut out: Vec<SegmentRef> = self.segments
+        let mut out: Vec<SegmentRef> = self
+            .segments
             .iter()
-            .map(|(&seg_id, &(ref seg, ref _sinfo))| {
-                SegmentRef {
-                    id: seg_id,
-                    segment: seg,
-                }
+            .map(|(&seg_id, &(ref seg, ref _sinfo))| SegmentRef {
+                id: seg_id,
+                segment: seg,
             })
             .collect();
         out.sort_by(|x, y| self.order.cmp(&x.id, &y.id));
@@ -202,12 +201,12 @@ impl SegmentSet {
 
     /// Fetch a handle to a loaded segment given a possibly stale ID.
     pub fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef> {
-        self.segments.get(&seg_id).map(|&(ref seg, ref _srcinfo)| {
-            SegmentRef {
+        self.segments
+            .get(&seg_id)
+            .map(|&(ref seg, ref _srcinfo)| SegmentRef {
                 id: seg_id,
                 segment: seg,
-            }
-        })
+            })
     }
 
     /// Fetch source information for a loaded segment given its ID.
@@ -273,11 +272,12 @@ impl SegmentSet {
 
         /// Given a buffer of data from a file, split it and queue jobs to do
         /// the parsing.
-        fn split_and_parse(state: &RecState,
-                           path: String,
-                           timestamp: Option<FileTime>,
-                           buf: Vec<u8>)
-                           -> Promise<FileSR> {
+        fn split_and_parse(
+            state: &RecState,
+            path: String,
+            timestamp: Option<FileTime>,
+            buf: Vec<u8>,
+        ) -> Promise<FileSR> {
             let mut parts = Vec::new();
             let buf = Arc::new(buf);
             // see if we need to parse this file in multiple slices.  the
@@ -343,9 +343,10 @@ impl SegmentSet {
         // read a file from disk (intercessions have already been checked, but
         // the first cache has not) and split/parse it;
         // returns by Result Error on I/O error
-        fn canonicalize_and_read(state: &mut RecState,
-                                 path: String)
-                                 -> io::Result<Promise<FileSR>> {
+        fn canonicalize_and_read(
+            state: &mut RecState,
+            path: String,
+        ) -> io::Result<Promise<FileSR>> {
             let metadata = fs::metadata(&path)?;
             let time = FileTime::from_last_modification_time(&metadata);
 
@@ -389,7 +390,10 @@ impl SegmentSet {
                         };
                         let seg = parser::dummy_segment(From::from(cerr));
                         // cache keys are None so this won't pollute any caches
-                        Promise::new(FileSR(None, vec![SliceSR(None, vec![seg], Arc::new(sinfo))]))
+                        Promise::new(FileSR(
+                            None,
+                            vec![SliceSR(None, vec![seg], Arc::new(sinfo))],
+                        ))
                     })
                 }
                 Some(data) => split_and_parse(state, path, None, data),
@@ -479,14 +483,18 @@ impl SegmentSet {
         let mut new_r = 0..new_segs.len();
 
         // LCS lite
-        while old_r.start < old_r.end && new_r.start < new_r.end &&
-              ptr_eq::<Segment>(&(old_segs[old_r.start].1).0, &new_segs[new_r.start].0) {
+        while old_r.start < old_r.end
+            && new_r.start < new_r.end
+            && ptr_eq::<Segment>(&(old_segs[old_r.start].1).0, &new_segs[new_r.start].0)
+        {
             old_r.start += 1;
             new_r.start += 1;
         }
 
-        while old_r.start < old_r.end && new_r.start < new_r.end &&
-              ptr_eq::<Segment>(&(old_segs[old_r.end - 1].1).0, &new_segs[new_r.end - 1].0) {
+        while old_r.start < old_r.end
+            && new_r.start < new_r.end
+            && ptr_eq::<Segment>(&(old_segs[old_r.end - 1].1).0, &new_segs[new_r.end - 1].0)
+        {
             old_r.end -= 1;
             new_r.end -= 1;
         }
@@ -498,7 +506,8 @@ impl SegmentSet {
         self.file_cache = state.new_by_time;
 
         while old_r.start < old_r.end && new_r.start < new_r.end {
-            self.segments.insert(old_segs[old_r.start].0, new_segs[new_r.start].clone());
+            self.segments
+                .insert(old_segs[old_r.start].0, new_segs[new_r.start].clone());
             new_r.start += 1;
             old_r.start += 1;
         }

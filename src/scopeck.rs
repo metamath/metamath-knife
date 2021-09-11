@@ -32,13 +32,19 @@ use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::nameck::Atom;
 use crate::nameck::NameReader;
-use crate::nameck::Nameset;
 use crate::nameck::NameUsage;
+use crate::nameck::Nameset;
 use crate::parser;
 use crate::parser::Comparer;
+use crate::segment_set::SegmentSet;
+use crate::util::fast_extend;
+use crate::util::new_map;
+use crate::util::new_set;
+use crate::util::ptr_eq;
+use crate::util::HashMap;
+use crate::util::HashSet;
 use parser::copy_token;
 use parser::GlobalRange;
-use parser::NO_STATEMENT;
 use parser::Segment;
 use parser::SegmentId;
 use parser::SegmentOrder;
@@ -52,20 +58,14 @@ use parser::Token;
 use parser::TokenAddress;
 use parser::TokenPtr;
 use parser::TokenRef;
-use crate::segment_set::SegmentSet;
+use parser::NO_STATEMENT;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
-use crate::util::fast_extend;
-use crate::util::HashMap;
-use crate::util::HashSet;
-use crate::util::new_map;
-use crate::util::new_set;
-use crate::util::ptr_eq;
 
 /// Information on a `$v` active in the local or global scope.
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 struct LocalVarInfo {
     /// Definition location
     start: TokenAddress,
@@ -76,7 +76,7 @@ struct LocalVarInfo {
 }
 
 /// Information on a `$f` active in scope
-#[derive(Copy,Clone,Debug,Default)]
+#[derive(Copy, Clone, Debug, Default)]
 struct LocalFloatInfo {
     valid: GlobalRange,
     typecode: Atom,
@@ -84,7 +84,7 @@ struct LocalFloatInfo {
 
 /// Information on a math symbol which has been determined to be valid in the
 /// current scope
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy, Clone, Debug)]
 enum CheckedToken<'a> {
     Const(TokenPtr<'a>, Atom),
     Var(TokenPtr<'a>, Atom, LocalFloatInfo),
@@ -92,13 +92,13 @@ enum CheckedToken<'a> {
 use self::CheckedToken::*;
 
 /// Information on a `$d` statement active in the local scope
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 struct LocalDvInfo {
     valid: GlobalRange,
     vars: Vec<Atom>,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 struct LocalEssentialInfo<'a> {
     valid: GlobalRange,
     label: TokenPtr<'a>,
@@ -111,7 +111,7 @@ struct LocalEssentialInfo<'a> {
 pub type VarIndex = usize;
 
 /// A literal-variable pair, used in the frame expressions.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct ExprFragment {
     /// Pointer into the frame's constant pool for a literal span consisting of
     /// zero or more constant symbols.
@@ -131,7 +131,7 @@ pub struct ExprFragment {
 /// between math symbols are indicated by setting the 8th bit on the last byte
 /// of each symbol.  The same compressed representation is used in literal
 /// segments so that execution can be simple copying.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct VerifyExpr {
     /// Atom representation of the first constant symbol in the expression.
     pub typecode: Atom,
@@ -154,7 +154,7 @@ impl Default for VerifyExpr {
 }
 
 /// Representation of a hypothesis in a frame program.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub enum Hyp {
     /// An `$e` hypothesis, which is substituted and then compared to a stack
     /// slot.
@@ -211,7 +211,7 @@ impl Hyp {
 ///
 /// Variable names are replaced with small integers so that the substitution
 /// being built can be maintained as an array.
-#[derive(Clone,Debug,Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Frame {
     /// Type of this statement, will be `StatementType::Axiom`,
     /// `StatementType::Floating`, or `StatementType::Provable`.
@@ -277,7 +277,11 @@ struct ScopeState<'a> {
 }
 
 fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic) {
-    state.diagnostics.entry(ix).or_insert_with(Vec::new).push(diag);
+    state
+        .diagnostics
+        .entry(ix)
+        .or_insert_with(Vec::new)
+        .push(diag);
 }
 
 /// Verifies that this is the true (first) use of a label.  The returned atom
@@ -296,10 +300,11 @@ fn check_label_dup(state: &mut ScopeState, sref: StatementRef) -> Option<Atom> {
 }
 
 /// Find the definition of a math symbol and verify that it is in scope.
-fn check_math_symbol(state: &mut ScopeState,
-                     sref: StatementRef,
-                     tref: TokenRef)
-                     -> Option<(SymbolType, Atom)> {
+fn check_math_symbol(
+    state: &mut ScopeState,
+    sref: StatementRef,
+    tref: TokenRef,
+) -> Option<(SymbolType, Atom)> {
     // active global definition?
     if let Some(sdef) = state.gnames.lookup_symbol(&tref) {
         if state.order.cmp(&sdef.address, &tref.address) == Ordering::Less {
@@ -308,23 +313,30 @@ fn check_math_symbol(state: &mut ScopeState,
     }
 
     // active local definition?
-    if let Some(local_slot) = state.local_vars.get(tref.slice).and_then(|slot| slot.last()) {
+    if let Some(local_slot) = state
+        .local_vars
+        .get(tref.slice)
+        .and_then(|slot| slot.last())
+    {
         if check_endpoint(sref.index(), local_slot.end) {
             return Some((SymbolType::Variable, local_slot.atom));
         }
     }
 
-    push_diagnostic(state,
-                    sref.index(),
-                    Diagnostic::NotActiveSymbol(tref.index()));
+    push_diagnostic(
+        state,
+        sref.index(),
+        Diagnostic::NotActiveSymbol(tref.index()),
+    );
     None
 }
 
 /// Find the active typecode for a variable.
-fn lookup_float<'a>(state: &mut ScopeState<'a>,
-                    sref: StatementRef<'a>,
-                    tref: TokenRef<'a>)
-                    -> Option<LocalFloatInfo> {
+fn lookup_float<'a>(
+    state: &mut ScopeState<'a>,
+    sref: StatementRef<'a>,
+    tref: TokenRef<'a>,
+) -> Option<LocalFloatInfo> {
     // active global definition?
     if let Some(fdef) = state.gnames.lookup_float(&tref) {
         if state.order.cmp(&fdef.address, &sref.address()) == Ordering::Less {
@@ -336,7 +348,11 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
     }
 
     // active local definition?
-    if let Some(&local_slot) = state.local_floats.get(tref.slice).and_then(|slot| slot.last()) {
+    if let Some(&local_slot) = state
+        .local_floats
+        .get(tref.slice)
+        .and_then(|slot| slot.last())
+    {
         if check_endpoint(sref.index(), local_slot.valid.end) {
             return Some(local_slot);
         }
@@ -347,9 +363,10 @@ fn lookup_float<'a>(state: &mut ScopeState<'a>,
 
 /// Given a math string, verify that all tokens are active, all variables have
 /// typecodes, and the head is a constant.
-fn check_eap<'a>(state: &mut ScopeState<'a>,
-                 sref: StatementRef<'a>)
-                 -> Option<Vec<CheckedToken<'a>>> {
+fn check_eap<'a>(
+    state: &mut ScopeState<'a>,
+    sref: StatementRef<'a>,
+) -> Option<Vec<CheckedToken<'a>>> {
     let mut bad = false;
     let mut out = Vec::with_capacity(sref.math_len() as usize);
 
@@ -366,9 +383,11 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
                 } else {
                     match lookup_float(state, sref, tref) {
                         None => {
-                            push_diagnostic(state,
-                                            sref.index(),
-                                            Diagnostic::VariableMissingFloat(tref.index()));
+                            push_diagnostic(
+                                state,
+                                sref.index(),
+                                Diagnostic::VariableMissingFloat(tref.index()),
+                            );
                             bad = true;
                         }
                         Some(lfi) => out.push(Var(tref.slice, atom, lfi)),
@@ -387,10 +406,12 @@ fn check_eap<'a>(state: &mut ScopeState<'a>,
 
 /// Constructs the psuedo-frames which are required by the verifier for optional
 /// `$f` hypotheses.
-fn construct_stub_frame(state: &mut ScopeState,
-                        sref: StatementRef,
-                        latom: Atom,
-                        expr: &[CheckedToken]) {
+fn construct_stub_frame(
+    state: &mut ScopeState,
+    sref: StatementRef,
+    latom: Atom,
+    expr: &[CheckedToken],
+) {
     let mut iter = expr.iter();
     let typecode = match *iter.next().expect("parser checks $eap token count") {
         Const(_, typecode) => typecode,
@@ -476,15 +497,19 @@ fn scan_expression(iframe: &mut InchoateFrame, expr: &[CheckedToken]) -> VerifyE
             }
             Var(_, atom, lfi) => {
                 // check if the variable is in use
-                let index = iframe.variables.get(&atom).map(|&(x, _)| x).unwrap_or_else(|| {
-                    // it's not!  record it in the frame, and save the $f info for later
-                    let index = iframe.variables.len();
-                    iframe.var_list.push(atom);
-                    // make room in the dv-list
-                    iframe.optional_dv.push(Bitset::new());
-                    iframe.variables.insert(atom, (index, lfi));
-                    index
-                });
+                let index = iframe
+                    .variables
+                    .get(&atom)
+                    .map(|&(x, _)| x)
+                    .unwrap_or_else(|| {
+                        // it's not!  record it in the frame, and save the $f info for later
+                        let index = iframe.variables.len();
+                        iframe.var_list.push(atom);
+                        // make room in the dv-list
+                        iframe.optional_dv.push(Bitset::new());
+                        iframe.variables.insert(atom, (index, lfi));
+                        index
+                    });
                 // the tail is broken at each variable, so start a new segment
                 tail.push(ExprFragment {
                     prefix: open_const..iframe.const_pool.len(),
@@ -517,7 +542,9 @@ fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
                 let index = iframe.variables.len();
                 iframe.var_list.push(varatom);
                 iframe.optional_dv.push(Bitset::new());
-                iframe.variables.insert(varatom, (index, Default::default()));
+                iframe
+                    .variables
+                    .insert(varatom, (index, Default::default()));
                 index
             }
         };
@@ -539,12 +566,18 @@ fn scan_dv(iframe: &mut InchoateFrame, var_set: &[Atom]) {
 }
 
 /// Actually constructs frame programs for `$a`/`$p` statements.
-fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
-                            sref: StatementRef<'a>,
-                            label_atom: Atom,
-                            expr: &[CheckedToken<'a>]) {
-    state.local_essen.retain(|hyp| check_endpoint(sref.index(), hyp.valid.end));
-    state.local_dv.retain(|hyp| check_endpoint(sref.index(), hyp.valid.end));
+fn construct_full_frame<'a>(
+    state: &mut ScopeState<'a>,
+    sref: StatementRef<'a>,
+    label_atom: Atom,
+    expr: &[CheckedToken<'a>],
+) {
+    state
+        .local_essen
+        .retain(|hyp| check_endpoint(sref.index(), hyp.valid.end));
+    state
+        .local_dv
+        .retain(|hyp| check_endpoint(sref.index(), hyp.valid.end));
     // local_essen and local_dv now contain only things still in scope
 
     // collect mandatory variables
@@ -619,16 +652,20 @@ fn scope_check_constant(state: &mut ScopeState, sref: StatementRef) {
 
     for tref in sref.math_iter() {
         if let Some(ldef) = state.gnames.lookup_label(&tref) {
-            push_diagnostic(state,
-                            sref.index(),
-                            Diagnostic::SymbolDuplicatesLabel(tref.index(), ldef.address));
+            push_diagnostic(
+                state,
+                sref.index(),
+                Diagnostic::SymbolDuplicatesLabel(tref.index(), ldef.address),
+            );
         }
 
         if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
             if cdef.address != tref.address {
-                push_diagnostic(state,
-                                sref.index(),
-                                Diagnostic::SymbolRedeclared(tref.index(), cdef.address));
+                push_diagnostic(
+                    state,
+                    sref.index(),
+                    Diagnostic::SymbolRedeclared(tref.index(), cdef.address),
+                );
             }
         }
     }
@@ -648,9 +685,11 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             }
             Some((SymbolType::Variable, varat)) => {
                 if let Some(&previx) = used.get(&varat) {
-                    push_diagnostic(state,
-                                    sref.index(),
-                                    Diagnostic::DjRepeatedVariable(tref.index(), previx));
+                    push_diagnostic(
+                        state,
+                        sref.index(),
+                        Diagnostic::DjRepeatedVariable(tref.index(), previx),
+                    );
                     bad = true;
                     continue;
                 }
@@ -730,16 +769,19 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     }
 
     if let Some(prev) = lookup_float(state, sref, sref.math_at(1)) {
-        push_diagnostic(state,
-                        sref.index(),
-                        Diagnostic::FloatRedeclared(prev.valid.start));
+        push_diagnostic(
+            state,
+            sref.index(),
+            Diagnostic::FloatRedeclared(prev.valid.start),
+        );
         return;
     }
 
     // record the $f; global $f are tracked by nameck but must still be verified
     // here
     if sref.in_group() {
-        state.local_floats
+        state
+            .local_floats
             .entry(copy_token(&var_tok))
             .or_insert_with(Vec::new)
             .push(LocalFloatInfo {
@@ -748,7 +790,10 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
             });
     }
 
-    let expr = [Const(&const_tok, const_at), Var(&var_tok, var_at, LocalFloatInfo::default())];
+    let expr = [
+        Const(&const_tok, const_at),
+        Var(&var_tok, var_at, LocalFloatInfo::default()),
+    ];
     construct_stub_frame(state, sref, latom, &expr);
 }
 
@@ -757,11 +802,15 @@ fn check_endpoint(cur: StatementIndex, end: StatementIndex) -> bool {
 }
 
 // factored out to make a useful borrow scope
-fn maybe_add_local_var(state: &mut ScopeState,
-                       sref: StatementRef,
-                       tref: TokenRef)
-                       -> Option<TokenAddress> {
-    let lv_slot = state.local_vars.entry(copy_token(&tref)).or_insert_with(Vec::new);
+fn maybe_add_local_var(
+    state: &mut ScopeState,
+    sref: StatementRef,
+    tref: TokenRef,
+) -> Option<TokenAddress> {
+    let lv_slot = state
+        .local_vars
+        .entry(copy_token(&tref))
+        .or_insert_with(Vec::new);
 
     if let Some(lv_most_recent) = lv_slot.last() {
         if check_endpoint(sref.index(), lv_most_recent.end) {
@@ -780,18 +829,22 @@ fn maybe_add_local_var(state: &mut ScopeState,
 fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
     for tref in sref.math_iter() {
         if let Some(ldef) = state.gnames.lookup_label(&tref) {
-            push_diagnostic(state,
-                            sref.index(),
-                            Diagnostic::SymbolDuplicatesLabel(tref.index(), ldef.address));
+            push_diagnostic(
+                state,
+                sref.index(),
+                Diagnostic::SymbolDuplicatesLabel(tref.index(), ldef.address),
+            );
         }
 
         if !sref.in_group() {
             // top level $v, may conflict with a prior $c
             if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
                 if cdef.address != tref.address {
-                    push_diagnostic(state,
-                                    sref.index(),
-                                    Diagnostic::SymbolRedeclared(tref.index(), cdef.address));
+                    push_diagnostic(
+                        state,
+                        sref.index(),
+                        Diagnostic::SymbolRedeclared(tref.index(), cdef.address),
+                    );
                 }
             }
         } else {
@@ -799,15 +852,18 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
             // or a _later_ $c
             if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
                 if state.order.cmp(&cdef.address, &tref.address) == Ordering::Less {
-                    push_diagnostic(state,
-                                    sref.index(),
-                                    Diagnostic::SymbolRedeclared(tref.index(), cdef.address));
+                    push_diagnostic(
+                        state,
+                        sref.index(),
+                        Diagnostic::SymbolRedeclared(tref.index(), cdef.address),
+                    );
                     continue;
                 } else if cdef.stype == SymbolType::Constant {
-                    push_diagnostic(state,
-                                    sref.index(),
-                                    Diagnostic::VariableRedeclaredAsConstant(tref.index(),
-                                                                             cdef.address));
+                    push_diagnostic(
+                        state,
+                        sref.index(),
+                        Diagnostic::VariableRedeclaredAsConstant(tref.index(), cdef.address),
+                    );
                     continue;
                 }
             }
@@ -815,9 +871,11 @@ fn scope_check_variable(state: &mut ScopeState, sref: StatementRef) {
             // recorded in local state here
             if let Some(prev_addr) = maybe_add_local_var(state, sref, tref) {
                 // local/local conflict
-                push_diagnostic(state,
-                                sref.index(),
-                                Diagnostic::SymbolRedeclared(tref.index(), prev_addr));
+                push_diagnostic(
+                    state,
+                    sref.index(),
+                    Diagnostic::SymbolRedeclared(tref.index(), prev_addr),
+                );
             }
         }
     }
@@ -930,8 +988,8 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
             ssrq.push_back(segments.exec.exec(sref.bytes(), move || {
                 let sref = segments2.segment(id);
                 if let Some(old_res) = osr {
-                    if old_res.name_usage.valid(&names) &&
-                       ptr_eq::<Segment>(&old_res.source, &sref) {
+                    if old_res.name_usage.valid(&names) && ptr_eq::<Segment>(&old_res.source, &sref)
+                    {
                         return None;
                     }
                 }
@@ -972,7 +1030,10 @@ pub fn scope_check(result: &mut ScopeResult, segments: &Arc<SegmentSet>, names: 
         };
         for frame in &oseg.frames_out {
             let label = sref.statement(frame.valid.start.index).label();
-            result.frame_index.remove(label).expect("check_label_dup should prevent this");
+            result
+                .frame_index
+                .remove(label)
+                .expect("check_label_dup should prevent this");
         }
     }
 
@@ -1048,10 +1109,17 @@ impl ScopeUsage {
     /// Checks if any of the frames used by a `ScopeReader` have potentially
     /// changed since they were read.
     pub fn valid(&self, name: &Nameset, res: &ScopeResult) -> bool {
-        (self.incremental || res.generation <= self.generation) &&
-        self.found.iter().all(|&atom| match res.frame_index.get(name.atom_name(atom)) {
-            None => false,
-            Some(&(gen, _segid, _frix)) => gen <= self.generation,
-        }) && self.not_found.iter().all(|name| !res.frame_index.contains_key(name))
+        (self.incremental || res.generation <= self.generation)
+            && self
+                .found
+                .iter()
+                .all(|&atom| match res.frame_index.get(name.atom_name(atom)) {
+                    None => false,
+                    Some(&(gen, _segid, _frix)) => gen <= self.generation,
+                })
+            && self
+                .not_found
+                .iter()
+                .all(|name| !res.frame_index.contains_key(name))
     }
 }

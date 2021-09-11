@@ -6,16 +6,16 @@
 
 use crate::parser::as_str;
 use crate::parser::copy_token;
-use crate::parser::Token;
-use crate::parser::HeadingLevel;
 use crate::parser::HeadingDef;
+use crate::parser::HeadingLevel;
 use crate::parser::SegmentId;
 use crate::parser::SegmentRef;
 use crate::parser::StatementAddress;
+use crate::parser::Token;
 use crate::segment_set::SegmentSet;
 use std::sync::Arc;
 
-#[derive(Debug,Default,Clone)]
+#[derive(Debug, Default, Clone)]
 /// A node of a database outline
 pub struct OutlineNode {
     /// Name of this outline
@@ -51,12 +51,15 @@ impl OutlineNode {
 
     /// Add a child to this node, or to the correct sub-node
     fn add_child(&mut self, child: Self) {
-        assert!(child.level > self.level, "Cannot add subsection of higher level!");
+        assert!(
+            child.level > self.level,
+            "Cannot add subsection of higher level!"
+        );
         match self.children.last_mut() {
             None => {
                 // this is our first child
                 self.children.push(Arc::new(child));
-            },
+            }
             Some(last_child) => {
                 // Append to our last child
                 if child.level > last_child.level {
@@ -64,22 +67,22 @@ impl OutlineNode {
                 } else {
                     self.children.push(Arc::new(child));
                 }
-            },
+            }
         }
     }
-    
+
     /// Returns the name of that node, i.e. the heading title
     pub fn get_name(&self) -> &str {
         as_str(&self.name)
     }
-    
+
     // TODO - it would be nice to also have a method returning the heading chapter comment, if there is any.
 }
 
 /// Builds the overall outline from the different segments
 pub fn build_outline(node: &mut OutlineNode, sset: &Arc<SegmentSet>) {
     let segments = sset.segments();
-    assert!(!segments.is_empty(),"Parse returned no segment!");
+    assert!(!segments.is_empty(), "Parse returned no segment!");
     *node = OutlineNode::root_node(&segments);
 
     for vsr in segments.iter() {

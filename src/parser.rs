@@ -86,7 +86,7 @@ pub const NO_STATEMENT: StatementIndex = -1;
 ///
 /// Spans will generally not be empty.  An empty span at position 0 is called a
 /// null span used as a sentinel value by several functions.
-#[derive(Copy,Clone,Eq,PartialEq,Debug,Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct Span {
     /// Index of first character of the range.
     pub start: FilePos,
@@ -104,10 +104,7 @@ impl Span {
     }
 
     fn new2(start: FilePos, end: FilePos) -> Span {
-        Span {
-            start,
-            end,
-        }
+        Span { start, end }
     }
 
     /// Returns the null span.
@@ -134,7 +131,7 @@ impl Span {
 /// numeric order of segment identifiers need not mean anything at all and is
 /// not exposed.  If you need to compare segment identifiers for order, get a
 /// reference to the database's `SegmentOrder` object.
-#[derive(Copy,Clone,Debug,Eq,PartialEq,Hash,Default)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub struct SegmentId(pub u32);
 
 /// Semantic type for the index of a token in a statement.
@@ -157,7 +154,7 @@ pub type TokenIndex = i32;
 /// SegmentOrder implements the `Comparer` trait, allowing it to be used
 /// polymorphically with the `cmp` method to order lists of segments,
 /// statements, or tokens.
-#[derive(Clone,Debug,Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SegmentOrder {
     high_water: u32,
     order: Vec<SegmentId>,
@@ -208,7 +205,8 @@ impl SegmentOrder {
     /// end if you pass `start()`.
     pub fn new_before(&mut self, after: SegmentId) -> SegmentId {
         let id = self.alloc_id();
-        self.order.insert(self.reverse[after.0 as usize] as usize, id);
+        self.order
+            .insert(self.reverse[after.0 as usize] as usize, id);
         self.reindex();
         id
     }
@@ -248,7 +246,7 @@ impl<'a, T, C: Comparer<T>> Comparer<T> for &'a C {
 }
 
 /// A statement is located by giving its segment and index within the segment.
-#[derive(Copy,Clone,Eq,PartialEq,Hash,Debug,Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct StatementAddress {
     /// Segment which contains the statement.
     pub segment_id: SegmentId,
@@ -259,10 +257,7 @@ pub struct StatementAddress {
 impl StatementAddress {
     /// Constructs a statement address from its parts.
     pub fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
-        StatementAddress {
-            segment_id,
-            index,
-        }
+        StatementAddress { segment_id, index }
     }
 }
 
@@ -282,7 +277,7 @@ impl StatementAddress {
 ///
 /// In most cases you will use `Atom` instead, so the size of this struct, while
 /// a bit silly, doesn't matter so much.
-#[derive(Copy,Clone,Eq,PartialEq,Debug,Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct TokenAddress {
     /// Address of the statement in which the token is defined.
     pub statement: StatementAddress,
@@ -301,7 +296,7 @@ impl TokenAddress {
 }
 
 /// Expresses a valid range for a statement or token.
-#[derive(Copy,Clone,Debug,Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct GlobalRange {
     /// The starting position of the range, which is also the definition site.
     pub start: StatementAddress,
@@ -348,7 +343,7 @@ pub struct GlobalDv {
 }
 
 /// Types of math symbols in declarations.
-#[derive(Eq,PartialEq,Copy,Clone,Debug)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum SymbolType {
     /// `$v`
     Variable,
@@ -459,7 +454,7 @@ pub struct Segment {
 /// A pointer to a segment which knows its identity.
 ///
 /// `SegmentRef` objects are constructed from outside by the `segment_set`.
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct SegmentRef<'a> {
     /// The underlying segment from the parser.
     pub segment: &'a Arc<Segment>,
@@ -509,7 +504,7 @@ impl<'a> IntoIterator for SegmentRef<'a> {
 
 /// An enumeration of statement types, most of which correspond to statements as
 /// defined in the Metamath spec.
-#[derive(Copy,Clone,Debug,Eq,PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StatementType {
     /// Psuedo statement used only to record end-of-file whitespace.
     Eof,
@@ -562,13 +557,12 @@ impl Default for StatementType {
 
 impl StatementType {
     fn takes_label(self) -> bool {
-        matches!(self,
-            Axiom | Provable | Essential | Floating
-        )
+        matches!(self, Axiom | Provable | Essential | Floating)
     }
 
     fn takes_math(self) -> bool {
-        matches!(self,
+        matches!(
+            self,
             Axiom | Provable | Essential | Floating | Disjoint | Constant | Variable
         )
     }
@@ -582,7 +576,7 @@ impl StatementType {
 ///
 /// The spans comprising the math and proof strings, and the parse errors if
 /// any, are stored in separate arrays within the segment.
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy, Clone, Debug)]
 struct Statement {
     /// Statement type, either a spec-defined type or one of the pseudo-types.
     stype: StatementType,
@@ -610,7 +604,7 @@ struct Statement {
 
 /// A reference to a statement which knows its address and can be used to fetch
 /// statement information.
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct StatementRef<'a> {
     segment: SegmentRef<'a>,
     statement: &'a Statement,
@@ -784,7 +778,7 @@ pub struct TokenIter<'a> {
 /// A reference to a token within a math string that knows its address.
 ///
 /// Primarily used for iteration.
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct TokenRef<'a> {
     /// Textual content of the token.
     pub slice: TokenPtr<'a>,
@@ -865,8 +859,8 @@ struct Scanner<'a> {
 ///
 /// A Metamath database is required to consist of graphic characters, SP, HT,
 /// NL, FF, and CR.
-const MM_VALID_SPACES: u64 = (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) |
-                             (1u64 << 32);
+const MM_VALID_SPACES: u64 =
+    (1u64 << 9) | (1u64 << 10) | (1u64 << 12) | (1u64 << 13) | (1u64 << 32);
 
 /// Check if a character which is known to be <= 32 is a valid Metamath
 /// whitespace.  May panic if out of range.
@@ -882,7 +876,7 @@ fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
 
-#[derive(Debug,Eq,PartialEq,Ord,PartialOrd,Copy,Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
 /// The different types of heading markers, as defined in the Metamath book, section 4.4.1
 pub enum HeadingLevel {
     /// Virtual top-level heading, used as a root node
@@ -903,7 +897,7 @@ impl Default for HeadingLevel {
     }
 }
 
-#[derive(Eq,PartialEq,Copy,Clone)]
+#[derive(Eq, PartialEq, Copy, Clone)]
 enum CommentType {
     Normal,
     Typesetting,
@@ -1019,7 +1013,7 @@ impl<'a> Scanner<'a> {
                 }
             } else if tok_ref.len() >= 4 {
                 if tok_ref[0..4] == b"####"[0..4] {
-                    ctype = CommentType::Heading(HeadingLevel::MajorPart,);
+                    ctype = CommentType::Heading(HeadingLevel::MajorPart);
                 } else if tok_ref[0..4] == b"#*#*"[0..4] {
                     ctype = CommentType::Heading(HeadingLevel::Section);
                 } else if tok_ref[0..4] == b"=-=-"[0..4] {
@@ -1068,8 +1062,10 @@ impl<'a> Scanner<'a> {
             proof_end: self.span_pool.len(),
             group: NO_STATEMENT,
             group_end: NO_STATEMENT,
-            span: Span::new2(mem::replace(&mut self.statement_start, self.position),
-                             self.position),
+            span: Span::new2(
+                mem::replace(&mut self.statement_start, self.position),
+                self.position,
+            ),
         }
     }
 
@@ -1125,7 +1121,8 @@ impl<'a> Scanner<'a> {
     fn get_no_label(&mut self, kwtok: Span) -> Span {
         // none of these are invalidations...
         for &lspan in &self.labels {
-            self.diagnostics.push((self.statement_index, Diagnostic::SpuriousLabel(lspan)));
+            self.diagnostics
+                .push((self.statement_index, Diagnostic::SpuriousLabel(lspan)));
         }
 
         // If this is a valid no-label statement, kwtok will have the keyword.
@@ -1145,9 +1142,10 @@ impl<'a> Scanner<'a> {
             }
             _ => {
                 for &addl in self.labels.iter().skip(1) {
-                    self.diagnostics
-                        .push((self.statement_index,
-                               Diagnostic::RepeatedLabel(addl, self.labels[0])));
+                    self.diagnostics.push((
+                        self.statement_index,
+                        Diagnostic::RepeatedLabel(addl, self.labels[0]),
+                    ));
                 }
                 // have to invalidate because we don't know which to use
                 self.invalidated = true;
@@ -1361,11 +1359,7 @@ impl<'a> Scanner<'a> {
             _ => {}
         }
 
-        let stype = if self.invalidated {
-            Invalid
-        } else {
-            stype
-        };
+        let stype = if self.invalidated { Invalid } else { stype };
 
         self.out_statement(stype, label)
     }
@@ -1451,8 +1445,9 @@ impl<'a> Scanner<'a> {
         // populate `group_end` for statements in groups; was set for
         // `OpenGroup` in the loop above, and we don't want to overwrite it
         for index in 0..seg.statements.len() {
-            if seg.statements[index].group != NO_STATEMENT &&
-               seg.statements[index].stype != OpenGroup {
+            if seg.statements[index].group != NO_STATEMENT
+                && seg.statements[index].stype != OpenGroup
+            {
                 seg.statements[index].group_end =
                     seg.statements[seg.statements[index].group as usize].group_end;
             }
@@ -1528,24 +1523,22 @@ fn collect_definitions(seg: &mut Segment) {
                 });
             }
             HeadingComment(level) => {
-                seg.outline.push(HeadingDef { 
-                    name: copy_token(get_heading_name(buf,stmt.span.start)),
-                    index, 
-                    level 
+                seg.outline.push(HeadingDef {
+                    name: copy_token(get_heading_name(buf, stmt.span.start)),
+                    index,
+                    level,
                 });
             }
-            AdditionalInfoComment => {
-                match commands(buf, stmt.span.start) {
-                    Ok(commands) => {
-                        for command in commands {
-                            seg.commands.push((index, command));
-                        }
-                    },
-                    Err(diag) => {
-                        seg.diagnostics.push((index, diag));
-                    },
+            AdditionalInfoComment => match commands(buf, stmt.span.start) {
+                Ok(commands) => {
+                    for command in commands {
+                        seg.commands.push((index, command));
+                    }
                 }
-            }
+                Err(diag) => {
+                    seg.diagnostics.push((index, diag));
+                }
+            },
             _ => {}
         }
     }
@@ -1554,8 +1547,12 @@ fn collect_definitions(seg: &mut Segment) {
 /// Metamath spec valid label characters are `[-._a-zA-Z0-9]`
 fn is_valid_label(label: &[u8]) -> bool {
     label.iter().all(|&c| {
-        c == b'.' || c == b'-' || c == b'_' || (b'a'..=b'z').contains(&c) ||
-        (b'0'..=b'9').contains(&c) || (b'A'..=b'Z').contains(&c)
+        c == b'.'
+            || c == b'-'
+            || c == b'_'
+            || (b'a'..=b'z').contains(&c)
+            || (b'0'..=b'9').contains(&c)
+            || (b'A'..=b'Z').contains(&c)
     })
 }
 
@@ -1595,7 +1592,10 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
 
 /// Extract the parser commands out of a $j "additional information" comment
 fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter, Diagnostic> {
-    let mut iter = CommandIter { buffer, index: pos as usize };
+    let mut iter = CommandIter {
+        buffer,
+        index: pos as usize,
+    };
     iter.skip_white_spaces();
     iter.expect(b'$')?;
     iter.expect(b'(')?;
@@ -1606,7 +1606,7 @@ fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter, Diagnostic> {
 }
 
 struct CommandIter<'a> {
-    buffer: &'a[u8],
+    buffer: &'a [u8],
     index: usize,
 }
 
@@ -1614,18 +1614,20 @@ impl CommandIter<'_> {
     fn has_more(&self) -> bool {
         self.index < self.buffer.len()
     }
-    
+
     fn next_char(&self) -> u8 {
         self.buffer[self.index]
     }
-    
+
     fn skip_white_spaces(&mut self) {
         // Skip any white spaces and line feeds
-        while self.has_more() && (self.next_char() == b' ' || self.next_char() == b'\n' || self.next_char() == b'\r') {
+        while self.has_more()
+            && (self.next_char() == b' ' || self.next_char() == b'\n' || self.next_char() == b'\r')
+        {
             self.index += 1;
         }
     }
-    
+
     fn expect(&mut self, c: u8) -> Result<(), Diagnostic> {
         if !self.has_more() {
             let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
@@ -1646,10 +1648,14 @@ impl Iterator for CommandIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         while self.has_more() {
             match self.next_char() {
-                b' ' | b'\t' | b'\n' | b'\r' => {},   // Skip white spaces and line feeds
-                b'$' => { return None; },             // End upon comment closing, $)
-                _ => { break; },                      // Else stop
-            }    
+                b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
+                b'$' => {
+                    return None;
+                } // End upon comment closing, $)
+                _ => {
+                    break;
+                } // Else stop
+            }
             self.index += 1;
         }
 
@@ -1659,27 +1665,41 @@ impl Iterator for CommandIter<'_> {
             let token_start = self.index;
             while self.has_more() {
                 match self.next_char() {
-                    b' ' | b'\t' | b'\n' | b'\r' | b';' => { if !quoted { break; } }, // Stop if unquoted white spaces, line feeds or semicolon
-                    b'\'' => {                                             // Stop if quoted and end quote
-                        if quoted && token_start != self.index {
-                            self.index += 1; 
+                    b' ' | b'\t' | b'\n' | b'\r' | b';' => {
+                        if !quoted {
                             break;
                         }
-                    },
-                    _ => {},                                               // Else continue
+                    } // Stop if unquoted white spaces, line feeds or semicolon
+                    b'\'' => {
+                        // Stop if quoted and end quote
+                        if quoted && token_start != self.index {
+                            self.index += 1;
+                            break;
+                        }
+                    }
+                    _ => {} // Else continue
                 }
                 self.index += 1;
             }
 
             // New token found - ignore quotes if any
-            let token = if quoted { &self.buffer[token_start+1..self.index-1] } else { &self.buffer[token_start..self.index] };
+            let token = if quoted {
+                &self.buffer[token_start + 1..self.index - 1]
+            } else {
+                &self.buffer[token_start..self.index]
+            };
             command.push(copy_token(token));
 
             while self.has_more() {
                 match self.next_char() {
-                    b' ' | b'\t' | b'\n' | b'\r' => {},                    // Skip white spaces and line feeds
-                    b';' => { self.index += 1; return Some(command); },    // Stop if unquoted semicolon $)
-                    _ => { break; }                                        // Stop otherwise
+                    b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
+                    b';' => {
+                        self.index += 1;
+                        return Some(command);
+                    } // Stop if unquoted semicolon $)
+                    _ => {
+                        break;
+                    } // Stop otherwise
                 }
                 self.index += 1;
             }

@@ -29,9 +29,8 @@ use crate::diag::Diagnostic;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
 use crate::parser;
-use crate::parser::Comparer;
 use crate::parser::copy_token;
-use crate::parser::NO_STATEMENT;
+use crate::parser::Comparer;
 use crate::parser::Segment;
 use crate::parser::SegmentId;
 use crate::parser::SegmentOrder;
@@ -41,6 +40,7 @@ use crate::parser::StatementAddress;
 use crate::parser::StatementRef;
 use crate::parser::StatementType;
 use crate::parser::TokenPtr;
+use crate::parser::NO_STATEMENT;
 use crate::scopeck;
 use crate::scopeck::ExprFragment;
 use crate::scopeck::Frame;
@@ -50,6 +50,12 @@ use crate::scopeck::ScopeResult;
 use crate::scopeck::ScopeUsage;
 use crate::scopeck::VerifyExpr;
 use crate::segment_set::SegmentSet;
+use crate::util::copy_portion;
+use crate::util::fast_clear;
+use crate::util::fast_extend;
+use crate::util::new_map;
+use crate::util::ptr_eq;
+use crate::util::HashMap;
 use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
@@ -57,12 +63,6 @@ use std::result;
 use std::sync::Arc;
 use std::u32;
 use std::usize;
-use crate::util::copy_portion;
-use crate::util::fast_clear;
-use crate::util::fast_extend;
-use crate::util::HashMap;
-use crate::util::new_map;
-use crate::util::ptr_eq;
 
 // Proofs are very fragile and there are very few situations where errors are
 // recoverable, so we bail out using Result on any error.
@@ -110,12 +110,13 @@ pub trait ProofBuilder {
 
     /// Create a proof data node from a statement, the data for the hypotheses,
     /// and the compressed constant string
-    fn build(&mut self,
-             addr: StatementAddress,
-             hyps: Self::Accum,
-             pool: &[u8],
-             expr: Range<usize>)
-             -> Self::Item;
+    fn build(
+        &mut self,
+        addr: StatementAddress,
+        hyps: Self::Accum,
+        pool: &[u8],
+        expr: Range<usize>,
+    ) -> Self::Item;
 }
 
 /// The "null" proof builder, which creates no extra data. This
@@ -187,8 +188,10 @@ fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<P>, hyp: &'a 
     let tos = state.stack_buffer.len();
     match *hyp {
         Floating(_addr, var_index, _typecode) => {
-            fast_extend(&mut state.stack_buffer,
-                        state.nameset.atom_name(state.cur_frame.var_list[var_index]));
+            fast_extend(
+                &mut state.stack_buffer,
+                state.nameset.atom_name(state.cur_frame.var_list[var_index]),
+            );
             *state.stack_buffer.last_mut().unwrap() |= 0x80;
             vars.set_bit(var_index); // and we have prior knowledge it's identity mapped
         }
@@ -196,28 +199,37 @@ fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<P>, hyp: &'a 
             // this is the first of many subtle variations on the "interpret an
             // ExprFragment" theme in this module.
             for part in &*expr.tail {
-                fast_extend(&mut state.stack_buffer,
-                            &state.cur_frame.const_pool[part.prefix.clone()]);
-                fast_extend(&mut state.stack_buffer,
-                            state.nameset.atom_name(state.cur_frame.var_list[part.var]));
+                fast_extend(
+                    &mut state.stack_buffer,
+                    &state.cur_frame.const_pool[part.prefix.clone()],
+                );
+                fast_extend(
+                    &mut state.stack_buffer,
+                    state.nameset.atom_name(state.cur_frame.var_list[part.var]),
+                );
                 *state.stack_buffer.last_mut().unwrap() |= 0x80;
                 vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
             }
-            fast_extend(&mut state.stack_buffer,
-                        &state.cur_frame.const_pool[expr.rump.clone()]);
+            fast_extend(
+                &mut state.stack_buffer,
+                &state.cur_frame.const_pool[expr.rump.clone()],
+            );
         }
     };
 
     let ntos = state.stack_buffer.len();
 
-    state.prepared
-        .push(Hyp(vars,
-                  hyp.typecode(),
-                  tos..ntos,
-                  state.builder.build(hyp.address(),
-                                      Default::default(),
-                                      &state.stack_buffer,
-                                      tos..ntos)));
+    state.prepared.push(Hyp(
+        vars,
+        hyp.typecode(),
+        tos..ntos,
+        state.builder.build(
+            hyp.address(),
+            Default::default(),
+            &state.stack_buffer,
+            tos..ntos,
+        ),
+    ));
 }
 
 /// Adds a named $e hypothesis to the prepared array.  These are not kept in the
@@ -245,7 +257,7 @@ fn prepare_named_hyp<P: ProofBuilder>(state: &mut VerifyState<P>, label: TokenPt
     false
 }
 
-#[derive(Default,Clone,Copy)]
+#[derive(Default, Clone, Copy)]
 struct StepParse<'a> {
     // The local label for later backreference, or None for not present
     fwdref: Option<TokenPtr<'a>>,
@@ -259,10 +271,11 @@ struct StepParse<'a> {
 /// Used for named step references.  For NORMAL proofs this is immediately
 /// before execute_step, but for COMPRESSED proofs all used steps are prepared
 /// ahead of time, and assigned sequential numbers for later use.
-fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
-                                     label: TokenPtr<'a>,
-                                     label_span: Option<Span>)
-                                     -> Result<StepParse<'a>> {
+fn prepare_step<'a, P: ProofBuilder>(
+    state: &mut VerifyState<P>,
+    label: TokenPtr<'a>,
+    label_span: Option<Span>,
+) -> Result<StepParse<'a>> {
     let mut out = StepParse::default();
 
     // it's either an assertion or a hypothesis.  $f hyps have pseudo-frames
@@ -273,8 +286,10 @@ fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
         None => {
             let label_span = match label_span {
                 None => {
-                    try_assert!(prepare_named_hyp(state, label),
-                                Diagnostic::StepMissing(copy_token(label)));
+                    try_assert!(
+                        prepare_named_hyp(state, label),
+                        Diagnostic::StepMissing(copy_token(label))
+                    );
                     return Ok(out);
                 }
                 Some(l) => l,
@@ -282,8 +297,10 @@ fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
 
             // The above handles the "fast path", for normal and compressed proofs.
             // For packed/explicit...
-            let (fwdref, hyptok, label) = match (label.iter().position(|&x| x == b':'),
-                                                 label.iter().position(|&x| x == b'=')) {
+            let (fwdref, hyptok, label) = match (
+                label.iter().position(|&x| x == b':'),
+                label.iter().position(|&x| x == b'='),
+            ) {
                 (None, None) => (None, None, label),
                 (Some(m), None) => (Some(&label[..m]), None, &label[m + 1..]),
                 (None, Some(n)) => (None, Some(&label[..n]), &label[n + 1..]),
@@ -298,8 +315,10 @@ fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
             out.fwdref = fwdref;
             out.hyptok = hyptok;
             if let Some(x) = fwdref {
-                try_assert!(state.scoper.get(x).is_none(),
-                            Diagnostic::LocalLabelAmbiguous(label_span));
+                try_assert!(
+                    state.scoper.get(x).is_none(),
+                    Diagnostic::LocalLabelAmbiguous(label_span)
+                );
             }
             match state.scoper.get(label) {
                 Some(fp) => fp,
@@ -316,12 +335,16 @@ fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
     // disallow circular reasoning
     let valid = frame.valid;
     let pos = state.cur_frame.valid.start;
-    try_assert!(state.order.cmp(&pos, &valid.start) == Ordering::Greater,
-                Diagnostic::StepUsedBeforeDefinition(copy_token(label)));
+    try_assert!(
+        state.order.cmp(&pos, &valid.start) == Ordering::Greater,
+        Diagnostic::StepUsedBeforeDefinition(copy_token(label))
+    );
 
-    try_assert!(valid.end == NO_STATEMENT ||
-                pos.segment_id == valid.start.segment_id && pos.index < valid.end,
-                Diagnostic::StepUsedAfterScope(copy_token(label)));
+    try_assert!(
+        valid.end == NO_STATEMENT
+            || pos.segment_id == valid.start.segment_id && pos.index < valid.end,
+        Diagnostic::StepUsedAfterScope(copy_token(label))
+    );
 
     if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
         state.prepared.push(Assert(frame));
@@ -335,14 +358,17 @@ fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
         let tos = state.stack_buffer.len();
         fast_extend(&mut state.stack_buffer, &frame.stub_expr);
         let ntos = state.stack_buffer.len();
-        state.prepared
-            .push(Hyp(vars,
-                      frame.target.typecode,
-                      tos..ntos,
-                      state.builder.build(valid.start,
-                                          Default::default(),
-                                          &state.stack_buffer,
-                                          tos..ntos)));
+        state.prepared.push(Hyp(
+            vars,
+            frame.target.typecode,
+            tos..ntos,
+            state.builder.build(
+                valid.start,
+                Default::default(),
+                &state.stack_buffer,
+                tos..ntos,
+            ),
+        ));
     }
 
     Ok(out)
@@ -351,10 +377,12 @@ fn prepare_step<'a, P: ProofBuilder>(state: &mut VerifyState<P>,
 // perform a substitution after it has been built in `vars`, appending to
 // `target`
 #[inline(always)]
-fn do_substitute(target: &mut Vec<u8>,
-                 frame: &Frame,
-                 expr: &VerifyExpr,
-                 vars: &[(Range<usize>, Bitset)]) {
+fn do_substitute(
+    target: &mut Vec<u8>,
+    frame: &Frame,
+    expr: &VerifyExpr,
+    vars: &[(Range<usize>, Bitset)],
+) {
     for part in &*expr.tail {
         fast_extend(target, &frame.const_pool[part.prefix.clone()]);
         copy_portion(target, vars[part.var].0.clone());
@@ -364,12 +392,13 @@ fn do_substitute(target: &mut Vec<u8>,
 
 // like a substitution and equality check, but in one pass
 #[inline(always)]
-fn do_substitute_eq(mut compare: &[u8],
-                    frame: &Frame,
-                    expr: &VerifyExpr,
-                    vars: &[(Range<usize>, Bitset)],
-                    var_buffer: &[u8])
-                    -> bool {
+fn do_substitute_eq(
+    mut compare: &[u8],
+    frame: &Frame,
+    expr: &VerifyExpr,
+    vars: &[(Range<usize>, Bitset)],
+    var_buffer: &[u8],
+) -> bool {
     fn step(compare: &mut &[u8], slice: &[u8]) -> bool {
         let len = slice.len();
         if (*compare).len() < len {
@@ -428,12 +457,13 @@ fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) ->
 /// else we'll ignore the `$e`), and that logical file order is reflected in
 /// the stack order of the hypotheses, we can do this in one pass.
 #[inline(always)]
-fn process_hyp<P: ProofBuilder>(state: &mut VerifyState<P>,
-                                datavec: &mut P::Accum,
-                                frame: &Frame,
-                                ix: usize,
-                                hyp: &scopeck::Hyp)
-                                -> Result<()> {
+fn process_hyp<P: ProofBuilder>(
+    state: &mut VerifyState<P>,
+    datavec: &mut P::Accum,
+    frame: &Frame,
+    ix: usize,
+    hyp: &scopeck::Hyp,
+) -> Result<()> {
     let (ref data, ref slot): (P::Item, StackSlot) = state.stack[ix];
     state.builder.push(datavec, data.clone());
     match *hyp {
@@ -443,12 +473,16 @@ fn process_hyp<P: ProofBuilder>(state: &mut VerifyState<P>,
         }
         Essential(_addr, ref expr) => {
             try_assert!(slot.code == expr.typecode, Diagnostic::StepEssenWrongType);
-            try_assert!(do_substitute_eq(&state.stack_buffer[slot.expr.clone()],
-                                         frame,
-                                         expr,
-                                         &state.subst_info,
-                                         &state.stack_buffer),
-                        Diagnostic::StepEssenWrong);
+            try_assert!(
+                do_substitute_eq(
+                    &state.stack_buffer[slot.expr.clone()],
+                    frame,
+                    expr,
+                    &state.subst_info,
+                    &state.stack_buffer
+                ),
+                Diagnostic::StepEssenWrong
+            );
         }
     }
     Ok(())
@@ -457,27 +491,31 @@ fn process_hyp<P: ProofBuilder>(state: &mut VerifyState<P>,
 /// This is the main "VM" function, and responsible for ~30% of CPU time during
 /// a one-shot verify operation.
 #[inline(always)]
-fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
-                                 index: usize,
-                                 explicit: Option<&mut Vec<Option<TokenPtr>>>)
-                                 -> Result<()> {
+fn execute_step<P: ProofBuilder>(
+    state: &mut VerifyState<P>,
+    index: usize,
+    explicit: Option<&mut Vec<Option<TokenPtr>>>,
+) -> Result<()> {
     try_assert!(index < state.prepared.len(), Diagnostic::StepOutOfRange);
     let fref = match state.prepared[index] {
         Hyp(ref vars, code, ref expr, ref data) => {
             // hypotheses/saved steps are the easy case.  unfortunately, this is
             // also a very unpredictable branch
-            state.stack.push((data.clone(),
-                              StackSlot {
-                vars: vars.clone(),
-                code,
-                expr: expr.clone(),
-            }));
+            state.stack.push((
+                data.clone(),
+                StackSlot {
+                    vars: vars.clone(),
+                    code,
+                    expr: expr.clone(),
+                },
+            ));
             return Ok(());
         }
         Assert(fref) => fref,
     };
 
-    let sbase = state.stack
+    let sbase = state
+        .stack
         .len()
         .checked_sub(fref.hypotheses.len())
         .ok_or(Diagnostic::ProofUnderflow)?;
@@ -496,10 +534,13 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
         let mut in_order = true;
         for (ix, hyp) in fref.hypotheses.iter().enumerate() {
             if let Some(tok) = explicit_stack[sbase + ix] {
-                if state.nameset
-                        .lookup_label(tok)
-                        .ok_or_else(|| Diagnostic::BadExplicitLabel(copy_token(tok)))?
-                    .address != hyp.address() {
+                if state
+                    .nameset
+                    .lookup_label(tok)
+                    .ok_or_else(|| Diagnostic::BadExplicitLabel(copy_token(tok)))?
+                    .address
+                    != hyp.address()
+                {
                     in_order = false;
                     break;
                 }
@@ -517,12 +558,15 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
             for (ix, &ex) in explicit_stack[sbase..].iter().enumerate() {
                 if let Some(tok) = ex {
                     let addr = state.nameset.lookup_label(tok).unwrap().address;
-                    let hyp_ix = (fref.hypotheses
+                    let hyp_ix = (fref
+                        .hypotheses
                         .iter()
                         .position(|hyp| hyp.address() == addr)
                         .ok_or_else(|| Diagnostic::BadExplicitLabel(copy_token(tok))))?;
-                    try_assert!(assn_hyps[hyp_ix].is_none(),
-                                Diagnostic::DuplicateExplicitLabel(copy_token(tok)));
+                    try_assert!(
+                        assn_hyps[hyp_ix].is_none(),
+                        Diagnostic::DuplicateExplicitLabel(copy_token(tok))
+                    );
                     assn_hyps[hyp_ix] = Some(ix);
                 }
             }
@@ -534,11 +578,13 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
             }
 
             for (ix, slot) in assn_hyps.iter().enumerate() {
-                process_hyp(state,
-                                 &mut datavec,
-                                 fref,
-                                 sbase + ix,
-                                 &fref.hypotheses[slot.unwrap()])?;
+                process_hyp(
+                    state,
+                    &mut datavec,
+                    fref,
+                    sbase + ix,
+                    &fref.hypotheses[slot.unwrap()],
+                )?;
             }
         }
 
@@ -555,20 +601,25 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
     // deciding whether we need to move anything would swamp any savings, anyway
     // - remember that this function is largely a branch predictor benchmark
     let tos = state.stack_buffer.len();
-    do_substitute(&mut state.stack_buffer,
-                  fref,
-                  &fref.target,
-                  &state.subst_info);
+    do_substitute(
+        &mut state.stack_buffer,
+        fref,
+        &fref.target,
+        &state.subst_info,
+    );
     let ntos = state.stack_buffer.len();
 
     state.stack.truncate(sbase);
-    state.stack
-        .push((state.builder.build(fref.valid.start, datavec, &state.stack_buffer, tos..ntos),
-               StackSlot {
+    state.stack.push((
+        state
+            .builder
+            .build(fref.valid.start, datavec, &state.stack_buffer, tos..ntos),
+        StackSlot {
             code: fref.target.typecode,
             vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
             expr: tos..ntos,
-        }));
+        },
+    ));
 
     // check $d constraints on the used assertion now that the dust has settled.
     // Remember that we might have variable indexes allocated during the proof
@@ -576,8 +627,10 @@ fn execute_step<P: ProofBuilder>(state: &mut VerifyState<P>,
     for &(ix1, ix2) in &*fref.mandatory_dv {
         for var1 in &state.subst_info[ix1].1 {
             for var2 in &state.subst_info[ix2].1 {
-                try_assert!(var1 < state.dv_map.len() && state.dv_map[var1].has_bit(var2),
-                            Diagnostic::ProofDvViolation);
+                try_assert!(
+                    var1 < state.dv_map.len() && state.dv_map[var1].has_bit(var2),
+                    Diagnostic::ProofDvViolation
+                );
             }
         }
     }
@@ -590,27 +643,40 @@ fn finalize_step<P: ProofBuilder>(state: &mut VerifyState<P>) -> Result<P::Item>
     try_assert!(state.stack.len() <= 1, Diagnostic::ProofExcessEnd);
     let &(ref data, ref tos) = state.stack.last().ok_or(Diagnostic::ProofNoSteps)?;
 
-    try_assert!(tos.code == state.cur_frame.target.typecode,
-                Diagnostic::ProofWrongTypeEnd);
+    try_assert!(
+        tos.code == state.cur_frame.target.typecode,
+        Diagnostic::ProofWrongTypeEnd
+    );
 
     fast_clear(&mut state.temp_buffer);
     do_substitute_raw(&mut state.temp_buffer, state.cur_frame, state.nameset);
 
-    try_assert!(state.stack_buffer[tos.expr.clone()] == state.temp_buffer[..],
-                Diagnostic::ProofWrongExprEnd);
+    try_assert!(
+        state.stack_buffer[tos.expr.clone()] == state.temp_buffer[..],
+        Diagnostic::ProofWrongExprEnd
+    );
 
     Ok(data.clone())
 }
 
 fn save_step<P: ProofBuilder>(state: &mut VerifyState<P>) {
-    let &(ref data, ref top) = state.stack.last().expect("can_save should prevent getting here");
-    state.prepared.push(Hyp(top.vars.clone(), top.code, top.expr.clone(), data.clone()));
+    let &(ref data, ref top) = state
+        .stack
+        .last()
+        .expect("can_save should prevent getting here");
+    state.prepared.push(Hyp(
+        top.vars.clone(),
+        top.code,
+        top.expr.clone(),
+        data.clone(),
+    ));
 }
 
 // proofs are not self-synchronizing, so it's not likely to get >1 usable error
-fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
-                                     stmt: StatementRef<'a>)
-                                     -> Result<P::Item> {
+fn verify_proof<'a, P: ProofBuilder>(
+    state: &mut VerifyState<'a, P>,
+    stmt: StatementRef<'a>,
+) -> Result<P::Item> {
     // clear, but do not free memory
     state.stack.clear();
     fast_clear(&mut state.stack_buffer);
@@ -665,8 +731,10 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
                     can_save = true;
                 } else if (b'U'..=b'Y').contains(&ch) {
                     k = k * 5 + 1 + (ch - b'U') as usize;
-                    try_assert!(k < (u32::max_value() as usize / 20) - 1,
-                                Diagnostic::ProofMalformedVarint);
+                    try_assert!(
+                        k < (u32::max_value() as usize / 20) - 1,
+                        Diagnostic::ProofMalformedVarint
+                    );
                     can_save = false;
                 } else if ch == b'Z' {
                     try_assert!(can_save, Diagnostic::ProofInvalidSave);
@@ -694,7 +762,8 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
             let step = prepare_step(state, chunk, Some(span))?;
             if let Some(label) = step.label {
                 try_assert!(step.fwdref.is_none(), Diagnostic::ChainBackref(span));
-                let &ix = backrefs.get(label)
+                let &ix = backrefs
+                    .get(label)
                     .ok_or_else(|| Diagnostic::StepMissing(copy_token(label)))?;
                 execute_step(state, ix, explicit_stack.as_mut())?;
             } else {
@@ -702,8 +771,10 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
                 if let Some(fwdref) = step.fwdref {
                     state.prepared.pop();
                     save_step(state);
-                    try_assert!(backrefs.insert(fwdref, count).is_none(),
-                                Diagnostic::LocalLabelDuplicate(span));
+                    try_assert!(
+                        backrefs.insert(fwdref, count).is_none(),
+                        Diagnostic::LocalLabelDuplicate(span)
+                    );
                 }
                 count += 1;
             }
@@ -711,7 +782,7 @@ fn verify_proof<'a, P: ProofBuilder>(state: &mut VerifyState<'a, P>,
                 if explicit_stack.is_none() {
                     // lazy initialization so that we don't need to maintain
                     // this parallel stack if we are not in explicit mode
-                    explicit_stack = Some(vec![None; state.stack.len()-1]);
+                    explicit_stack = Some(vec![None; state.stack.len() - 1]);
                 }
                 explicit_stack.as_mut().unwrap().push(step.hyptok);
             }
@@ -729,7 +800,7 @@ struct VerifySegment {
 }
 
 /// Analysis pass result for the verifier.
-#[derive(Default,Clone)]
+#[derive(Default, Clone)]
 pub struct VerifyResult {
     segments: HashMap<SegmentId, Arc<VerifySegment>>,
 }
@@ -748,11 +819,12 @@ impl VerifyResult {
 }
 
 /// Driver which verifies each statement in a segment.
-fn verify_segment(sset: &SegmentSet,
-                  nset: &Nameset,
-                  scopes: &ScopeResult,
-                  sid: SegmentId)
-                  -> VerifySegment {
+fn verify_segment(
+    sset: &SegmentSet,
+    nset: &Nameset,
+    scopes: &ScopeResult,
+    sid: SegmentId,
+) -> VerifySegment {
     let mut diagnostics = new_map();
     let dummy_frame = Frame::default();
     let sref = sset.segment(sid);
@@ -793,10 +865,12 @@ fn verify_segment(sset: &SegmentSet,
 }
 
 /// Calculates or updates the verification result for a database.
-pub fn verify(result: &mut VerifyResult,
-              segments: &Arc<SegmentSet>,
-              nset: &Arc<Nameset>,
-              scope: &Arc<ScopeResult>) {
+pub fn verify(
+    result: &mut VerifyResult,
+    segments: &Arc<SegmentSet>,
+    nset: &Arc<Nameset>,
+    scope: &Arc<ScopeResult>,
+) {
     let old = mem::replace(&mut result.segments, new_map());
     let mut ssrq = Vec::new();
     for sref in segments.segments() {
@@ -808,8 +882,9 @@ pub fn verify(result: &mut VerifyResult,
         ssrq.push(segments.exec.exec(sref.bytes(), move || {
             let sref = segments2.segment(id);
             if let Some(old_res) = old_res_o {
-                if old_res.scope_usage.valid(&nset, &scope) &&
-                   ptr_eq::<Segment>(&old_res.source, &sref) {
+                if old_res.scope_usage.valid(&nset, &scope)
+                    && ptr_eq::<Segment>(&old_res.source, &sref)
+                {
                     return (id, old_res);
                 }
             }
@@ -829,12 +904,13 @@ pub fn verify(result: &mut VerifyResult,
 
 /// Parse a single $p statement, returning the result of the given
 /// proof builder, or an error if the proof is faulty
-pub fn verify_one<P: ProofBuilder>(sset: &SegmentSet,
-                                   nset: &Nameset,
-                                   scopes: &ScopeResult,
-                                   builder: &mut P,
-                                   stmt: StatementRef)
-                                   -> result::Result<P::Item, Diagnostic> {
+pub fn verify_one<P: ProofBuilder>(
+    sset: &SegmentSet,
+    nset: &Nameset,
+    scopes: &ScopeResult,
+    builder: &mut P,
+    stmt: StatementRef,
+) -> result::Result<P::Item, Diagnostic> {
     let dummy_frame = Frame::default();
     let mut state = VerifyState {
         this_seg: stmt.segment(),

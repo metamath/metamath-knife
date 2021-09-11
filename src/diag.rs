@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 /// List of passes that generate diagnostics, for use with the
 /// `Database::diag_notations` filter.
-#[derive(Copy,Clone,Eq,PartialEq,Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum DiagnosticClass {
     /// Parse errors, which can be observed from a single statement in
     /// isolation.
@@ -45,7 +45,7 @@ pub enum DiagnosticClass {
 /// Each diagnostic applies to precisely one statement.  Some diagnostics
 /// reference statements other than the one they are attached to; the fanout is
 /// handled by to_annotations.
-#[derive(Debug,Clone,Eq,PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum Diagnostic {
     BadCharacter(usize, u8),
@@ -128,7 +128,7 @@ impl From<io::Error> for Diagnostic {
 }
 
 /// An indication of the severity of a notation.
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Level {
     /// Notes indicate other statements relevant to an error which is primarily
     /// elsewhere.
@@ -163,9 +163,10 @@ pub struct Notation {
 }
 
 /// Converts a collection of raw diagnostics to a notation list before output.
-pub fn to_annotations(sset: &SegmentSet,
-                      mut diags: Vec<(StatementAddress, Diagnostic)>)
-                      -> Vec<Notation> {
+pub fn to_annotations(
+    sset: &SegmentSet,
+    mut diags: Vec<(StatementAddress, Diagnostic)>,
+) -> Vec<Notation> {
     diags.sort_by(|x, y| sset.order.cmp(&x.0, &y.0));
     let mut out = Vec::new();
     for (saddr, diag) in diags {
@@ -174,10 +175,12 @@ pub fn to_annotations(sset: &SegmentSet,
     out
 }
 
-fn annotate_diagnostic(notes: &mut Vec<Notation>,
-                       sset: &SegmentSet,
-                       stmt: StatementRef,
-                       diag: &Diagnostic) {
+fn annotate_diagnostic(
+    notes: &mut Vec<Notation>,
+    sset: &SegmentSet,
+    stmt: StatementRef,
+    diag: &Diagnostic,
+) {
     struct AnnInfo<'a> {
         notes: &'a mut Vec<Notation>,
         sset: &'a SegmentSet,
