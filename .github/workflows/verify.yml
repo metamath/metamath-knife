@@ -37,7 +37,7 @@ jobs:
         uses: hecrj/setup-rust-action@v1
         with:
           rust-version: ${{ matrix.rust }}
-          components: clippy
+          components: clippy, rustfmt
       # TODO: Add more static tests, perhaps eventually fail on warnings
       # (or disable those warnings, preferably as specifically as we can).
       - name: Run tests
