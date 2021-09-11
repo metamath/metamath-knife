@@ -147,7 +147,7 @@ impl Formula {
             // the model formula is a variable, build or match the substitution
             if let Some(formula) = substitutions.0.get(&other.tree[other_node_id]) {
                 // there already is as substitution for that variable, check equality
-                self.sub_eq(node_id, formula, formula.root).then(|| {()})
+                self.sub_eq(node_id, formula, formula.root).then(|| {})
             } else {
                 // store the new substitution and succeed
                 substitutions.0.insert(other.tree[other_node_id], Box::new(self.sub_formula(node_id)));

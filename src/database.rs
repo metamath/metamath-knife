@@ -141,8 +141,6 @@ pub struct DbOptions {
     /// `parser::guess_buffer_name`) of segments which are recalculated in each
     /// pass.
     pub trace_recalc: bool,
-    /// True to record database outline with parts, chapters, and sections.
-    pub outline: bool,
     /// True to record detailed usage data needed for incremental operation.
     ///
     /// This will slow down the initial analysis, so don't set it if you won't
@@ -152,8 +150,6 @@ pub struct DbOptions {
     pub incremental: bool,
     /// Number of jobs to run in parallel at any given time.
     pub jobs: usize,
-    /// If true, will parse the statements in addition to preparing the grammar
-    pub parse_statements: bool,
 }
 
 /// Wraps a heap-allocated closure with a difficulty score which can be used for
@@ -237,8 +233,8 @@ impl Executor {
         }
 
         Executor {
-            concurrency: concurrency,
-            mutex: mutex,
+            concurrency,
+            mutex,
             work_cv: cv,
         }
     }
@@ -402,7 +398,7 @@ impl Database {
         let exec = Executor::new(options.jobs);
         Database {
             segments: Some(Arc::new(SegmentSet::new(options.clone(), &exec))),
-            options: options,
+            options,
             nameset: None,
             scopes: None,
             verify: None,
@@ -598,9 +594,8 @@ impl Database {
             let scope = self.scope_result().clone();
             let name = self.name_result().clone();
             let sref = self.statement(&stmt)
-                .expect(format!("Label {} did not correspond to an existing statement",
-                                &stmt)
-                    .as_ref());
+                .unwrap_or_else(|| panic!("Label {} did not correspond to an existing statement",
+                                &stmt));
 
             File::create(format!("{}.mmp", stmt.clone()))
                 .map_err(export::ExportError::Io)
@@ -655,7 +650,7 @@ impl Database {
         // let indent = (node.level as usize) * 3
         println!("{:indent$} {:?} {:?}", "", node.level, node.get_name(), indent = indent);
         for child in node.children.iter() {
-            self.print_outline_node(&child, indent + 1);
+            self.print_outline_node(child, indent + 1);
         }        
     }
 

@@ -105,8 +105,8 @@ impl Span {
 
     fn new2(start: FilePos, end: FilePos) -> Span {
         Span {
-            start: start,
-            end: end,
+            start,
+            end,
         }
     }
 
@@ -260,8 +260,8 @@ impl StatementAddress {
     /// Constructs a statement address from its parts.
     pub fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
         StatementAddress {
-            segment_id: segment_id,
-            index: index,
+            segment_id,
+            index,
         }
     }
 }
@@ -482,7 +482,7 @@ impl<'a> SegmentRef<'a> {
         StatementRef {
             segment: self,
             statement: &self.segment.statements[index as usize],
-            index: index,
+            index,
         }
     }
 
@@ -562,17 +562,15 @@ impl Default for StatementType {
 
 impl StatementType {
     fn takes_label(self) -> bool {
-        match self {
-            Axiom | Provable | Essential | Floating => true,
-            _ => false,
-        }
+        matches!(self,
+            Axiom | Provable | Essential | Floating
+        )
     }
 
     fn takes_math(self) -> bool {
-        match self {
-            Axiom | Provable | Essential | Floating | Disjoint | Constant | Variable => true,
-            _ => false,
-        }
+        matches!(self,
+            Axiom | Provable | Essential | Floating | Disjoint | Constant | Variable
+        )
     }
 }
 
@@ -769,7 +767,7 @@ impl<'a> Iterator for StatementIter<'a> {
             StatementRef {
                 segment: self.segment,
                 statement: st_ref,
-                index: index,
+                index,
             }
         })
     }
@@ -940,7 +938,7 @@ impl<'a> Scanner<'a> {
             // Restart the function from the beginning to reload self.buffer;
             // doing it this way lets it be kept in a register in the common
             // case
-            return slf.get_raw();
+            slf.get_raw()
         }
 
         let len = self.buffer.len();
@@ -1063,8 +1061,8 @@ impl<'a> Scanner<'a> {
     /// statements and non-comment.
     fn out_statement(&mut self, stype: StatementType, label: Span) -> Statement {
         Statement {
-            stype: stype,
-            label: label,
+            stype,
+            label,
             math_start: self.statement_math_start,
             proof_start: self.statement_proof_start,
             proof_end: self.span_pool.len(),
@@ -1201,7 +1199,7 @@ impl<'a> Scanner<'a> {
         } else {
             Diagnostic::UnclosedMath
         });
-        return false;
+        false
     }
 
     /// Parses math and proof strings for the current statement and records the
@@ -1272,7 +1270,7 @@ impl<'a> Scanner<'a> {
                     self.diag(Diagnostic::FilenameDollar);
                 }
                 return res;
-            } else if tref.len() > 0 && tref[0] == b'$' {
+            } else if !tref.is_empty() && tref[0] == b'$' {
                 break;
             } else {
                 count += 1;
@@ -1281,7 +1279,7 @@ impl<'a> Scanner<'a> {
         }
         self.diag(Diagnostic::UnclosedInclude);
         self.invalidated = true;
-        return res;
+        res
     }
 
     /// Main function called to read a complete statement from the input buffer.
@@ -1460,8 +1458,8 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        seg.diagnostics = mem::replace(&mut self.diagnostics, Vec::new());
-        seg.span_pool = mem::replace(&mut self.span_pool, Vec::new());
+        seg.diagnostics = mem::take(&mut self.diagnostics);
+        seg.span_pool = mem::take(&mut self.span_pool);
         seg.span_pool.shrink_to_fit();
         seg.statements.shrink_to_fit();
         collect_definitions(&mut seg);
@@ -1476,7 +1474,7 @@ fn collect_definitions(seg: &mut Segment) {
     for (index, &ref stmt) in seg.statements.iter().enumerate() {
         let index = index as StatementIndex;
         if stmt.stype.takes_label() {
-            seg.labels.push(LabelDef { index: index });
+            seg.labels.push(LabelDef { index });
         }
 
         if stmt.group_end != NO_STATEMENT {
@@ -1484,7 +1482,7 @@ fn collect_definitions(seg: &mut Segment) {
                 let math = &seg.span_pool[stmt.math_start..stmt.proof_start];
                 for sindex in 0..math.len() {
                     seg.local_vars.push(LocalVarDef {
-                        index: index,
+                        index,
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -1556,8 +1554,8 @@ fn collect_definitions(seg: &mut Segment) {
 /// Metamath spec valid label characters are `[-._a-zA-Z0-9]`
 fn is_valid_label(label: &[u8]) -> bool {
     label.iter().all(|&c| {
-        c == b'.' || c == b'-' || c == b'_' || (c >= b'a' && c <= b'z') ||
-        (c >= b'0' && c <= b'9') || (c >= b'A' && c <= b'Z')
+        c == b'.' || c == b'-' || c == b'_' || (b'a'..=b'z').contains(&c) ||
+        (b'0'..=b'9').contains(&c) || (b'A'..=b'Z').contains(&c)
     })
 }
 
@@ -1632,14 +1630,12 @@ impl CommandIter<'_> {
         if !self.has_more() {
             let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
             Err(Diagnostic::UnclosedComment(cspan))
+        } else if self.next_char() != c {
+            let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
+            Err(Diagnostic::MalformedAdditionalInfo(cspan))
         } else {
-            if self.next_char() != c {
-                let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
-                Err(Diagnostic::MalformedAdditionalInfo(cspan))
-            } else {
-                self.index += 1;
-                Ok(())
-            }
+            self.index += 1;
+            Ok(())
         }
     }
 }

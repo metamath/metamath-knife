@@ -114,8 +114,8 @@ impl LineCache {
     /// Find the offset just after the end of the line (usually the
     /// location of a '\n', unless we are at the end of the file).
     pub fn line_end(buf: &[u8], offset: usize) -> usize {
-        for pos in offset..buf.len() {
-            if buf[pos] == b'\n' {
+        for (pos, &ch) in buf.iter().enumerate().skip(offset) {
+            if ch == b'\n' {
                 return pos;
             }
         }

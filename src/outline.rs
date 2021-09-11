@@ -30,7 +30,7 @@ pub struct OutlineNode {
 
 impl OutlineNode {
     /// Build the root node for a database
-    fn root_node(segments: &Vec<SegmentRef>) -> Self {
+    fn root_node(segments: &[SegmentRef]) -> Self {
         OutlineNode {
             name: copy_token("Database".as_bytes()),
             level: HeadingLevel::Database,
@@ -77,9 +77,9 @@ impl OutlineNode {
 }
 
 /// Builds the overall outline from the different segments
-pub fn build_outline<'a>(node: &mut OutlineNode, sset: &'a Arc<SegmentSet>) {
+pub fn build_outline(node: &mut OutlineNode, sset: &Arc<SegmentSet>) {
     let segments = sset.segments();
-    assert!(segments.len() > 0,"Parse returned no segment!");
+    assert!(!segments.is_empty(),"Parse returned no segment!");
     *node = OutlineNode::root_node(&segments);
 
     for vsr in segments.iter() {

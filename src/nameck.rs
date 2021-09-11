@@ -139,7 +139,7 @@ fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
         return atom;
     }
     table.table.insert(copy_token(tok), next);
-    if table.reverse.len() == 0 {
+    if table.reverse.is_empty() {
         table.reverse.push(Token::default());
     }
     table.reverse.push(copy_token(tok));
@@ -185,7 +185,7 @@ impl Nameset {
         let mut keys_to_remove = Vec::new();
         for (&seg_id, seg) in &self.segments {
             if segs.segment_opt(seg_id)
-                .map_or(true, |sref| !util::ptr_eq::<Segment>(&sref.segment, &seg)) {
+                .map_or(true, |sref| !util::ptr_eq::<Segment>(sref.segment, seg)) {
                 keys_to_remove.push(seg_id);
             }
         }
@@ -210,7 +210,7 @@ impl Nameset {
         self.segments.insert(id, seg.clone());
         let sref = SegmentRef {
             segment: &seg,
-            id: id,
+            id,
         };
 
         for symdef in &seg.symbols {
@@ -226,12 +226,12 @@ impl Nameset {
             }
         }
 
-        for &ref lsymdef in &seg.local_vars {
+        for lsymdef in &seg.local_vars {
             let name = &sref.statement(lsymdef.index).math_at(lsymdef.ordinal);
             intern(&mut self.atom_table, name);
         }
 
-        for &ref labdef in &seg.labels {
+        for labdef in &seg.labels {
             let labelr = sref.statement(labdef.index).label();
             let label = copy_token(labelr);
             let slot = autoviv(&mut self.labels, label);
@@ -245,7 +245,7 @@ impl Nameset {
                         ());
         }
 
-        for &ref floatdef in &seg.floats {
+        for floatdef in &seg.floats {
             let slot = autoviv(&mut self.symbols, floatdef.name.clone());
             slot.generation = self.generation;
             if slot.atom == Atom::default() {
@@ -259,8 +259,8 @@ impl Nameset {
                         (floatdef.label.clone(), floatdef.typecode.clone(), tcatom));
         }
 
-        for &ref dvdef in &seg.global_dvs {
-            let vars = dvdef.vars.iter().map(|v| intern(&mut self.atom_table, &v)).collect();
+        for dvdef in &seg.global_dvs {
+            let vars = dvdef.vars.iter().map(|v| intern(&mut self.atom_table, v)).collect();
             self.dv_gen = self.generation;
             slot_insert(&mut self.dv_info,
                         &*self.order,
@@ -275,10 +275,10 @@ impl Nameset {
         if let Some(seg) = self.segments.remove(&id) {
             let sref = SegmentRef {
                 segment: &seg,
-                id: id,
+                id,
             };
             let gen = self.generation;
-            for &ref symdef in &seg.symbols {
+            for symdef in &seg.symbols {
                 deviv(&mut self.symbols, &symdef.name, |slot| {
                     let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
                     slot.generation = gen;
@@ -287,7 +287,7 @@ impl Nameset {
                 });
             }
 
-            for &ref labdef in &seg.labels {
+            for labdef in &seg.labels {
                 let label = sref.statement(labdef.index).label();
                 deviv(&mut self.labels, label, |slot| {
                     slot.generation = gen;
@@ -295,7 +295,7 @@ impl Nameset {
                 });
             }
 
-            for &ref floatdef in &seg.floats {
+            for floatdef in &seg.floats {
                 deviv(&mut self.symbols, &floatdef.name, |slot| {
                     let address = StatementAddress::new(id, floatdef.start);
                     slot.generation = gen;
@@ -303,7 +303,7 @@ impl Nameset {
                 });
             }
 
-            for &ref dvdef in &seg.global_dvs {
+            for dvdef in &seg.global_dvs {
                 self.dv_gen = gen;
                 slot_remove(&mut self.dv_info, StatementAddress::new(id, dvdef.start));
             }
@@ -314,7 +314,7 @@ impl Nameset {
     ///
     /// If you don't know about the name, use lookup_symbol instead.
     pub fn get_atom(&self, name: TokenPtr) -> Atom {
-        self.atom_table.table.get(name).expect("please only use get_atom for local $v").clone()
+        *self.atom_table.table.get(name).expect("please only use get_atom for local $v")
     }
 
     /// Map atoms back to names.
@@ -328,7 +328,7 @@ impl Nameset {
 
     /// Looks up the address and atom for a statement label.
     pub fn lookup_label(&self, label: TokenPtr) -> Option<LookupLabel> {
-        self.labels.get(label).and_then(|&ref lslot| {
+        self.labels.get(label).and_then(|lslot| {
             lslot.labels.first().map(|&(addr, _)| {
                 LookupLabel {
                     atom: lslot.atom,
@@ -340,10 +340,10 @@ impl Nameset {
 
     /// Looks up the address and type for a math symbol.
     pub fn lookup_symbol(&self, symbol: TokenPtr) -> Option<LookupSymbol> {
-        self.symbols.get(symbol).and_then(|&ref syminfo| {
+        self.symbols.get(symbol).and_then(|syminfo| {
             syminfo.all.first().map(|&(addr, stype)| {
                 LookupSymbol {
-                    stype: stype,
+                    stype,
                     atom: syminfo.atom,
                     address: addr,
                     const_address: syminfo.constant.first().map(|&(addr, _)| addr),
@@ -432,7 +432,7 @@ impl<'a> NameReader<'a> {
     /// used.
     pub fn new(nameset: &'a Nameset) -> Self {
         NameReader {
-            nameset: nameset,
+            nameset,
             incremental: nameset.options.incremental,
             found_symbol: new_set(),
             not_found_symbol: new_set(),
@@ -493,8 +493,8 @@ impl<'a> NameReader<'a> {
                 syminfo.float.first().map(|&(addr, (ref label, ref typecode, tcatom))| {
                     LookupFloat {
                         address: addr,
-                        label: &label,
-                        typecode: &typecode,
+                        label,
+                        typecode,
                         typecode_atom: tcatom,
                     }
                 })
@@ -540,7 +540,7 @@ impl NameUsage {
             }
         }
 
-        for &ref name in &self.not_found_symbol {
+        for name in &self.not_found_symbol {
             if nameset.symbols.contains_key(name) {
                 return false;
             }
@@ -557,12 +557,12 @@ impl NameUsage {
             }
         }
 
-        for &ref name in &self.not_found_label {
+        for name in &self.not_found_label {
             if nameset.labels.contains_key(name) {
                 return false;
             }
         }
 
-        return true;
+        true
     }
 }

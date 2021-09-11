@@ -14,8 +14,7 @@ const GRAMMAR_DB : &[u8] = b"
 ";
 
 pub fn mkdb(text: &[u8]) -> Database {
-    let mut options = DbOptions::default();
-    options.incremental = true;
+    let options = DbOptions { incremental: true, ..Default::default() };
     let mut db = Database::new(options);
     db.parse("test.mm".to_owned(),
              vec![("test.mm".to_owned(), text.to_owned())]);
@@ -38,9 +37,9 @@ fn test_db_stmt_parse() {
     let sset = db.parse_result().clone();
     let grammar = db.grammar_result().clone();
     let stmt_parse = db.stmt_parse_result().clone();
-    assert!(sset.parse_diagnostics().len() == 0);
-    assert!(grammar.diagnostics().len() == 0);
-    assert!(stmt_parse.diagnostics().len() == 0);
+    assert!(sset.parse_diagnostics().is_empty());
+    assert!(grammar.diagnostics().is_empty());
+    assert!(stmt_parse.diagnostics().is_empty());
 }
 
 #[test]

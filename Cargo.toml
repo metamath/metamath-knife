@@ -23,7 +23,6 @@ simple_logger = "1.13.0"
 dot-writer = { version = "0.1.2", optional = true }
 
 [features]
-sysalloc = []
 dot = ["dot-writer"]
 
 [profile]

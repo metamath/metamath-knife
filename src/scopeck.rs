@@ -175,9 +175,9 @@ impl Hyp {
 
     /// Returns the typecode expected on the stack for this hypothesis.
     pub fn typecode(&self) -> Atom {
-        match self {
-            &Hyp::Essential(_, ref expr) => expr.typecode,
-            &Hyp::Floating(_, _, typecode) => typecode,
+        match *self {
+            Hyp::Essential(_, ref expr) => expr.typecode,
+            Hyp::Floating(_, _, typecode) => typecode,
         }
     }
 }
@@ -277,7 +277,7 @@ struct ScopeState<'a> {
 }
 
 fn push_diagnostic(state: &mut ScopeState, ix: StatementIndex, diag: Diagnostic) {
-    state.diagnostics.entry(ix).or_insert(Vec::new()).push(diag);
+    state.diagnostics.entry(ix).or_insert_with(Vec::new).push(diag);
 }
 
 /// Verifies that this is the true (first) use of a label.  The returned atom
@@ -392,8 +392,8 @@ fn construct_stub_frame(state: &mut ScopeState,
                         latom: Atom,
                         expr: &[CheckedToken]) {
     let mut iter = expr.iter();
-    let typecode = match iter.next().expect("parser checks $eap token count") {
-        &Const(_, typecode) => typecode,
+    let typecode = match *iter.next().expect("parser checks $eap token count") {
+        Const(_, typecode) => typecode,
         _ => unreachable!(),
     };
     let mut mvars = Vec::new();
@@ -419,7 +419,7 @@ fn construct_stub_frame(state: &mut ScopeState,
         valid: sref.scope_range(),
         hypotheses: Box::default(),
         target: VerifyExpr {
-            typecode: typecode,
+            typecode,
             rump: 0..0,
             tail: Box::default(),
         },
@@ -460,8 +460,8 @@ struct InchoateFrame {
 /// inchoate frame.
 fn scan_expression(iframe: &mut InchoateFrame, expr: &[CheckedToken]) -> VerifyExpr {
     let mut iter = expr.iter();
-    let head = match iter.next().expect("parser checks $eap token count") {
-        &Const(_, head) => head,
+    let head = match *iter.next().expect("parser checks $eap token count") {
+        Const(_, head) => head,
         _ => unreachable!(),
     };
     let mut open_const = iframe.const_pool.len();
@@ -578,7 +578,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
     iframe.mandatory_count = iframe.var_list.len();
 
     for &(_, ref vars) in state.gnames.lookup_global_dv() {
-        scan_dv(&mut iframe, &vars)
+        scan_dv(&mut iframe, vars)
     }
 
     for dv in &state.local_dv {
@@ -587,7 +587,7 @@ fn construct_full_frame<'a>(state: &mut ScopeState<'a>,
 
     state.frames_out.push(Frame {
         stype: sref.statement_type(),
-        label_atom: label_atom,
+        label_atom,
         valid: sref.address().unbounded_range(),
         hypotheses: hyps.into_boxed_slice(),
         target: scan_res,
@@ -673,7 +673,7 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         // construct_full_frame when it's no longer in scope
         state.local_dv.push(LocalDvInfo {
             valid: sref.scope_range(),
-            vars: vars,
+            vars,
         });
     }
 }
@@ -741,7 +741,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if sref.in_group() {
         state.local_floats
             .entry(copy_token(&var_tok))
-            .or_insert(Vec::new())
+            .or_insert_with(Vec::new)
             .push(LocalFloatInfo {
                 typecode: const_at,
                 valid: sref.scope_range(),
@@ -761,7 +761,7 @@ fn maybe_add_local_var(state: &mut ScopeState,
                        sref: StatementRef,
                        tref: TokenRef)
                        -> Option<TokenAddress> {
-    let lv_slot = state.local_vars.entry(copy_token(&tref)).or_insert(Vec::new());
+    let lv_slot = state.local_vars.entry(copy_token(&tref)).or_insert_with(Vec::new);
 
     if let Some(lv_most_recent) = lv_slot.last() {
         if check_endpoint(sref.index(), lv_most_recent.end) {
@@ -887,7 +887,7 @@ impl ScopeResult {
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
         for (sid, ssro) in self.segments.iter().enumerate() {
-            if let &Some(ref ssr) = ssro {
+            if let Some(ref ssr) = *ssro {
                 for (&six, diag) in &ssr.diagnostics {
                     for d in diag {
                         out.push((StatementAddress::new(SegmentId(sid as u32), six), d.clone()));

@@ -187,16 +187,16 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
         args: Vec<(&'static str, String)>,
     }
 
-    fn ann<'a>(info: &mut AnnInfo<'a>, mut span: Span) {
+    fn ann(info: &mut AnnInfo, mut span: Span) {
         if span.is_null() {
             span = info.stmt.span();
         }
         info.notes.push(Notation {
             source: info.sset.source_info(info.stmt.segment().id).clone(),
             message: info.s,
-            span: span,
+            span,
             level: info.level,
-            args: mem::replace(&mut info.args, Vec::new()),
+            args: mem::take(&mut info.args),
         })
     }
 
@@ -209,9 +209,9 @@ fn annotate_diagnostic(notes: &mut Vec<Notation>,
     }
 
     let mut info = AnnInfo {
-        notes: notes,
-        sset: sset,
-        stmt: stmt,
+        notes,
+        sset,
+        stmt,
         level: Error,
         s: "",
         args: Vec::new(),

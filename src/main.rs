@@ -2,15 +2,11 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 #![warn(missing_docs)]
-#![cfg_attr(feature = "sysalloc", feature(alloc_system))]
 #[macro_use]
 extern crate clap;
 extern crate filetime;
 extern crate fnv;
 extern crate regex;
-
-#[cfg(feature = "sysalloc")]
-extern crate alloc_system;
 
 pub mod bit_set;
 pub mod database;
@@ -97,19 +93,19 @@ fn main() {
             .multiple(true))
         .get_matches();
 
-    let mut options = DbOptions::default();
-    options.autosplit = matches.is_present("split");
-    options.timing = matches.is_present("timing");
-    options.outline = matches.is_present("outline");
-    options.trace_recalc = matches.is_present("trace-recalc");
-    options.incremental = matches.is_present("repeat");
-    options.jobs = usize::from_str(matches.value_of("jobs").unwrap_or("1"))
-        .expect("validator should check this");
-    options.incremental |= matches.is_present("grammar") 
-        || matches.is_present("parse-stmt") 
-        || matches.is_present("export-grammar-dot") 
-        || matches.is_present("print-grammar") 
-        || matches.is_present("print-formula");
+    let options = DbOptions {
+        autosplit: matches.is_present("split"),
+        timing: matches.is_present("timing"),
+        trace_recalc: matches.is_present("trace-recalc"),
+        incremental: matches.is_present("repeat")
+            || matches.is_present("grammar") 
+            || matches.is_present("parse-stmt") 
+            || matches.is_present("export-grammar-dot") 
+            || matches.is_present("print-grammar") 
+            || matches.is_present("print-formula"),
+        jobs: usize::from_str(matches.value_of("jobs").unwrap_or("1"))
+            .expect("validator should check this"),
+    };
 
     if matches.is_present("debug") {
         SimpleLogger::new().init().unwrap();

@@ -37,7 +37,10 @@ jobs:
         uses: hecrj/setup-rust-action@v1
         with:
           rust-version: ${{ matrix.rust }}
+          components: clippy
       # TODO: Add more static tests, perhaps eventually fail on warnings
       # (or disable those warnings, preferably as specifically as we can).
       - name: Run tests
         run: cargo test --verbose
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
