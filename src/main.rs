@@ -96,6 +96,11 @@ fn main() {
                 .short("p"),
         )
         .arg(
+            Arg::with_name("verify-parse-stmt")
+                .help("Check that printing parsed statements gives back the original formulas")
+                .long("verify-parse-stmt"),
+        )
+        .arg(
             Arg::with_name("print-grammar")
                 .help("Print the database's grammar")
                 .long("print-grammar")
@@ -167,6 +172,7 @@ fn main() {
         incremental: matches.is_present("repeat")
             || matches.is_present("grammar")
             || matches.is_present("parse-stmt")
+            || matches.is_present("verify-parse-stmt")
             || matches.is_present("export-grammar-dot")
             || matches.is_present("print-grammar")
             || matches.is_present("print-formula"),
@@ -208,6 +214,10 @@ fn main() {
             types.push(DiagnosticClass::StmtParse);
         }
 
+        if matches.is_present("verify-parse-stmt") {
+            db.verify_parse_stmt();
+        }
+
         let mut lc = LineCache::default();
         let mut count = 0;
         for notation in db.diag_notations(types) {
@@ -215,10 +225,6 @@ fn main() {
             count += 1;
         }
         println!("{} diagnostics issued.", count);
-
-        if matches.is_present("outline") {
-            db.print_outline();
-        }
 
         if matches.is_present("print-grammar") {
             db.print_grammar();

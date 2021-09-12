@@ -574,11 +574,13 @@ impl Grammar {
             let token_ptr = sref.math_at(1).slice;
             let symbol = names.lookup_symbol(token_ptr).unwrap();
             if symbol.stype == SymbolType::Variable {
-                type_conversions.push((
-                    names.lookup_float(token_ptr).unwrap().typecode_atom,
-                    this_typecode,
-                    this_label,
-                ));
+                let from_typecode = match names.lookup_float(token_ptr) {
+                    Some(lookup_float) => lookup_float.typecode_atom,
+                    _ => {
+                        return Err(Diagnostic::VariableMissingFloat(1));
+                    }
+                };
+                type_conversions.push((from_typecode, this_typecode, this_label));
                 return Ok(()); // we don't need to add the type conversion axiom itself to the grammar (or do we?)
             }
         }
@@ -665,7 +667,6 @@ impl Grammar {
     /// Handle type conversion:
     /// Go through each node and everywhere there is to_typecode(`class`), put a from_typecode(`setvar`),
     /// pointing to a copy of the next node with a leaf to first do a `cv`
-    #[allow(clippy::too_many_arguments)]
     fn perform_type_conversion(
         &mut self,
         from_typecode: TypeCode,
@@ -761,8 +762,9 @@ impl Grammar {
             }
             for (symbol, next_node) in map {
                 if next_node.next_node_id == add_to_node_id {
+                    // avoid infinite recursion
                     continue;
-                } // avoid infinite recursion
+                }
                 if let GrammarNode::Leaf {
                     reduce: r,
                     typecode,
@@ -798,28 +800,29 @@ impl Grammar {
                         "BRANCH for {} to {} {:?}",
                         add_from_node_id, add_to_node_id, next_node.leaf_label
                     );
-                    let new_next_node_id = match self.add_branch_with_reduce(
+                    let (new_next_node_id, new_stored_reduces) = match self.add_branch_with_reduce(
                         add_to_node_id,
                         *symbol,
                         *stype,
                         next_node.leaf_label,
                     ) {
-                        Ok(new_next_node_id) => new_next_node_id,
+                        Ok(new_next_node_id) => (new_next_node_id, stored_reduces),
                         Err(new_next_node_id) => {
+                            let mut new_stored_reduces = stored_reduces;
                             // This is the case where there is already a branch, with a different reduce.
                             // In that case, we have to store the reduce until the copy is finished.
                             for reduce in next_node.leaf_label {
                                 debug!(">> Storing {:?}", reduce);
-                                stored_reduces.push(reduce);
+                                new_stored_reduces.push(reduce);
                             }
-                            new_next_node_id
+                            (new_next_node_id, new_stored_reduces)
                         }
                     };
                     self.clone_branches(
                         next_node.next_node_id,
                         new_next_node_id,
                         nset,
-                        stored_reduces,
+                        new_stored_reduces,
                         make_final,
                     );
                 }
@@ -835,8 +838,9 @@ impl Grammar {
         reduce_vec: &ReduceVec,
     ) {
         if add_from_node_id == add_to_node_id {
+            // nothing to clone here!
             return;
-        } // nothing to clone here!
+        }
         debug!(
             "Clone with reduce {} to {}",
             add_from_node_id, add_to_node_id
@@ -1101,48 +1105,81 @@ impl Grammar {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn parse_formula<'a>(
+    fn parse_formula(
         &self,
-        start_node: NodeId,
         sref: &StatementRef,
-        ix: &mut TokenIndex,
         formula_builder: &mut FormulaBuilder,
-        expected_typecodes: &'a [&'a TypeCode],
+        expected_typecodes: Box<[&TypeCode]>,
         nset: &Arc<Nameset>,
         names: &mut NameReader,
-    ) -> Result<TypeCode, Diagnostic> {
-        let mut node = start_node;
+    ) -> Result<(), Diagnostic> {
+        struct StackElement<'a> {
+            node_id: NodeId,
+            expected_typecodes: Box<[&'a TypeCode]>,
+        }
+
+        let mut ix = 1;
+        let mut e = StackElement {
+            node_id: self.root,
+            expected_typecodes,
+        };
+        let mut stack = vec![];
         loop {
-            match self.nodes.get(node) {
+            match self.nodes.get(e.node_id) {
                 GrammarNode::Leaf { reduce, typecode } => {
                     // We found a leaf: REDUCE
                     self.do_reduce(formula_builder, *reduce, nset);
-                    if expected_typecodes.iter().any(|&t| *t == *typecode) {
-                        if *ix != sref.math_len() {
-                            println!(
-                                "Check this out! {} < {} for {:?}",
-                                *ix,
-                                sref.math_len(),
-                                as_str(nset.statement_name(sref))
+
+                    if e.expected_typecodes.iter().any(|&t| *t == *typecode) {
+                        // We found an expected typecode, pop from the stack and continue
+                        if let Some(popped) = stack.pop() {
+                            e = popped;
+                            debug!(
+                                " ++ Finished parsing formula, found typecode {:?}, back to {}",
+                                as_str(nset.atom_name(*typecode)),
+                                e.node_id
                             );
+                            let (_, var_map) = self.get_branch(e.node_id);
+                            match var_map.get(typecode) {
+                                Some(NextNode {
+                                    next_node_id,
+                                    leaf_label,
+                                }) => {
+                                    // Found a sub-formula: First optionally REDUCE and continue
+                                    for reduce in leaf_label.into_iter() {
+                                        self.do_reduce(formula_builder, *reduce, nset);
+                                    }
+
+                                    e.node_id = *next_node_id;
+                                    debug!("   Next Node: {:?}", e.node_id);
+                                }
+                                None => {
+                                    debug!("TODO");
+                                }
+                            }
+                        } else if ix == sref.math_len() {
+                            // We popped the last element from the stack and we are at the end of the math string, success
+                            return Ok(());
+                        } else {
+                            // TODO, we might have parsed a prefix of the expected type, but this does not occur in set.mm
+                            return Err(Diagnostic::UnparseableStatement(ix));
                         }
-                        return Ok(*typecode);
                     } else {
+                        // We have not found the expected typecode, continue from root
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) =
                             self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
                         for reduce in leaf_label.into_iter() {
                             self.do_reduce(formula_builder, *reduce, nset);
                         }
-                        node = next_node_id;
+                        e.node_id = next_node_id;
                     }
                 }
                 GrammarNode::Branch { cst_map, var_map } => {
-                    if *ix == sref.math_len() {
+                    if ix == sref.math_len() {
                         return Err(Grammar::too_short(cst_map, nset));
                     }
-                    let token = sref.math_at(*ix);
+                    let token = sref.math_at(ix);
                     let symbol = names.lookup_symbol(token.slice).unwrap();
                     debug!("   {:?}", as_str(nset.atom_name(symbol.atom)));
 
@@ -1157,112 +1194,28 @@ impl Grammar {
                             }
 
                             // Found an atom matching one of our next nodes: SHIFT, to the next node
-                            self.do_shift(sref, ix, nset, names);
-                            node = *next_node_id;
-                            debug!("   Next Node: {:?}", node);
+                            self.do_shift(sref, &mut ix, nset, names);
+                            e.node_id = *next_node_id;
+                            debug!("   Next Node: {:?}", e.node_id);
                         }
                         None => {
                             // No matching constant, search among variables
-                            if var_map.is_empty() || node == self.root {
+                            if var_map.is_empty() || e.node_id == self.root {
                                 return Err(Diagnostic::UnparseableStatement(token.index()));
                             }
 
                             debug!(
-                                " ++ Not in CST map, recursive call expecting {:?}",
+                                " ++ Not in CST map, push stack element and expect {:?}",
                                 var_map.keys()
                             );
-                            let typecode = self.parse_formula(
-                                self.root,
-                                sref,
-                                ix,
-                                formula_builder,
-                                var_map.keys().collect::<Vec<&TypeCode>>().as_slice(),
-                                nset,
-                                names,
-                            )?;
-                            debug!(
-                                " ++ Finished parsing formula, found typecode {:?}, back to {}",
-                                as_str(nset.atom_name(typecode)),
-                                node
-                            );
-                            match var_map.get(&typecode) {
-                                Some(NextNode {
-                                    next_node_id,
-                                    leaf_label,
-                                }) => {
-                                    // Found a sub-formula: First optionally REDUCE and continue
-                                    for reduce in leaf_label.into_iter() {
-                                        self.do_reduce(formula_builder, *reduce, nset);
-                                    }
-
-                                    node = *next_node_id;
-                                    debug!("   Next Node: {:?}", node);
-                                }
-                                None => {
-                                    // No match found, try as a prefix of a larger formula
-                                    let (_, var_map_2) = self.get_branch(self.root);
-                                    match var_map_2.get(&typecode) {
-                                        Some(NextNode {
-                                            next_node_id: next_node_id_2,
-                                            leaf_label: leaf_label_2,
-                                        }) => {
-                                            // Found a sub-formula: First optionally REDUCE and continue
-                                            for reduce in leaf_label_2.into_iter() {
-                                                self.do_reduce(formula_builder, *reduce, nset);
-                                            }
-
-                                            // Found and reduced a sub-formula, to the next node
-                                            debug!(
-                                                " ++ Considering prefix, switching to {}",
-                                                next_node_id_2
-                                            );
-                                            let typecode = self.parse_formula(
-                                                *next_node_id_2,
-                                                sref,
-                                                ix,
-                                                formula_builder,
-                                                var_map
-                                                    .keys()
-                                                    .collect::<Vec<&TypeCode>>()
-                                                    .as_slice(),
-                                                nset,
-                                                names,
-                                            )?;
-                                            debug!(" ++ Finished parsing formula, found typecode {:?}, back to {}", as_str(nset.atom_name(typecode)), node);
-                                            match var_map.get(&typecode) {
-                                                Some(NextNode {
-                                                    next_node_id,
-                                                    leaf_label,
-                                                }) => {
-                                                    // Found a sub-formula: First optionally REDUCE and continue
-                                                    for reduce in leaf_label.into_iter() {
-                                                        self.do_reduce(
-                                                            formula_builder,
-                                                            *reduce,
-                                                            nset,
-                                                        );
-                                                    }
-
-                                                    node = *next_node_id;
-                                                    debug!("   Next Node: {:?}", node);
-                                                }
-                                                None => {
-                                                    // Still no match found, error.
-                                                    return Err(Diagnostic::UnparseableStatement(
-                                                        token.index(),
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                        _ => {
-                                            // Still no match found, error.
-                                            return Err(Diagnostic::UnparseableStatement(
-                                                token.index(),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
+                            stack.push(e);
+                            e = StackElement {
+                                node_id: self.root,
+                                expected_typecodes: var_map
+                                    .keys()
+                                    .collect::<Vec<&TypeCode>>()
+                                    .into_boxed_slice(),
+                            };
                         }
                     }
                 }
@@ -1304,11 +1257,9 @@ impl Grammar {
         );
 
         self.parse_formula(
-            self.root,
             sref,
-            &mut 1,
             &mut formula_builder,
-            vec![&expected_typecode].as_slice(),
+            Box::new([&expected_typecode]),
             nset,
             names,
         )?;
@@ -1478,6 +1429,27 @@ impl StmtParse {
             }
         }
         out
+    }
+
+    /// Check that printing parsed statements gives back the original formulas
+    pub fn verify(
+        &self,
+        sset: &Arc<SegmentSet>,
+        nset: &Arc<Nameset>,
+    ) -> Result<(), (StatementAddress, Diagnostic)> {
+        for sps in self.segments.values() {
+            for (&sa, &ref formula) in &sps.formulas {
+                let sref = sset.statement(sa);
+                let math_iter = sref
+                    .math_iter()
+                    .map(|token| nset.lookup_symbol(token.slice).unwrap().atom);
+                let fmla_iter = formula.iter(sset, nset);
+                if math_iter.ne(fmla_iter) {
+                    return Err((sa, Diagnostic::FormulaVerificationFailed));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Writes down all formulas
