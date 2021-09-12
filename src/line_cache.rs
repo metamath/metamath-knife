@@ -1,7 +1,7 @@
 //! Utilities for source-offset/line-number mapping.
 
-use std::cmp::Ordering;
 use crate::util::HashMap;
+use std::cmp::Ordering;
 
 const PAGE: usize = 256;
 
@@ -53,10 +53,13 @@ fn make_index(mut buf: &[u8]) -> Vec<u32> {
 // find the lowest offset for which from_offset would give the target.
 // Panics if line number out of range.
 fn line_to_offset(buf: &[u8], index: &[u32], line: u32) -> usize {
-    let page = index.binary_search_by(|&ll| if ll < line {
-            Ordering::Less
-        } else {
-            Ordering::Greater
+    let page = index
+        .binary_search_by(|&ll| {
+            if ll < line {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
         })
         .err()
         .expect("cannot match");
@@ -85,7 +88,9 @@ fn line_to_offset(buf: &[u8], index: &[u32], line: u32) -> usize {
 
 impl LineCache {
     fn get_index(&mut self, buf: &[u8]) -> &Vec<u32> {
-        self.map.entry((buf.as_ptr() as usize, buf.len())).or_insert_with(|| make_index(buf))
+        self.map
+            .entry((buf.as_ptr() as usize, buf.len()))
+            .or_insert_with(|| make_index(buf))
     }
 
     /// Map a line to a buffer index.  Panics if out of range.
@@ -109,7 +114,6 @@ impl LineCache {
         let colno = offset - line_to_offset(buf, index, lineno);
         (lineno + 1, colno as u32 + 1)
     }
-
 
     /// Find the offset just after the end of the line (usually the
     /// location of a '\n', unless we are at the end of the file).

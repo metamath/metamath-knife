@@ -1,7 +1,7 @@
 use crate::grammar_tests::mkdb;
 use crate::parser::as_str;
 
-const FORMULA_DB : &[u8] = b"
+const FORMULA_DB: &[u8] = b"
     $c |- wff class ( ) + = 1 2 $.
     $( $j syntax 'class'; syntax 'wff'; syntax '|-' as 'wff'; $)
     $v A B $.
@@ -27,8 +27,12 @@ fn test_unify() {
     let mut db = mkdb(FORMULA_DB);
     let stmt_parse = db.stmt_parse_result().clone();
     let names = db.name_result().clone();
-    let goal = stmt_parse.get_formula(&db.statement("1p2com").unwrap()).unwrap();
-    let axiom = stmt_parse.get_formula(&db.statement("ax-com").unwrap()).unwrap();
+    let goal = stmt_parse
+        .get_formula(&db.statement("1p2com").unwrap())
+        .unwrap();
+    let axiom = stmt_parse
+        .get_formula(&db.statement("ax-com").unwrap())
+        .unwrap();
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
@@ -41,8 +45,12 @@ fn test_unify() {
 fn test_unify_fail() {
     let mut db = mkdb(FORMULA_DB);
     let stmt_parse = db.stmt_parse_result().clone();
-    let goal = stmt_parse.get_formula(&db.statement("1p2com").unwrap()).unwrap();
-    let axiom = stmt_parse.get_formula(&db.statement("addeq1").unwrap()).unwrap();
+    let goal = stmt_parse
+        .get_formula(&db.statement("1p2com").unwrap())
+        .unwrap();
+    let axiom = stmt_parse
+        .get_formula(&db.statement("addeq1").unwrap())
+        .unwrap();
     assert!(goal.unify(axiom).is_none());
 }
 
@@ -53,8 +61,12 @@ fn test_substitute() {
     let mut db = mkdb(FORMULA_DB);
     let stmt_parse = db.stmt_parse_result().clone();
     let names = db.name_result().clone();
-    let goal = stmt_parse.get_formula(&db.statement("1p2com").unwrap()).unwrap();
-    let axiom = stmt_parse.get_formula(&db.statement("addeq1.1").unwrap()).unwrap();
+    let goal = stmt_parse
+        .get_formula(&db.statement("1p2com").unwrap())
+        .unwrap();
+    let axiom = stmt_parse
+        .get_formula(&db.statement("addeq1.1").unwrap())
+        .unwrap();
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
@@ -64,8 +76,12 @@ fn test_substitute() {
     assert!(as_str(names.atom_name(subst[&b].get_by_path(&[]).unwrap())) == "cadd");
     assert!(as_str(names.atom_name(subst[&b].get_by_path(&[1]).unwrap())) == "c2");
     assert!(as_str(names.atom_name(subst[&b].get_by_path(&[2]).unwrap())) == "c1");
-    let stmt = stmt_parse.get_formula(&db.statement("addeq1").unwrap()).unwrap();
-    let formula = stmt_parse.get_formula(&db.statement("formula").unwrap()).unwrap();
+    let stmt = stmt_parse
+        .get_formula(&db.statement("addeq1").unwrap())
+        .unwrap();
+    let formula = stmt_parse
+        .get_formula(&db.statement("formula").unwrap())
+        .unwrap();
     let result = stmt.substitute(&subst);
     assert!(result == *formula);
 }

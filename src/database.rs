@@ -111,6 +111,8 @@ use crate::parser::StatementRef;
 use crate::scopeck;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
+use crate::verify;
+use crate::verify::VerifyResult;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt;
@@ -121,14 +123,12 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
-use crate::verify;
-use crate::verify::VerifyResult;
 
 /// Structure for options that affect database processing, and must be constant
 /// for the lifetime of the database container.
 ///
 /// Some of these could theoretically support modification.
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 pub struct DbOptions {
     /// If true, the automatic splitting of large files described above is
     /// enabled, with the caveat about chapter comments inside grouping
@@ -217,17 +217,15 @@ impl Executor {
             for _ in 0..concurrency {
                 let mutex = mutex.clone();
                 let cv = cv.clone();
-                thread::spawn(move || {
-                    loop {
-                        let mut task: Job = {
-                            let mut mutexg = mutex.lock().unwrap();
-                            while mutexg.is_empty() {
-                                mutexg = cv.wait(mutexg).unwrap();
-                            }
-                            mutexg.pop().unwrap()
-                        };
-                        (task.1)();
-                    }
+                thread::spawn(move || loop {
+                    let mut task: Job = {
+                        let mut mutexg = mutex.lock().unwrap();
+                        while mutexg.is_empty() {
+                            mutexg = cv.wait(mutexg).unwrap();
+                        }
+                        mutexg.pop().unwrap()
+                    };
+                    (task.1)();
                 });
             }
         }
@@ -249,22 +247,26 @@ impl Executor {
     /// queued work.  If the provided task panics, the error will be stored and
     /// rethrown when the promise is awaited.
     pub fn exec<TASK, RV>(&self, estimate: usize, task: TASK) -> Promise<RV>
-        where TASK: FnOnce() -> RV,
-              TASK: Send + 'static,
-              RV: Send + 'static
+    where
+        TASK: FnOnce() -> RV,
+        TASK: Send + 'static,
+        RV: Send + 'static,
     {
         let parts = Arc::new((Mutex::new(None), Condvar::new()));
 
         let partsc = parts.clone();
         let mut tasko = Some(task);
-        queue_work(self,
-                   estimate,
-                   Box::new(move || {
-            let mut g = partsc.0.lock().unwrap();
-            let taskf = panic::AssertUnwindSafe(tasko.take().expect("should only be called once"));
-            *g = Some(panic::catch_unwind(taskf));
-            partsc.1.notify_one();
-        }));
+        queue_work(
+            self,
+            estimate,
+            Box::new(move || {
+                let mut g = partsc.0.lock().unwrap();
+                let taskf =
+                    panic::AssertUnwindSafe(tasko.take().expect("should only be called once"));
+                *g = Some(panic::catch_unwind(taskf));
+                partsc.1.notify_one();
+            }),
+        );
 
         Promise::new_once(move || {
             let mut g = parts.0.lock().unwrap();
@@ -297,7 +299,8 @@ impl<T> Promise<T> {
     /// invoked when `wait` is called, on the thread where `wait` is called.  If
     /// you want to run code in parallel, use `Executor::exec`.
     pub fn new_once<FN>(fun: FN) -> Promise<T>
-        where FN: FnOnce() -> T + Send + 'static
+    where
+        FN: FnOnce() -> T + Send + 'static,
     {
         let mut funcell = Some(fun);
         // the take hack works around the lack of stable FnBox
@@ -306,7 +309,8 @@ impl<T> Promise<T> {
 
     /// Wrap a value which is available now in a promise.
     pub fn new(value: T) -> Self
-        where T: Send + 'static
+    where
+        T: Send + 'static,
     {
         Promise::new_once(move || value)
     }
@@ -314,9 +318,10 @@ impl<T> Promise<T> {
     /// Modify a promise with a function, which will be called at `wait` time on
     /// the `wait` thread.
     pub fn map<FN, RV>(self, fun: FN) -> Promise<RV>
-        where T: 'static,
-              FN: 'static,
-              FN: Send + FnOnce(T) -> RV
+    where
+        T: 'static,
+        FN: 'static,
+        FN: Send + FnOnce(T) -> RV,
     {
         Promise::new_once(move || fun(self.wait()))
     }
@@ -324,7 +329,8 @@ impl<T> Promise<T> {
     /// Convert a collection of promises into a single promise, which waits for
     /// all of its parts.
     pub fn join(promises: Vec<Promise<T>>) -> Promise<Vec<T>>
-        where T: 'static
+    where
+        T: 'static,
     {
         Promise::new_once(move || promises.into_iter().map(|x| x.wait()).collect())
     }
@@ -593,9 +599,12 @@ impl Database {
             let parse = self.parse_result().clone();
             let scope = self.scope_result().clone();
             let name = self.name_result().clone();
-            let sref = self.statement(&stmt)
-                .unwrap_or_else(|| panic!("Label {} did not correspond to an existing statement",
-                                &stmt));
+            let sref = self.statement(&stmt).unwrap_or_else(|| {
+                panic!(
+                    "Label {} did not correspond to an existing statement",
+                    &stmt
+                )
+            });
 
             File::create(format!("{}.mmp", stmt.clone()))
                 .map_err(export::ExportError::Io)
@@ -648,10 +657,16 @@ impl Database {
     /// Dump the outline of this database.
     fn print_outline_node(&mut self, node: &OutlineNode, indent: usize) {
         // let indent = (node.level as usize) * 3
-        println!("{:indent$} {:?} {:?}", "", node.level, node.get_name(), indent = indent);
+        println!(
+            "{:indent$} {:?} {:?}",
+            "",
+            node.level,
+            node.get_name(),
+            indent = indent
+        );
         for child in node.children.iter() {
             self.print_outline_node(child, indent + 1);
-        }        
+        }
     }
 
     /// Runs one or more passes and collects all errors they generate.
@@ -679,8 +694,8 @@ impl Database {
         if types.contains(&DiagnosticClass::StmtParse) {
             diags.extend(self.stmt_parse_result().diagnostics());
         }
-        time(&self.options.clone(),
-             "diag",
-             || diag::to_annotations(self.parse_result(), diags))
+        time(&self.options.clone(), "diag", || {
+            diag::to_annotations(self.parse_result(), diags)
+        })
     }
 }

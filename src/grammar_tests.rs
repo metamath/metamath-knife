@@ -2,7 +2,7 @@ use crate::database::Database;
 use crate::database::DbOptions;
 use crate::parser::as_str;
 
-const GRAMMAR_DB : &[u8] = b"
+const GRAMMAR_DB: &[u8] = b"
     $c |- wff class ( ) + = $.
     $( $j syntax 'class'; syntax 'wff'; syntax '|-' as 'wff'; $)
     $v A B $.
@@ -14,10 +14,15 @@ const GRAMMAR_DB : &[u8] = b"
 ";
 
 pub fn mkdb(text: &[u8]) -> Database {
-    let options = DbOptions { incremental: true, ..Default::default() };
+    let options = DbOptions {
+        incremental: true,
+        ..Default::default()
+    };
     let mut db = Database::new(options);
-    db.parse("test.mm".to_owned(),
-             vec![("test.mm".to_owned(), text.to_owned())]);
+    db.parse(
+        "test.mm".to_owned(),
+        vec![("test.mm".to_owned(), text.to_owned())],
+    );
     db
 }
 
@@ -52,10 +57,10 @@ fn test_db_formula() {
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cadd");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1,1]).unwrap())) == "cA");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1,2]).unwrap())) == "cB");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "cB");
         assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cadd");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2,1]).unwrap())) == "cB");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2,2]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cB");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[2, 2]).unwrap())) == "cA");
     }
 }
