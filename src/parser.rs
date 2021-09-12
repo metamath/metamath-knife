@@ -1650,11 +1650,13 @@ impl Iterator for CommandIter<'_> {
             match self.next_char() {
                 b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
                 b'$' => {
+                    // End upon comment closing, $)
                     return None;
-                } // End upon comment closing, $)
+                }
                 _ => {
+                    // Else stop
                     break;
-                } // Else stop
+                }
             }
             self.index += 1;
         }
@@ -1666,10 +1668,11 @@ impl Iterator for CommandIter<'_> {
             while self.has_more() {
                 match self.next_char() {
                     b' ' | b'\t' | b'\n' | b'\r' | b';' => {
+                        // Stop if unquoted white spaces, line feeds or semicolon
                         if !quoted {
                             break;
                         }
-                    } // Stop if unquoted white spaces, line feeds or semicolon
+                    }
                     b'\'' => {
                         // Stop if quoted and end quote
                         if quoted && token_start != self.index {
@@ -1694,12 +1697,14 @@ impl Iterator for CommandIter<'_> {
                 match self.next_char() {
                     b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
                     b';' => {
+                        // Stop if unquoted semicolon $)
                         self.index += 1;
                         return Some(command);
-                    } // Stop if unquoted semicolon $)
+                    }
                     _ => {
+                        // Stop otherwise
                         break;
-                    } // Stop otherwise
+                    }
                 }
                 self.index += 1;
             }
