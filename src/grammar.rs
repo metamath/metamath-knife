@@ -897,10 +897,10 @@ impl Grammar {
             .next_node_id
     }
 
-    /// Handle common prefixes.
+    /// Handle common prefixes (garden paths).
     /// For example in set.mm, ` (  A ` is a prefix common to ` ( A X. B ) ` and ` ( A e. B /\ T. ) `
     /// The first is a notation, but would "shadow" the second option.
-    /// The command `ambiguous_prefix ( A   =>   ( ph ;` handles this.
+    /// The command `garden_path ( A   =>   ( ph ;` handles this.
     ///
     // NOTE:
     //    Common prefix must be constant only, and both first differing symbols must be variables
@@ -1018,11 +1018,11 @@ impl Grammar {
     /// Here is how the commands are to be included into the metamath file:
     /// `
     ///   $( Warn the parser about which particular formula prefixes are ambiguous $)
-    ///   $( $j ambiguous_prefix ( A   =>   ( ph ;
+    ///   $( $j garden_path ( A   =>   ( ph ;
     ///         type_conversions;
-    ///         ambiguous_prefix ( x e. A   =>   ( ph ;
-    ///         ambiguous_prefix { <.   =>   { A ;
-    ///         ambiguous_prefix { <. <.   =>   { A ;
+    ///         garden_path ( x e. A   =>   ( ph ;
+    ///         garden_path { <.   =>   { A ;
+    ///         garden_path { <. <.   =>   { A ;
     ///   $)
     /// `
     fn handle_commands(
@@ -1047,11 +1047,11 @@ impl Grammar {
                 }
             }
             // Handle Ambiguous prefix commands
-            if &command[0].as_ref() == b"ambiguous_prefix" {
+            if &command[0].as_ref() == b"garden_path" {
                 let split_index = command
                     .iter()
                     .position(|t| t.as_ref() == b"=>")
-                    .expect("'=>' not present in 'ambiguous_prefix' command!");
+                    .expect("'=>' not present in 'garden_path' command!");
                 let (prefix, shadows) = command.split_at(split_index);
                 if let Err(diag) =
                     self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names)
@@ -1381,7 +1381,7 @@ pub(crate) fn build_grammar<'a>(
         }
     }
 
-    // Post-treatement (type conversion and ambiguous prefix) as instructed by $j parser commands
+    // Post-treatement (type conversion and garden paths) as instructed by $j parser commands
     if let Err((address, diag)) = grammar.handle_commands(sset, nset, &mut names, &type_conversions)
     {
         grammar.diagnostics.insert(address, diag);
@@ -1432,6 +1432,7 @@ impl StmtParse {
     }
 
     /// Check that printing parsed statements gives back the original formulas
+    // TODO - this could be parallelized
     pub fn verify(
         &self,
         sset: &Arc<SegmentSet>,

@@ -72,7 +72,7 @@ fn test_db_formula() {
 const GARDEN_PATH_DB: &[u8] = b"
     $c |- wff class setvar { } <. >. , | e. = $.
     $( $j syntax 'class'; syntax 'wff'; syntax '|-' as 'wff';
-        type_conversions; ambiguous_prefix { <.   =>   { A ;
+        type_conversions; garden_path { <.   =>   { A ;
     $)
     $v ph A B C D x y $.
     wph $f wff ph $.
