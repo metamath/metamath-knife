@@ -646,6 +646,18 @@ impl Database {
         })
     }
 
+    /// Verify that printing the formulas of this database gives back the original formulas
+    pub fn verify_parse_stmt(&mut self) {
+        time(&self.options.clone(), "verify_parse_stmt", || {
+            let parse = self.parse_result().clone();
+            let name = self.name_result().clone();
+            let stmt_parse = self.stmt_parse_result().clone();
+            if let Err(diag) = stmt_parse.verify(&parse, &name) {
+                diag::to_annotations(self.parse_result(), vec![diag]);
+            }
+        })
+    }
+
     /// Dump the outline of this database.
     pub fn print_outline(&mut self) {
         time(&self.options.clone(), "print_outline", || {

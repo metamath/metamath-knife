@@ -70,6 +70,7 @@ pub enum Diagnostic {
     FloatNotConstant(TokenIndex),
     FloatNotVariable(TokenIndex),
     FloatRedeclared(StatementAddress),
+    FormulaVerificationFailed,
     GrammarAmbiguous(StatementAddress),
     GrammarProvableFloat,
     IoError(String),
@@ -331,6 +332,10 @@ fn annotate_diagnostic(
             info.s = "Previous $f was here";
             info.level = Note;
             ann(&mut info, Span::null());
+        }
+        FormulaVerificationFailed => {
+            info.s = "Formula verification failed at this symbol";
+            ann(&mut info, stmt.span());
         }
         GrammarAmbiguous(prevstmt) => {
             info.s = "Grammar is ambiguous; ";
