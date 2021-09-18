@@ -21,7 +21,6 @@ use crate::parser::StatementRef;
 use crate::parser::StatementType;
 use crate::parser::SymbolType;
 use crate::parser::Token;
-use crate::parser::TokenIndex;
 use crate::segment_set::SegmentSet;
 use crate::util::new_map;
 use crate::util::HashMap;
@@ -1075,17 +1074,14 @@ impl Grammar {
 
     fn do_shift(
         &self,
-        sref: &StatementRef,
-        ix: &mut TokenIndex,
+        symbol_iter: &mut dyn Iterator<Item = (usize, Symbol)>,
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
     ) {
-        if self.debug {
-            let token = sref.math_at(*ix);
-            let symbol = names.lookup_symbol(token.slice).unwrap();
-            debug!("   SHIFT {:?}", as_str(nset.atom_name(symbol.atom)));
+        if let Some((_ix, symbol)) = symbol_iter.next() {
+            if self.debug {
+                debug!("   SHIFT {:?}", as_str(nset.atom_name(symbol)));
+            }
         }
-        *ix += 1;
     }
 
     fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
@@ -1105,19 +1101,20 @@ impl Grammar {
         );
     }
 
-    fn parse_formula(
+    /// Parses the given list of symbols into a formula syntax tree.
+    pub fn parse_formula(
         &self,
-        sref: &StatementRef,
-        formula_builder: &mut FormulaBuilder,
+        symbol_iter: &mut dyn Iterator<Item = Symbol>,
         expected_typecodes: Box<[&TypeCode]>,
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
-    ) -> Result<(), Diagnostic> {
+    ) -> Result<Formula, Diagnostic> {
         struct StackElement<'a> {
             node_id: NodeId,
             expected_typecodes: Box<[&'a TypeCode]>,
         }
 
+        let mut formula_builder = FormulaBuilder::default();
+        let mut symbol_enum = symbol_iter.enumerate().peekable();
         let mut ix = 1;
         let mut e = StackElement {
             node_id: self.root,
@@ -1128,7 +1125,7 @@ impl Grammar {
             match self.nodes.get(e.node_id) {
                 GrammarNode::Leaf { reduce, typecode } => {
                     // We found a leaf: REDUCE
-                    self.do_reduce(formula_builder, *reduce, nset);
+                    self.do_reduce(&mut formula_builder, *reduce, nset);
 
                     if e.expected_typecodes.iter().any(|&t| *t == *typecode) {
                         // We found an expected typecode, pop from the stack and continue
@@ -1147,7 +1144,7 @@ impl Grammar {
                                 }) => {
                                     // Found a sub-formula: First optionally REDUCE and continue
                                     for reduce in leaf_label.into_iter() {
-                                        self.do_reduce(formula_builder, *reduce, nset);
+                                        self.do_reduce(&mut formula_builder, *reduce, nset);
                                     }
 
                                     e.node_id = *next_node_id;
@@ -1157,9 +1154,9 @@ impl Grammar {
                                     debug!("TODO");
                                 }
                             }
-                        } else if ix == sref.math_len() {
+                        } else if symbol_enum.peek().is_none() {
                             // We popped the last element from the stack and we are at the end of the math string, success
-                            return Ok(());
+                            return Ok(formula_builder.build(*typecode));
                         } else {
                             // TODO, we might have parsed a prefix of the expected type, but this does not occur in set.mm
                             return Err(Diagnostic::UnparseableStatement(ix));
@@ -1170,53 +1167,53 @@ impl Grammar {
                         let (next_node_id, leaf_label) =
                             self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
                         for reduce in leaf_label.into_iter() {
-                            self.do_reduce(formula_builder, *reduce, nset);
+                            self.do_reduce(&mut formula_builder, *reduce, nset);
                         }
                         e.node_id = next_node_id;
                     }
                 }
                 GrammarNode::Branch { cst_map, var_map } => {
-                    if ix == sref.math_len() {
+                    if let Some((index, symbol)) = symbol_enum.peek() {
+                        ix = *index as i32;
+                        debug!("   {:?}", as_str(nset.atom_name(*symbol)));
+
+                        match cst_map.get(symbol) {
+                            Some(NextNode {
+                                next_node_id,
+                                leaf_label,
+                            }) => {
+                                // Found an atom matching one of our next nodes: First optionally REDUCE and continue
+                                for reduce in leaf_label.into_iter() {
+                                    self.do_reduce(&mut formula_builder, *reduce, nset);
+                                }
+
+                                // Found an atom matching one of our next nodes: SHIFT, to the next node
+                                self.do_shift(&mut symbol_enum, nset);
+                                e.node_id = *next_node_id;
+                                debug!("   Next Node: {:?}", e.node_id);
+                            }
+                            None => {
+                                // No matching constant, search among variables
+                                if var_map.is_empty() || e.node_id == self.root {
+                                    return Err(Diagnostic::UnparseableStatement(ix));
+                                }
+
+                                debug!(
+                                    " ++ Not in CST map, push stack element and expect {:?}",
+                                    var_map.keys()
+                                );
+                                stack.push(e);
+                                e = StackElement {
+                                    node_id: self.root,
+                                    expected_typecodes: var_map
+                                        .keys()
+                                        .collect::<Vec<&TypeCode>>()
+                                        .into_boxed_slice(),
+                                };
+                            }
+                        }
+                    } else {
                         return Err(Grammar::too_short(cst_map, nset));
-                    }
-                    let token = sref.math_at(ix);
-                    let symbol = names.lookup_symbol(token.slice).unwrap();
-                    debug!("   {:?}", as_str(nset.atom_name(symbol.atom)));
-
-                    match cst_map.get(&symbol.atom) {
-                        Some(NextNode {
-                            next_node_id,
-                            leaf_label,
-                        }) => {
-                            // Found an atom matching one of our next nodes: First optionally REDUCE and continue
-                            for reduce in leaf_label.into_iter() {
-                                self.do_reduce(formula_builder, *reduce, nset);
-                            }
-
-                            // Found an atom matching one of our next nodes: SHIFT, to the next node
-                            self.do_shift(sref, &mut ix, nset, names);
-                            e.node_id = *next_node_id;
-                            debug!("   Next Node: {:?}", e.node_id);
-                        }
-                        None => {
-                            // No matching constant, search among variables
-                            if var_map.is_empty() || e.node_id == self.root {
-                                return Err(Diagnostic::UnparseableStatement(token.index()));
-                            }
-
-                            debug!(
-                                " ++ Not in CST map, push stack element and expect {:?}",
-                                var_map.keys()
-                            );
-                            stack.push(e);
-                            e = StackElement {
-                                node_id: self.root,
-                                expected_typecodes: var_map
-                                    .keys()
-                                    .collect::<Vec<&TypeCode>>()
-                                    .into_boxed_slice(),
-                            };
-                        }
                     }
                 }
             }
@@ -1247,23 +1244,19 @@ impl Grammar {
         if expected_typecode == self.provable_type {
             expected_typecode = self.logic_type;
         }
-
         // At the time of writing, there are only 3 statements which are not provable but "syntactic theorems": weq, wel and bj-0
-        let mut formula_builder = FormulaBuilder::default();
 
         debug!(
             "--------- Statement {:?} ---------",
             as_str(nset.statement_name(sref))
         );
 
-        self.parse_formula(
-            sref,
-            &mut formula_builder,
-            Box::new([&expected_typecode]),
-            nset,
-            names,
-        )?;
-        Ok(Some(formula_builder.build(typecode)))
+        let mut symbol_iter = sref
+            .math_iter()
+            .skip(1)
+            .map(|token| names.lookup_symbol(token.slice).unwrap().atom);
+        let formula = self.parse_formula(&mut symbol_iter, Box::new([&expected_typecode]), nset)?;
+        Ok(Some(formula))
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.

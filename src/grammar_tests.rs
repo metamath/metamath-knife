@@ -68,6 +68,31 @@ fn test_db_formula() {
     }
 }
 
+#[test]
+fn test_parse_formula() {
+    let mut db = mkdb(GRAMMAR_DB);
+    let sset = db.parse_result().clone();
+    let names = db.name_result().clone();
+    let grammar = db.grammar_result().clone();
+    let wff = names.lookup_symbol(b"wff").unwrap().atom;
+    let a = names.lookup_symbol(b"A").unwrap().atom;
+    let b = names.lookup_symbol(b"B").unwrap().atom;
+    let eq = names.lookup_symbol(b"=").unwrap().atom;
+    let plus = names.lookup_symbol(b"+").unwrap().atom;
+    let open_parens = names.lookup_symbol(b"(").unwrap().atom;
+    let close_parens = names.lookup_symbol(b")").unwrap().atom;
+    let fmla_vec = vec![a, eq, open_parens, b, plus, a, close_parens];
+    let formula = grammar
+        .parse_formula(&mut fmla_vec.clone().into_iter(), Box::new([&wff]), &names)
+        .unwrap();
+    assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cadd");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cB");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 2]).unwrap())) == "cA");
+    assert!(formula.iter(&sset, &names).eq(fmla_vec.into_iter()));
+}
+
 // A minimal set.mm-like database with "Garden Paths"
 const GARDEN_PATH_DB: &[u8] = b"
     $c |- wff class setvar { } <. >. , | e. = $.
