@@ -54,7 +54,7 @@ impl<TreeItem: Copy> Tree<TreeItem> {
         }
     }
 
-    /// iterator through the children of the given node
+    /// returns the child node with the given index among children nodes
     pub fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
         let mut iter = self.children_iter(node_id);
         let mut nth_node_id = node_id;

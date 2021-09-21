@@ -4,17 +4,8 @@
 
 // There are several improvements which could be made to this implementation, without changing the API:
 //
-// - `sub_formula`:
-//      `sub_formula` currently copies the whole array which backs the formula tree, which is very inefficient.
-//      This can be improved by making formulas immutable and providing an `Arc` into their slices, so that no copy occurs.
-//      This means that while the `FormulaBuilding` part would work with trees backed by a `Vector`,
-//      they would be converted to slices at the end of the building process.
 // - `sub_eq`:
 //      We could compute a hash of a formula and store it in every node, to speed up equality testing.
-// - `sub_eq`:
-//      If the formula is backed by an `Arc`, sub-formula equality testing could be improved by testing pointer equality (`ptr_eq`) for the Arc,
-//      and equality of the node index. This would tackle cases where we are comparing two formulas which are actually pointing to the same place
-//      in the same array.
 // - `substitute`:
 //      A more advanced implementation of `substitute` may act directly on the slice backing the formula to
 //      first copy in bulk the formula tree, which will remain mostly intact, then the substitutions,
@@ -63,7 +54,7 @@ impl Index<&Label> for Substitutions {
 #[derive(Default)]
 pub struct Formula {
     typecode: TypeCode,
-    tree: Tree<Label>,
+    tree: Arc<Tree<Label>>,
     root: NodeId,
     variables: Bitset,
 }
@@ -128,13 +119,14 @@ impl Formula {
 
     /// Check for equality of sub-formulas
     fn sub_eq(&self, node_id: NodeId, other: &Formula, other_node_id: NodeId) -> bool {
-        self.tree[node_id] == other.tree[other_node_id]
-            && self.tree.has_children(node_id) == other.tree.has_children(other_node_id)
-            && self
-                .tree
-                .children_iter(node_id)
-                .zip(other.tree.children_iter(other_node_id))
-                .all(|(s_id, o_id)| self.sub_eq(s_id, other, o_id))
+        (Arc::ptr_eq(&self.tree, &other.tree) && node_id == other_node_id)
+            || (self.tree[node_id] == other.tree[other_node_id]
+                && self.tree.has_children(node_id) == other.tree.has_children(other_node_id)
+                && self
+                    .tree
+                    .children_iter(node_id)
+                    .zip(other.tree.children_iter(other_node_id))
+                    .all(|(s_id, o_id)| self.sub_eq(s_id, other, o_id)))
     }
 
     /// Unify this formula with the given formula model
@@ -312,7 +304,8 @@ impl<'a> Iterator for Flatten<'a> {
 #[derive(Default)]
 pub(crate) struct FormulaBuilder {
     stack: Vec<NodeId>,
-    formula: Formula,
+    variables: Bitset,
+    tree: Tree<Label>,
 }
 
 /// A utility to build a formula.
@@ -325,23 +318,26 @@ impl FormulaBuilder {
         let reduce_end = self.stack.len().saturating_sub(offset.into());
         let new_node_id = {
             let children = self.stack.drain(reduce_start..reduce_end);
-            self.formula.tree.add_node(label, children.as_slice())
+            self.tree.add_node(label, children.as_slice())
         };
         if is_variable {
-            self.formula.variables.set_bit(new_node_id);
+            self.variables.set_bit(new_node_id);
         }
         self.stack.insert(reduce_start, new_node_id);
     }
 
-    pub(crate) fn build(mut self, typecode: TypeCode) -> Formula {
+    pub(crate) fn build(self, typecode: TypeCode) -> Formula {
         // Only one entry shall remain in the stack at the time of building, the formula root.
         assert!(
             self.stack.len() == 1,
             "Final formula building state does not have one root - {:?}",
             self.stack
         );
-        self.formula.root = self.stack[0];
-        self.formula.typecode = typecode;
-        self.formula
+        Formula {
+            typecode,
+            tree: Arc::new(self.tree),
+            root: self.stack[0],
+            variables: self.variables,
+        }
     }
 }
