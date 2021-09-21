@@ -24,3 +24,6 @@ pub mod util;
 pub mod verify;
 
 pub use database::Database;
+pub use formula::Formula;
+pub use formula::Label;
+pub use formula::Symbol;

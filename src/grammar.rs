@@ -644,7 +644,9 @@ impl Grammar {
 
         // If is safe to unwrap here since parser has already checked.
         let token = tokens.next().unwrap();
-        let symbol = names.lookup_symbol(token.slice).unwrap();
+        let symbol = names
+            .lookup_symbol(token.slice)
+            .ok_or(Diagnostic::FloatNotVariable(1))?;
 
         debug!(
             "========== Statement {:?} ==========",
@@ -1115,7 +1117,7 @@ impl Grammar {
 
         let mut formula_builder = FormulaBuilder::default();
         let mut symbol_enum = symbol_iter.enumerate().peekable();
-        let mut ix = 1;
+        let mut ix;
         let mut e = StackElement {
             node_id: self.root,
             expected_typecodes,
@@ -1158,8 +1160,13 @@ impl Grammar {
                             // We popped the last element from the stack and we are at the end of the math string, success
                             return Ok(formula_builder.build(*typecode));
                         } else {
-                            // TODO, we might have parsed a prefix of the expected type, but this does not occur in set.mm
-                            return Err(Diagnostic::UnparseableStatement(ix));
+                            // There are still symbols to parse, continue from root
+                            let (next_node_id, leaf_label) =
+                                self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
+                            for reduce in leaf_label.into_iter() {
+                                self.do_reduce(&mut formula_builder, *reduce, nset);
+                            }
+                            e.node_id = next_node_id;
                         }
                     } else {
                         // We have not found the expected typecode, continue from root
@@ -1257,6 +1264,14 @@ impl Grammar {
             .map(|token| names.lookup_symbol(token.slice).unwrap().atom);
         let formula = self.parse_formula(&mut symbol_iter, Box::new([&expected_typecode]), nset)?;
         Ok(Some(formula))
+    }
+
+    /// Returns the typecodes allowed in this grammar
+    pub fn typecodes(&self) -> Box<[&TypeCode]> {
+        self.typecodes
+            .iter()
+            .collect::<Vec<&TypeCode>>()
+            .into_boxed_slice()
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
