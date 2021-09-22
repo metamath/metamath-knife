@@ -48,5 +48,5 @@ jobs:
         run: cargo fmt -- --check 
       - name: Verify official set.mm
         run: |
-          wget -N -q https://raw.githubusercontent.com/metamath/set.mm/76edf1031e8caf9622a2bcb4084ee17ed64ca791/set.mm
+          curl -s -G https://raw.githubusercontent.com/metamath/set.mm/76edf1031e8caf9622a2bcb4084ee17ed64ca791/set.mm > set.mm
           cargo run -- --jobs 8 set.mm --verify --grammar --parse-stmt --verify-parse-stmt 
