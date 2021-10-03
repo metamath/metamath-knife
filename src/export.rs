@@ -91,7 +91,18 @@ pub fn export_mmp<W: Write>(
     }
 
     let arr = ProofTreeArray::new(sset, nset, scope, stmt)?;
+    export_mmp_proof_tree(sset, nset, scope, thm_label, &arr, out)
+}
 
+/// Export an mmp file for a given proof tree.
+pub fn export_mmp_proof_tree<W: Write>(
+    sset: &SegmentSet,
+    nset: &Nameset,
+    scope: &ScopeResult,
+    thm_label: &[u8],
+    arr: &ProofTreeArray,
+    out: &mut W,
+) -> Result<(), ExportError> {
     // TODO remove hardcoded logical step symbol
     let provable_tc = "|-".as_bytes();
     let provable_tc = nset.lookup_symbol(provable_tc).map(|_| provable_tc);
@@ -179,7 +190,7 @@ pub fn export_mmp<W: Write>(
             scope,
             thm_label,
             style: ProofStyle::Compressed,
-            arr: &arr,
+            arr,
             initial_chr: 2,
             indent: 6,
             line_width: 79,

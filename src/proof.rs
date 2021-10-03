@@ -134,7 +134,7 @@ impl ProofTreeArray {
     ) -> Result<ProofTreeArray, Diagnostic> {
         let mut arr = ProofTreeArray::default();
         arr.qed = verify_one(sset, nset, scopes, &mut arr, stmt)?;
-        arr.indent = arr.calc_indent();
+        arr.calc_indent();
         Ok(arr)
     }
 
@@ -145,8 +145,8 @@ impl ProofTreeArray {
 
     /// Finds the shortest path from each node in the proof tree to the `qed` step,
     /// using Dijkstra's algorithm.  Based on the example in
-    /// https://doc.rust-lang.org/std/collections/binary_heap/.
-    fn calc_indent(&self) -> Vec<u16> {
+    /// <https://doc.rust-lang.org/std/collections/binary_heap/>.
+    pub fn calc_indent(&mut self) {
         #[derive(Copy, Clone, Eq, PartialEq)]
         struct IndentNode {
             index: usize,
@@ -206,7 +206,7 @@ impl ProofTreeArray {
             }
         }
 
-        dist
+        self.indent = dist;
     }
 
     /// Get the number of parents of each step in the proof

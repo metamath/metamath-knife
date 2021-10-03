@@ -19,13 +19,19 @@ use crate::nameck::Nameset;
 use crate::parser::as_str;
 use crate::parser::SymbolType;
 use crate::parser::TokenIter;
+use crate::scopeck::Hyp;
+use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::tree::NodeId;
 use crate::tree::SiblingIter;
 use crate::tree::Tree;
+use crate::util::fast_extend;
 use crate::util::new_map;
 use crate::util::HashMap;
+use crate::verify::ProofBuilder;
 use core::ops::Index;
+use std::iter::FromIterator;
+use std::ops::Range;
 use std::sync::Arc;
 
 /// An atom representing a typecode (for "set.mm", that's one of 'wff', 'class', 'setvar' or '|-')
@@ -37,12 +43,13 @@ pub type Symbol = Atom;
 /// An atom representing a label (nameck suggests LAtom for this)
 pub type Label = Atom;
 
+#[derive(Clone, Default)]
 /// A set of substitutions, mapping variables to a formula
 /// We also could have used `dyn Index<&Label, Output=Box<Formula>>`
-pub struct Substitutions(HashMap<Label, Box<Formula>>);
+pub struct Substitutions(HashMap<Label, Formula>);
 
 impl Index<&Label> for Substitutions {
-    type Output = Box<Formula>;
+    type Output = Formula;
 
     #[inline]
     fn index(&self, label: &Label) -> &Self::Output {
@@ -50,8 +57,20 @@ impl Index<&Label> for Substitutions {
     }
 }
 
+impl Substitutions {
+    /// Inserts a substitution into the substitution set.
+    pub fn insert(&mut self, label: Label, formula: Formula) -> Option<Formula> {
+        self.0.insert(label, formula)
+    }
+
+    /// Add all the provided substitutions to this one
+    pub fn extend(&mut self, substitutions: &Substitutions) {
+        self.0.extend(substitutions.0.clone());
+    }
+}
+
 /// A parsed formula, in a tree format which is convenient to perform unifications
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Formula {
     typecode: TypeCode,
     tree: Arc<Tree<Label>>,
@@ -82,6 +101,83 @@ impl Formula {
             str.push_str(as_str(nset.atom_name(symbol)));
         }
         str
+    }
+
+    /// Appends this formula to the provided stack buffer.
+    ///
+    /// The [ProofBuilder] structure uses a dense representation of formulas as byte strings, using the high bit to mark
+    /// the end of each token. This funtion creates such a byte string, stores it in the provided buffer,
+    /// and returns the range the newly added string occupies on the buffer.
+    ///
+    /// See [crate::verify] for more about this format.
+    pub fn append_to_stack_buffer(
+        &self,
+        mut stack_buffer: &mut Vec<u8>,
+        sset: &Arc<SegmentSet>,
+        nset: &Arc<Nameset>,
+    ) -> Range<usize> {
+        let tos = stack_buffer.len();
+        for symbol in self.iter(sset, nset) {
+            fast_extend(&mut stack_buffer, nset.atom_name(symbol));
+            *stack_buffer.last_mut().unwrap() |= 0x80;
+        }
+        let ntos = stack_buffer.len();
+        tos..ntos
+    }
+
+    /// Builds the syntax proof for this formula.
+    ///
+    /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
+    /// This methos builds such a syntax proof for the formula into a [crate::proof::ProofTree],
+    /// stores that proof tree in the provided [ProofBuilder] `arr`,
+    /// and returns the index of that ProofTree within `arr`.
+    pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
+        &self,
+        stack_buffer: &mut Vec<u8>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = Vec<I>>,
+        sset: &Arc<SegmentSet>,
+        nset: &Arc<Nameset>,
+        scope: &Arc<ScopeResult>,
+    ) -> I {
+        self.sub_build_syntax_proof(self.root, stack_buffer, arr, sset, nset, scope)
+    }
+
+    /// Stores and returns the index of a [ProofTree] in a [ProofBuilder],
+    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
+    // Formulas children nodes are stored in the order of appearance of the variables in the formula, which is efficient when parsing or rendering the formula from or into a string of tokens.
+    // However, proofs require children nodes sorted in the order of mandatory floating hypotheses.
+    // This method performs this mapping.
+    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
+        &self,
+        node_id: NodeId,
+        stack_buffer: &mut Vec<u8>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+        sset: &Arc<SegmentSet>,
+        nset: &Arc<Nameset>,
+        scope: &Arc<ScopeResult>,
+    ) -> I {
+        let token = nset.atom_name(self.tree[node_id]);
+        let address = nset.lookup_label(token).unwrap().address;
+        let frame = scope.get(token).unwrap();
+        let children_hyps = self
+            .tree
+            .children_iter(node_id)
+            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr, sset, nset, scope))
+            .collect::<Vec<I>>()
+            .into_boxed_slice();
+        let hyps = frame
+            .hypotheses
+            .iter()
+            .filter_map(|hyp| {
+                if let Hyp::Floating(_sa, index, _) = hyp {
+                    Some(children_hyps[*index])
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let range = self.append_to_stack_buffer(stack_buffer, sset, nset);
+        arr.build(address, hyps, stack_buffer, range)
     }
 
     /// Debug only, dumps the internal structure of the formula.
@@ -152,10 +248,9 @@ impl Formula {
                 self.sub_eq(node_id, formula, formula.root).then(|| {})
             } else {
                 // store the new substitution and succeed
-                substitutions.0.insert(
-                    other.tree[other_node_id],
-                    Box::new(self.sub_formula(node_id)),
-                );
+                substitutions
+                    .0
+                    .insert(other.tree[other_node_id], self.sub_formula(node_id));
                 Some(())
             }
         } else if self.tree[node_id] == other.tree[other_node_id]
