@@ -258,12 +258,14 @@ fn main() {
                 break;
             }
         } else {
-            break;
-        }
-    }
+            if !matches.is_present("free") {
+                mem::forget(db);
+            }
 
-    if !matches.is_present("free") {
-        mem::forget(db);
+            // Exit with code 1 if any warning or error were encountered
+            let code = if count > 0 { 1 } else { 0 };
+            std::process::exit(code);
+        }
     }
 }
 
