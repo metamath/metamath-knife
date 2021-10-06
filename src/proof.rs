@@ -7,6 +7,7 @@ use crate::parser::StatementAddress;
 use crate::parser::StatementRef;
 use crate::parser::StatementType::*;
 use crate::parser::TokenPtr;
+use crate::scopeck::Hyp;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::util::new_map;
@@ -517,7 +518,6 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
     fn fmt_compressed(&mut self) -> fmt::Result {
         let parents = self.p.arr.count_parents();
         let rpn = self.p.arr.to_rpn(&parents, false);
-        let mut proof_ordered_hyps = vec![];
         let mut proof_ordered: Vec<(StatementRef, usize)> = vec![];
         let frame = self.p.scope.get(self.p.thm_label).unwrap();
         for item in &rpn {
@@ -529,9 +529,9 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                         if frame.var_list[..frame.mandatory_count].contains(&atom) {
                             continue;
                         }
-                        &mut proof_ordered_hyps
+                        &mut proof_ordered
                     }
-                    Essential => &mut proof_ordered_hyps,
+                    Essential => continue,
                     Axiom | Provable => &mut proof_ordered,
                     _ => unreachable!(),
                 };
@@ -541,8 +541,6 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                 }
             }
         }
-        proof_ordered_hyps.append(&mut proof_ordered);
-        proof_ordered = proof_ordered_hyps;
         let values: Vec<u16> = proof_ordered
             .iter()
             .map(|&(s, _)| s.label().len() as u16 + 1)
@@ -597,16 +595,41 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
         }
         process_block(&mut paren_stmt, &mut length_block);
 
+        self.write_word("(")?;
+        for s in &paren_stmt {
+            self.write_word(as_str(s.label()))?;
+        }
+        self.write_word(")")?;
+
+        let mut ess_stmt: Vec<StatementRef> = frame
+            .hypotheses
+            .iter()
+            .filter_map(|h| {
+                if let Hyp::Essential(addr, _) = h {
+                    Some(self.p.sset.statement(*addr))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        ess_stmt.append(&mut paren_stmt);
+        paren_stmt = ess_stmt;
+
         let mut letters: Vec<u8> = vec![];
         for item in &rpn {
             let (is_fwdref, mut letter) = match *item {
                 RPNStep::Normal { fwdref, addr, .. } => {
                     let stmt = self.p.sset.statement(addr);
                     let pos = if stmt.statement_type() == Floating {
-                        let atom = self.p.nset.var_atom(stmt).unwrap();
-                        frame.var_list[..frame.mandatory_count]
+                        frame.hypotheses[..frame.mandatory_count]
                             .iter()
-                            .position(|&a| a == atom)
+                            .position(|h| {
+                                if let Hyp::Floating(sa, ..) = h {
+                                    *sa == addr
+                                } else {
+                                    false
+                                }
+                            })
                     } else {
                         None
                     };
@@ -636,11 +659,6 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
             }
         }
 
-        self.write_word("(")?;
-        for s in paren_stmt {
-            self.write_word(as_str(s.label()))?;
-        }
-        self.write_word(")")?;
         let mut letters: &[u8] = &letters;
         loop {
             let ll = (self.p.line_width - self.chr)
