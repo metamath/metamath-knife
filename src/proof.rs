@@ -523,24 +523,28 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
         for item in &rpn {
             if let RPNStep::Normal { addr, .. } = *item {
                 let stmt = self.p.sset.statement(addr);
-                let vec = match stmt.statement_type() {
+                match stmt.statement_type() {
                     Floating => {
                         let atom = self.p.nset.var_atom(stmt).unwrap();
-                        if frame.var_list[..frame.mandatory_count].contains(&atom) {
+                        if frame.mandatory_vars().contains(&atom) {
                             continue;
                         }
-                        &mut proof_ordered
                     }
                     Essential => continue,
-                    Axiom | Provable => &mut proof_ordered,
+                    Axiom | Provable => {}
                     _ => unreachable!(),
-                };
-                match vec.iter().position(|&(s, _)| s.address() == addr) {
-                    Some(n) => vec[n].1 += 1,
-                    None => vec.push((stmt, 1)),
+                }
+                match proof_ordered.iter_mut().find(|(s, _)| s.address() == addr) {
+                    Some((_, n)) => *n += 1,
+                    None => proof_ordered.push((stmt, 1)),
                 }
             }
         }
+
+        // stable sort to put all hypotheses first
+        proof_ordered.sort_by_key(|(stmt, _)| matches!(stmt.statement_type(), Axiom | Provable));
+
+        // get the length of each label, plus 1 for the space
         let values: Vec<u16> = proof_ordered
             .iter()
             .map(|&(s, _)| s.label().len() as u16 + 1)
@@ -560,8 +564,7 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
         let width = self.p.line_width - self.p.indent + 1;
 
         let mut knapsack = VecDeque::new(); // scratch space used in knapsack_fit
-        let mut process_block = |paren_stmt: &mut Vec<StatementRef<'a>>,
-                                 length_block: &mut Vec<usize>| {
+        let mut process_block = |length_block: &mut Vec<usize>| {
             length_block.sort_unstable();
             while !length_block.is_empty() {
                 knapsack_fit(
@@ -573,9 +576,10 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                 for &p in &knapsack {
                     line_pos += values[p];
                     paren_stmt.push(proof_ordered[p].0);
-                    if let Ok(n) = length_block.binary_search(&p) {
-                        length_block.remove(n);
-                    }
+                    let n = length_block
+                        .binary_search(&p)
+                        .expect("knapsack_fit returns elements in the array");
+                    length_block.remove(n);
                 }
                 if !knapsack.is_empty() || line_pos >= width - 1 {
                     line_pos = 0;
@@ -587,13 +591,13 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
             if i == cutoff {
                 i = 1;
                 cutoff *= 5;
-                process_block(&mut paren_stmt, &mut length_block);
+                process_block(&mut length_block);
             } else {
                 i += 1;
             }
             length_block.push(pos);
         }
-        process_block(&mut paren_stmt, &mut length_block);
+        process_block(&mut length_block);
 
         self.write_word("(")?;
         for s in &paren_stmt {
@@ -621,15 +625,13 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                 RPNStep::Normal { fwdref, addr, .. } => {
                     let stmt = self.p.sset.statement(addr);
                     let pos = if stmt.statement_type() == Floating {
-                        frame.hypotheses[..frame.mandatory_count]
-                            .iter()
-                            .position(|h| {
-                                if let Hyp::Floating(sa, ..) = h {
-                                    *sa == addr
-                                } else {
-                                    false
-                                }
-                            })
+                        frame.mandatory_hyps().iter().position(|h| {
+                            if let Hyp::Floating(sa, ..) = h {
+                                *sa == addr
+                            } else {
+                                false
+                            }
+                        })
                     } else {
                         None
                     };
