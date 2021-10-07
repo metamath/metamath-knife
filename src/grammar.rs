@@ -117,7 +117,7 @@ impl GrammarTree {
         add_reduce: Reduce,
     ) -> Result<(), NodeId> {
         match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
-            // TODO here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
+            // TODO(tirix): here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
             (
                 GrammarNode::Branch { cst_map, var_map },
                 GrammarNode::Branch {
@@ -126,7 +126,7 @@ impl GrammarTree {
                 },
             ) => {
                 for (symbol, next_node) in cst_map.iter() {
-                    if to_cst_map.get(symbol).is_some() { // TODO later use map_try_insert #82766
+                    if to_cst_map.get(symbol).is_some() { // TODO(tirix): later use map_try_insert #82766
                          // Skip error here, do nothing for now...
                          //return Err(conflict_next_node.next_node_id);
                          //panic!("Conflict when copying constant grammar branches!");
@@ -135,7 +135,7 @@ impl GrammarTree {
                     }
                 }
                 for (typecode, next_node) in var_map.iter() {
-                    if to_var_map.get(typecode).is_some() { // TODO later use map_try_insert #82766
+                    if to_var_map.get(typecode).is_some() { // TODO(tirix): later use map_try_insert #82766
                          // Skip error here, do nothing for now...
                          //return Err(conflict_next_node.next_node_id);
                          //panic!("Conflict when copying variable grammar branches!");
@@ -920,7 +920,7 @@ impl Grammar {
             if prefix[index] != shadows[index] {
                 break;
             }
-            // TODO use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
+            // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
             if let GrammarNode::Branch { cst_map, .. } = self.nodes.get(node_id) {
                 let prefix_symbol = nset.lookup_symbol(prefix[index].as_ref()).unwrap().atom;
                 let next_node = cst_map
@@ -1162,7 +1162,7 @@ impl Grammar {
                         } else {
                             // There are still symbols to parse, continue from root
                             let (next_node_id, leaf_label) =
-                                self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
+                                self.next_var_node(self.root, *typecode).unwrap(); // TODO(tirix): error case
                             for reduce in leaf_label.into_iter() {
                                 self.do_reduce(&mut formula_builder, *reduce, nset);
                             }
@@ -1172,7 +1172,7 @@ impl Grammar {
                         // We have not found the expected typecode, continue from root
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) =
-                            self.next_var_node(self.root, *typecode).unwrap(); // TODO error case
+                            self.next_var_node(self.root, *typecode).unwrap(); // TODO(tirix): error case
                         for reduce in leaf_label.into_iter() {
                             self.do_reduce(&mut formula_builder, *reduce, nset);
                         }
@@ -1440,7 +1440,7 @@ impl StmtParse {
     }
 
     /// Check that printing parsed statements gives back the original formulas
-    // TODO - this could be parallelized
+    // TODO(sorear): this could be parallelized
     pub fn verify(
         &self,
         sset: &Arc<SegmentSet>,

@@ -38,15 +38,15 @@ jobs:
         with:
           rust-version: ${{ matrix.rust }}
           components: clippy, rustfmt
-      # TODO: Add more static tests, perhaps eventually fail on warnings
+      # TODO(David): Add more static tests, perhaps eventually fail on warnings
       # (or disable those warnings, preferably as specifically as we can).
       - name: Run tests
         run: cargo test --verbose
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Format
-        run: cargo fmt -- --check 
+        run: cargo fmt -- --check
       - name: Verify official set.mm
         run: |
           curl -s -G https://raw.githubusercontent.com/metamath/set.mm/76edf1031e8caf9622a2bcb4084ee17ed64ca791/set.mm > set.mm
-          cargo run -- --jobs 8 set.mm --verify --grammar --parse-stmt --verify-parse-stmt 
+          cargo run -- --jobs 8 set.mm --verify --grammar --parse-stmt --verify-parse-stmt

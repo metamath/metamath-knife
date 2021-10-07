@@ -466,7 +466,7 @@ impl<'a> NameReader<'a> {
         }
     }
 
-    // TODO: add versions which fetch less data, to reduce dep tracking overhead
+    // TODO(sorear): add versions which fetch less data, to reduce dep tracking overhead
 
     /// Looks up the address and atom for a statement label.
     pub fn lookup_label(&mut self, label: TokenPtr) -> Option<LookupLabel> {
@@ -494,7 +494,7 @@ impl<'a> NameReader<'a> {
         out
     }
 
-    // TODO: consider merging this with lookup_symbol
+    // TODO(sorear): consider merging this with lookup_symbol
     /// Looks up the float declaration for a math symbol.
     pub fn lookup_float(&mut self, symbol: TokenPtr) -> Option<LookupFloat<'a>> {
         match self.nameset.symbols.get(symbol) {
