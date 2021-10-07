@@ -1,46 +1,11 @@
 //! A library for manipulating [Metamath](http://us.metamath.org/#faq)
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
-#![warn(missing_docs)]
-#[macro_use]
-extern crate clap;
-extern crate filetime;
-extern crate fnv;
-extern crate regex;
 
-pub mod bit_set;
-pub mod database;
-pub mod diag;
-pub mod export;
-pub mod formula;
-pub mod grammar;
-pub mod line_cache;
-pub mod nameck;
-pub mod outline;
-pub mod parser;
-pub mod proof;
-pub mod scopeck;
-pub mod segment_set;
-mod tree;
-pub mod util;
-pub mod verify;
-
-#[cfg(test)]
-mod formula_tests;
-#[cfg(test)]
-mod grammar_tests;
-#[cfg(test)]
-mod parser_tests;
-#[cfg(test)]
-mod util_tests;
-
-use clap::App;
-use clap::Arg;
-use database::Database;
-use database::DbOptions;
-use diag::DiagnosticClass;
-use diag::Notation;
-use line_cache::LineCache;
+use clap::{crate_version, App, Arg};
+use metamath_knife::database::{Database, DbOptions};
+use metamath_knife::diag::{DiagnosticClass, Notation};
+use metamath_knife::line_cache::LineCache;
 use simple_logger::SimpleLogger;
 use std::io;
 use std::mem;

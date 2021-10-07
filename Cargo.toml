@@ -37,3 +37,8 @@ codegen-units = 4
 
 [profile.test]
 codegen-units = 4
+
+[[bin]]
+name = "metamath-knife"
+path = "src/main.rs"
+doc = false
