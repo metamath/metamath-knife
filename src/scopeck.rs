@@ -101,7 +101,7 @@ struct LocalDvInfo {
 #[derive(Clone, Debug)]
 struct LocalEssentialInfo<'a> {
     valid: GlobalRange,
-    label: TokenPtr<'a>,
+    _label: TokenPtr<'a>,
     string: Vec<CheckedToken<'a>>,
 }
 
@@ -724,7 +724,7 @@ fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>)
             // construct_full_frame when it's no longer in scope
             state.local_essen.push(LocalEssentialInfo {
                 valid: sref.scope_range(),
-                label: sref.label(),
+                _label: sref.label(),
                 string: expr,
             });
         }
