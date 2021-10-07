@@ -24,14 +24,14 @@ pub struct Bitset {
     tail: Option<Box<Vec<usize>>>,
 }
 
-fn bits_per_word() -> usize {
+const fn bits_per_word() -> usize {
     size_of::<usize>() * 8
 }
 
 impl Clone for Bitset {
     #[inline]
-    fn clone(&self) -> Bitset {
-        Bitset {
+    fn clone(&self) -> Self {
+        Self {
             head: self.head,
             tail: self.tail.clone(),
         }
@@ -44,7 +44,7 @@ impl PartialEq for Bitset {
         self.head == other.head
             && match (self.tail.as_ref(), other.tail.as_ref()) {
                 (None, None) => true,
-                (Some(ref self_tail), Some(ref other_tail)) => self_tail == other_tail,
+                (Some(self_tail), Some(other_tail)) => self_tail == other_tail,
                 _ => false,
             }
     }
@@ -53,8 +53,8 @@ impl PartialEq for Bitset {
 impl Bitset {
     /// Creates a new empty `Bitset`.  Does not allocate.  Equivalent to
     /// `Bitset::default()`.
-    pub fn new() -> Bitset {
-        Bitset {
+    pub const fn new() -> Self {
+        Self {
             head: 0,
             tail: None,
         }
@@ -151,6 +151,7 @@ impl<'a> IntoIterator for &'a Bitset {
 }
 
 /// Iterator for set bits in a bitset.
+#[derive(Debug)]
 pub struct BitsetIter<'a> {
     bits: usize,
     offset: usize,

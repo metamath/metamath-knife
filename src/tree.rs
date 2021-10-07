@@ -2,8 +2,9 @@
 //!
 use core::ops::Index;
 
-pub type NodeId = usize;
+pub(crate) type NodeId = usize;
 
+#[derive(Debug)]
 struct TreeNode<TreeItem> {
     item: TreeItem,
     first_child: NodeId,
@@ -11,8 +12,8 @@ struct TreeNode<TreeItem> {
 }
 
 /// A tree implementation, hopefully efficient for representing formulas
-#[derive(Default)]
-pub struct Tree<TreeItem> {
+#[derive(Default, Debug)]
+pub(crate) struct Tree<TreeItem> {
     nodes: Vec<TreeNode<TreeItem>>,
 }
 
@@ -21,7 +22,7 @@ impl<TreeItem: Copy> Tree<TreeItem> {
     /// This way of constructing the tree forces to use a bottom-up approach,
     /// where the leafs are added first, followed by the branch nodes.
     /// The root node is added last, and is therefore not at a fixed index.
-    pub fn add_node(&mut self, item: TreeItem, children: &[NodeId]) -> NodeId {
+    pub(crate) fn add_node(&mut self, item: TreeItem, children: &[NodeId]) -> NodeId {
         let mut new_node = TreeNode {
             item,
             first_child: 0,
@@ -41,7 +42,7 @@ impl<TreeItem: Copy> Tree<TreeItem> {
     }
 
     /// iterator through the children of the given node
-    pub fn children_iter(&self, node_id: NodeId) -> SiblingIter<TreeItem> {
+    pub(crate) fn children_iter(&self, node_id: NodeId) -> SiblingIter<'_, TreeItem> {
         assert!(node_id > 0, "Cannot iterate null node!");
         assert!(
             node_id <= self.nodes.len(),
@@ -55,7 +56,7 @@ impl<TreeItem: Copy> Tree<TreeItem> {
     }
 
     /// returns the child node with the given index among children nodes
-    pub fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
+    pub(crate) fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
         let mut iter = self.children_iter(node_id);
         let mut nth_node_id = node_id;
         for _ in 0..index {
@@ -65,12 +66,12 @@ impl<TreeItem: Copy> Tree<TreeItem> {
     }
 
     /// returns whether the given node has children or not
-    pub fn has_children(&self, node_id: NodeId) -> bool {
+    pub(crate) fn has_children(&self, node_id: NodeId) -> bool {
         self.nodes[node_id - 1].first_child != 0
     }
 
     /// Debug only, dumps the internal structure of the tree.
-    pub fn dump<'a, D>(&'a self, display: D)
+    pub(crate) fn dump<'a, D>(&'a self, display: D)
     where
         D: Fn(&'a TreeItem) -> &str,
     {
@@ -114,7 +115,8 @@ impl<TreeItem: Clone> Clone for Tree<TreeItem> {
 }
 
 /// An iterator through sibling nodes
-pub struct SiblingIter<'a, TreeItem> {
+#[derive(Debug)]
+pub(crate) struct SiblingIter<'a, TreeItem> {
     tree: &'a Tree<TreeItem>,
     current_id: NodeId,
 }
@@ -123,13 +125,12 @@ impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
     type Item = NodeId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.current_id {
-            0 => None, // end of the iteration
-            _ => {
-                let current_id = self.current_id;
-                self.current_id = self.tree.nodes[current_id - 1].next_sibling;
-                Some(current_id)
-            }
+        if self.current_id == 0 {
+            None
+        } else {
+            let current_id = self.current_id;
+            self.current_id = self.tree.nodes[current_id - 1].next_sibling;
+            Some(current_id)
         }
     }
 }

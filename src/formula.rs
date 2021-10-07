@@ -1,6 +1,6 @@
 //! `Formula` stores the result of a parsing as the tree of its "syntactic proof"
-//! The formula nodes are the equivalent of MMJ2's "ParseNode"s, and the formula
-//! itself the equivalent of MMJ2's "ParseTree"
+//! The formula nodes are the equivalent of MMJ2's `ParseNode`s, and the formula
+//! itself the equivalent of MMJ2's `ParseTree`
 
 // There are several improvements which could be made to this implementation,
 // without changing the API:
@@ -44,12 +44,13 @@ pub type TypeCode = Atom;
 /// An atom representing a math symbol
 pub type Symbol = Atom;
 
-/// An atom representing a label (nameck suggests LAtom for this)
+/// An atom representing a label (nameck suggests `LAtom` for this)
 pub type Label = Atom;
 
 #[derive(Clone, Default)]
 /// A set of substitutions, mapping variables to a formula
 /// We also could have used `dyn Index<&Label, Output=Box<Formula>>`
+#[derive(Debug)]
 pub struct Substitutions(HashMap<Label, Formula>);
 
 impl Index<&Label> for Substitutions {
@@ -74,7 +75,7 @@ impl Substitutions {
 }
 
 /// A parsed formula, in a tree format which is convenient to perform unifications
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Formula {
     typecode: TypeCode,
     tree: Arc<Tree<Label>>,
@@ -85,6 +86,7 @@ pub struct Formula {
 impl Formula {
     /// Convert the formula back to a flat list of symbols
     /// This is slow and shall not normally be called except for showing a result to the user.
+    #[must_use]
     pub fn iter<'a>(&'a self, sset: &'a Arc<SegmentSet>, nset: &'a Arc<Nameset>) -> Flatten<'a> {
         let mut f = Flatten {
             formula: self,
@@ -97,6 +99,7 @@ impl Formula {
     }
 
     /// Displays the formula as a string
+    #[must_use]
     pub fn display(&self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) -> String {
         let mut str = String::new();
         str.push_str(as_str(nset.atom_name(self.typecode)));
@@ -109,12 +112,12 @@ impl Formula {
 
     /// Appends this formula to the provided stack buffer.
     ///
-    /// The [ProofBuilder] structure uses a dense representation of formulas as byte strings,
+    /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,
     /// using the high bit to mark the end of each token.
-    /// This funtion creates such a byte string, stores it in the provided buffer,
+    /// This function creates such a byte string, stores it in the provided buffer,
     /// and returns the range the newly added string occupies on the buffer.
     ///
-    /// See [crate::verify] for more about this format.
+    /// See [`crate::verify`] for more about this format.
     pub fn append_to_stack_buffer(
         &self,
         stack_buffer: &mut Vec<u8>,
@@ -126,16 +129,16 @@ impl Formula {
             fast_extend(stack_buffer, nset.atom_name(symbol));
             *stack_buffer.last_mut().unwrap() |= 0x80;
         }
-        let ntos = stack_buffer.len();
-        tos..ntos
+        let n_tos = stack_buffer.len();
+        tos..n_tos
     }
 
     /// Builds the syntax proof for this formula.
     ///
     /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
-    /// This methos builds such a syntax proof for the formula into a [crate::proof::ProofTree],
-    /// stores that proof tree in the provided [ProofBuilder] `arr`,
-    /// and returns the index of that ProofTree within `arr`.
+    /// This methos builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
+    /// stores that proof tree in the provided [`ProofBuilder`] `arr`,
+    /// and returns the index of that `ProofTree` within `arr`.
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         &self,
         stack_buffer: &mut Vec<u8>,
@@ -147,7 +150,7 @@ impl Formula {
         self.sub_build_syntax_proof(self.root, stack_buffer, arr, sset, nset, scope)
     }
 
-    /// Stores and returns the index of a [ProofTree] in a [ProofBuilder],
+    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
     /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
     // Formulas children nodes are stored in the order of appearance of the variables
     // in the formula, which is efficient when parsing or rendering the formula from
@@ -196,6 +199,7 @@ impl Formula {
     /// Returns the label obtained when following the given path.
     /// Each element of the path gives the index of the child to retrieve.
     /// For example, the empty
+    #[must_use]
     pub fn get_by_path(&self, path: &[usize]) -> Option<Label> {
         let mut node_id = self.root;
         for index in path {
@@ -235,6 +239,7 @@ impl Formula {
     /// Unify this formula with the given formula model
     /// If successful, this returns the substitutions which needs to be made in
     /// `other` in order to match this formula.
+    #[must_use]
     pub fn unify(&self, other: &Formula) -> Option<Box<Substitutions>> {
         let mut substitutions = Substitutions(new_map());
         self.sub_unify(self.root, other, other.root, &mut substitutions)?;
@@ -283,6 +288,7 @@ impl Formula {
     /// This returns a new `Formula` object, built from this formula,
     /// where all instances of the variables specified in the substitutions are
     /// replaced by the corresponding formulas.
+    #[must_use]
     pub fn substitute(&self, substitutions: &Substitutions) -> Formula {
         let mut formula_builder = FormulaBuilder::default();
         self.sub_substitute(self.root, substitutions, &mut formula_builder);
@@ -344,6 +350,7 @@ impl PartialEq for Formula {
 }
 
 /// An iterator going through each symbol in a formula
+#[derive(Debug)]
 pub struct Flatten<'a> {
     formula: &'a Formula,
     stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Label>>)>,

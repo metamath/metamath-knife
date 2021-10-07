@@ -2,6 +2,7 @@
 
 use crate::util::HashMap;
 use std::cmp::Ordering;
+use std::convert::TryFrom;
 
 const PAGE: usize = 256;
 
@@ -15,7 +16,7 @@ const PAGE: usize = 256;
 /// outlives any of the buffers it has been queried against, and future buffers
 /// receive the same address range, the line cache will return incorrect results
 /// (but will not crash).
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct LineCache {
     map: HashMap<(usize, usize), Vec<u32>>,
 }
@@ -36,13 +37,14 @@ fn make_index(mut buf: &[u8]) -> Vec<u32> {
         // down because all vector hardware supported by Rust generates fewer
         // instructions that way (the natural compare instructions produce 0 and
         // -1, not 0 and 1).
+        #[allow(clippy::cast_sign_loss)]
         while page.len() >= 128 {
             let mut inner = 0i8;
             for &ch in &page[0..128] {
                 inner += -((ch == b'\n') as i8);
             }
             page = &page[128..];
-            count += (inner as u8).wrapping_neg() as u32;
+            count += u32::from((inner as u8).wrapping_neg());
         }
         out.push(count);
     }
@@ -94,12 +96,15 @@ impl LineCache {
     }
 
     /// Map a line to a buffer index.  Panics if out of range.
+    #[must_use]
     pub fn to_offset(&mut self, buf: &[u8], line: u32) -> usize {
         line_to_offset(buf, self.get_index(buf), line - 1)
     }
 
-    /// Map a buffer index to a (line, column) pair.  Panics if the buffer is
-    /// larger than 4GiB or if offset is out of range.
+    /// Map a buffer index to a (line, column) pair.
+    /// ## Panics
+    /// Panics if the buffer is larger than 4GiB or if offset is out of range.
+    #[must_use]
     pub fn from_offset(&mut self, buf: &[u8], offset: usize) -> (u32, u32) {
         let index = self.get_index(buf);
         // find a start point
@@ -112,11 +117,12 @@ impl LineCache {
         }
         // now for the column
         let colno = offset - line_to_offset(buf, index, lineno);
-        (lineno + 1, colno as u32 + 1)
+        (lineno + 1, u32::try_from(colno).unwrap() + 1)
     }
 
     /// Find the offset just after the end of the line (usually the
     /// location of a '\n', unless we are at the end of the file).
+    #[must_use]
     pub fn line_end(buf: &[u8], offset: usize) -> usize {
         for (pos, &ch) in buf.iter().enumerate().skip(offset) {
             if ch == b'\n' {

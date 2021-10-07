@@ -18,7 +18,7 @@ use std::io;
 use std::io::Write;
 use std::str;
 
-/// The error type for export::export_mmp().
+/// The error type for [`export::export_mmp`].
 #[derive(Debug)]
 pub enum ExportError {
     /// IO Error during write
@@ -46,7 +46,7 @@ impl From<fmt::Error> for ExportError {
 }
 
 impl fmt::Display for ExportError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             ExportError::Io(ref err) => write!(f, "IO error: {}", err),
             ExportError::Verify(ref err) => write!(f, "{:?}", err),
@@ -70,7 +70,7 @@ pub fn export_mmp<W: Write>(
     sset: &SegmentSet,
     nset: &Nameset,
     scope: &ScopeResult,
-    stmt: StatementRef,
+    stmt: StatementRef<'_>,
     out: &mut W,
 ) -> Result<(), ExportError> {
     let thm_label = stmt.label();
@@ -104,7 +104,7 @@ pub fn export_mmp_proof_tree<W: Write>(
     out: &mut W,
 ) -> Result<(), ExportError> {
     // TODO(Mario): remove hardcoded logical step symbol
-    let provable_tc = "|-".as_bytes();
+    let provable_tc = b"|-";
     let provable_tc = nset.lookup_symbol(provable_tc).map(|_| provable_tc);
 
     // This array maps the proof tree index to 0 for syntax proofs and a 1-based
@@ -113,16 +113,12 @@ pub fn export_mmp_proof_tree<W: Write>(
     let mut ix = 0usize;
     // This is indexed based on the numbering in logical_steps, so
     // if logical_steps[i] = j+1 then arr.trees[i] corresponds to (i, typecode[i], lines[j])
-    let mut lines: Vec<(usize, TokenRef, String)> = vec![];
+    let mut lines: Vec<(usize, TokenRef<'_>, String)> = vec![];
     for tree in &arr.trees {
         let stmt = sset.statement(tree.address);
         let label = stmt.label();
         let tc = stmt.math_at(0);
-        let logical = if let Some(tref) = provable_tc {
-            *tref == *tc
-        } else {
-            true
-        };
+        let logical = provable_tc.map_or(true, |tref| *tref == *tc);
 
         let cur = logical_steps.len();
         logical_steps.push(if logical {
@@ -137,9 +133,7 @@ pub fn export_mmp_proof_tree<W: Write>(
         if logical {
             let mut line = match stmt.statement_type() {
                 // Floating will not happen unless we don't recognize the grammar
-                StatementType::Essential | StatementType::Floating => {
-                    "h".to_string() + &ix.to_string()
-                }
+                StatementType::Essential | StatementType::Floating => format!("h{}", ix),
                 _ => {
                     if cur == arr.qed {
                         "qed".to_string()

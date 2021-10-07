@@ -6,6 +6,7 @@ use crate::parser::SegmentOrder;
 use crate::parser::Span;
 use crate::parser::StatementAddress;
 use crate::parser::StatementType;
+use crate::parser::TokenRef;
 use crate::parser::NO_STATEMENT;
 use std::cmp::Ordering;
 
@@ -13,7 +14,7 @@ use std::cmp::Ordering;
 #[allow(clippy::many_single_char_names)]
 fn test_segment_order() {
     let mut so = SegmentOrder::new();
-    let f = so.start();
+    let f = SegmentOrder::START;
     let e = so.new_before(f);
     let b = so.new_before(e);
     let d = so.new_before(e);
@@ -84,7 +85,7 @@ fn test_stref_v() {
     assert_eq!(vx.math_span(0), Span::new(3, 4));
     assert_eq!(vyz.span_full(), Span::new(10, 20));
     assert_eq!(vyz.span(), Span::new(11, 20));
-    let tli: Vec<_> = vyz.math_iter().map(|z| z.index()).collect();
+    let tli: Vec<_> = vyz.math_iter().map(TokenRef::index).collect();
     assert_eq!(tli, vec![0i32, 1i32]);
     let zz: Vec<Vec<u8>> = vyz.math_iter().map(|z| (&*z).to_owned()).collect();
     assert_eq!(zz, vec![b"Y", b"Z"]);

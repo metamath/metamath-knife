@@ -4,7 +4,6 @@ use fnv::FnvHasher;
 use std::collections;
 use std::hash::BuildHasherDefault;
 use std::hash::Hash;
-use std::ops::Range;
 use std::ptr;
 use std::slice;
 
@@ -14,19 +13,21 @@ pub type HashMap<K, V> = collections::HashMap<K, V, BuildHasherDefault<FnvHasher
 pub type HashSet<K> = collections::HashSet<K, BuildHasherDefault<FnvHasher>>;
 
 /// Create a new empty map.
+#[must_use]
 pub fn new_map<K, V>() -> HashMap<K, V>
 where
     K: Eq + Hash,
 {
-    HashMap::<K, V>::with_hasher(Default::default())
+    HashMap::default()
 }
 
 /// Create a new empty set.
+#[must_use]
 pub fn new_set<K>() -> HashSet<K>
 where
     K: Eq + Hash,
 {
-    HashSet::<K>::with_hasher(Default::default())
+    HashSet::default()
 }
 
 /// Quickly determine if two references are pointing at the same object.
@@ -56,12 +57,12 @@ pub fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
     }
 }
 
-// emprically, *most* copies in the verifier where fast_extend and copy_portion
+// emprically, *most* copies in the verifier where fast_extend and extend_from_within
 // are used are 1-2 bytes
 unsafe fn short_copy<T>(src: *const T, dst: *mut T, count: usize) {
     match count {
         1 => ptr::write(dst, ptr::read(src)),
-        2 => ptr::write(dst as *mut [T; 2], ptr::read(src as *const [T; 2])),
+        2 => ptr::write(dst.cast::<[T; 2]>(), ptr::read(src.cast())),
         _ => ptr::copy_nonoverlapping(src, dst, count),
     }
 }
@@ -80,47 +81,27 @@ pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
     }
 }
 
-/// Appends a slice of a byte vector to the end of the same vector.
-#[inline(always)]
-pub fn copy_portion(vec: &mut Vec<u8>, from: Range<usize>) {
-    let Range {
-        start: copy_start,
-        end: copy_end,
-    } = from;
-    assert!(vec.get(from).is_some(), "out of range");
-    unsafe {
-        let copy_len = copy_end - copy_start;
-        vec.reserve(copy_len);
-
-        let old_len = vec.len();
-        let copy_from = vec.as_ptr().add(copy_start);
-        let copy_to = vec.as_mut_ptr().add(old_len);
-        short_copy(copy_from, copy_to, copy_len);
-        vec.set_len(old_len + copy_len);
-    }
-}
-
 // Rust already assumes you're on a twos-complement byte-addressed pure-endian
 // machine. A chapter header is CRLF+ $ ( CRLF+ #*#...#*#, 79 total punctuation.
 // Thus, it has #*#* or *#*# on any 32*19-bit boundary
 
 // find a maximal 4-byte aligned slice within a larger byte slice
 fn aligned_part(buffer: &[u8]) -> (usize, &[u32]) {
-    let mut sptr = buffer.as_ptr() as usize;
-    let mut eptr = sptr + buffer.len();
+    let mut s_ptr = buffer.as_ptr() as usize;
+    let mut e_ptr = s_ptr + buffer.len();
 
     if buffer.len() < 4 {
         return (0, Default::default());
     }
 
-    let offset = sptr.wrapping_neg() & 3;
-    sptr += offset; // just checked this won't overflow
-    eptr -= eptr & 3; // cannot overflow by construction
+    let offset = s_ptr.wrapping_neg() & 3;
+    s_ptr += offset; // just checked this won't overflow
+    e_ptr -= e_ptr & 3; // cannot overflow by construction
 
     unsafe {
         (
             offset,
-            slice::from_raw_parts(sptr as *const u32, (eptr - sptr) / 4),
+            slice::from_raw_parts(s_ptr as *const u32, (e_ptr - s_ptr) / 4),
         )
     }
 }
@@ -132,6 +113,7 @@ fn aligned_part(buffer: &[u8]) -> (usize, &[u32]) {
 /// This runs on the full file on every reload, but it's also pretty good at
 /// running at full memory bandwidth.
 #[inline(never)]
+#[must_use]
 pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
     // returns something pointing at four consequtive puncts, guaranteed to find
     // if there is a run of 79
@@ -141,7 +123,7 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
         let mut pp = 0;
         while pp < aligned.len() {
             let word = aligned[pp];
-            if word == 0x2a232a23 || word == 0x232a232a {
+            if word == u32::from_ne_bytes(*b"#*#*") || word == u32::from_ne_bytes(*b"*#*#") {
                 return Some(offset + pp * 4);
             }
             pp += 19;
@@ -194,10 +176,9 @@ pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
             // check if we actually found a chapter heading
             if let Some(chap) = is_real(buffer, mix) {
                 return Some(chap + offset);
-            } else {
-                buffer = &buffer[mix + 1..];
-                offset += mix + 1;
             }
+            buffer = &buffer[mix + 1..];
+            offset += mix + 1;
         } else {
             return None;
         }

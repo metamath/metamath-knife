@@ -116,6 +116,7 @@ use crate::verify::VerifyResult;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt;
+use std::fmt::Debug;
 use std::fs::File;
 use std::panic;
 use std::sync::Arc;
@@ -128,7 +129,7 @@ use std::time::Instant;
 /// for the lifetime of the database container.
 ///
 /// Some of these could theoretically support modification.
-#[derive(Default, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct DbOptions {
     /// If true, the automatic splitting of large files described above is
     /// enabled, with the caveat about chapter comments inside grouping
@@ -186,7 +187,7 @@ pub struct Executor {
 /// Debug printing for `Executor` displays the current count of queued but not
 /// dispatched tasks.
 impl fmt::Debug for Executor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let g = self.mutex.lock().unwrap();
         write!(f, "Executor(active={})", g.len())
     }
@@ -209,6 +210,7 @@ impl Executor {
     /// implemented).  In the future, we *may* have process-level coordination
     /// to allow different `Executor`s to share a thread pool, and use per-job
     /// concurrency limits.
+    #[must_use]
     pub fn new(concurrency: usize) -> Executor {
         let mutex = Arc::new(Mutex::new(BinaryHeap::new()));
         let cv = Arc::new(Condvar::new());
@@ -248,22 +250,21 @@ impl Executor {
     /// rethrown when the promise is awaited.
     pub fn exec<TASK, RV>(&self, estimate: usize, task: TASK) -> Promise<RV>
     where
-        TASK: FnOnce() -> RV,
-        TASK: Send + 'static,
+        TASK: FnOnce() -> RV + Send + 'static,
         RV: Send + 'static,
     {
         let parts = Arc::new((Mutex::new(None), Condvar::new()));
 
         let partsc = parts.clone();
-        let mut tasko = Some(task);
+        let mut task_o = Some(task);
         queue_work(
             self,
             estimate,
             Box::new(move || {
                 let mut g = partsc.0.lock().unwrap();
-                let taskf =
-                    panic::AssertUnwindSafe(tasko.take().expect("should only be called once"));
-                *g = Some(panic::catch_unwind(taskf));
+                let task_f =
+                    panic::AssertUnwindSafe(task_o.take().expect("should only be called once"));
+                *g = Some(panic::catch_unwind(task_f));
                 partsc.1.notify_one();
             }),
         );
@@ -286,8 +287,15 @@ impl Executor {
 /// cheap tasks for interface consistency purposes only.
 pub struct Promise<T>(Box<dyn FnMut() -> T + Send>);
 
+impl<T> Debug for Promise<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Promise(..)")
+    }
+}
+
 impl<T> Promise<T> {
     /// Wait for a value to be available and return it, rethrowing any panic.
+    #[must_use]
     pub fn wait(mut self) -> T {
         (self.0)()
     }
@@ -320,19 +328,19 @@ impl<T> Promise<T> {
     pub fn map<FN, RV>(self, fun: FN) -> Promise<RV>
     where
         T: 'static,
-        FN: 'static,
-        FN: Send + FnOnce(T) -> RV,
+        FN: Send + FnOnce(T) -> RV + 'static,
     {
         Promise::new_once(move || fun(self.wait()))
     }
 
     /// Convert a collection of promises into a single promise, which waits for
     /// all of its parts.
+    #[must_use]
     pub fn join(promises: Vec<Promise<T>>) -> Promise<Vec<T>>
     where
         T: 'static,
     {
-        Promise::new_once(move || promises.into_iter().map(|x| x.wait()).collect())
+        Promise::new_once(move || promises.into_iter().map(Promise::wait).collect())
     }
 }
 
@@ -351,6 +359,7 @@ impl<T> Promise<T> {
 /// place, such as the hash table of statement labels constructed by nameck,
 /// that table must be duplicated so that it can be updated for one database
 /// without affecting the other.
+#[derive(Debug)]
 pub struct Database {
     options: Arc<DbOptions>,
     segments: Option<Arc<SegmentSet>>,
@@ -399,6 +408,7 @@ impl Database {
     ///
     /// Use `parse` to load it with data.  Currently this eagerly starts the
     /// threadpool, but that may change.
+    #[must_use]
     pub fn new(options: DbOptions) -> Database {
         let options = Arc::new(options);
         let exec = Executor::new(options.jobs);
@@ -583,12 +593,13 @@ impl Database {
     }
 
     /// A getter method which does not build the outline
-    pub fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
+    #[must_use]
+    pub const fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
         &self.outline
     }
 
     /// Get a statement by label.
-    pub fn statement(&mut self, name: &str) -> Option<StatementRef> {
+    pub fn statement(&mut self, name: &str) -> Option<StatementRef<'_>> {
         let lookup = self.name_result().lookup_label(name.as_bytes())?;
         Some(self.parse_result().statement(lookup.address))
     }
@@ -650,7 +661,7 @@ impl Database {
             let name = self.name_result().clone();
             let stmt_parse = self.stmt_parse_result().clone();
             if let Err(diag) = stmt_parse.verify(&parse, &name) {
-                diag::to_annotations(self.parse_result(), vec![diag]);
+                drop(diag::to_annotations(self.parse_result(), vec![diag]));
             }
         })
     }
@@ -673,7 +684,7 @@ impl Database {
             node.get_name(),
             indent = indent
         );
-        for child in node.children.iter() {
+        for child in &node.children {
             self.print_outline_node(child, indent + 1);
         }
     }
@@ -686,7 +697,7 @@ impl Database {
     ///
     /// Currently there is no way to incrementally fetch diagnostics, so this
     /// will be a bit slow if there are thousands of errors.
-    pub fn diag_notations(&mut self, types: Vec<DiagnosticClass>) -> Vec<Notation> {
+    pub fn diag_notations(&mut self, types: &[DiagnosticClass]) -> Vec<Notation> {
         let mut diags = Vec::new();
         if types.contains(&DiagnosticClass::Parse) {
             diags.extend(self.parse_result().parse_diagnostics());

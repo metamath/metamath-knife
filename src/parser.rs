@@ -96,29 +96,30 @@ pub struct Span {
 
 impl Span {
     /// Coercion from array index pairs.
-    pub fn new(start: usize, end: usize) -> Span {
+    #[must_use]
+    pub const fn new(start: usize, end: usize) -> Span {
         Span {
             start: start as FilePos,
             end: end as FilePos,
         }
     }
 
-    fn new2(start: FilePos, end: FilePos) -> Span {
+    const fn new2(start: FilePos, end: FilePos) -> Span {
         Span { start, end }
     }
 
     /// Returns the null span.
-    pub fn null() -> Span {
-        Span::new(0, 0)
-    }
+    pub const NULL: Span = Span::new(0, 0);
 
     /// Checks for the null span, i.e. zero length at offset zero.
-    pub fn is_null(self) -> bool {
+    #[must_use]
+    pub const fn is_null(self) -> bool {
         self.end == 0
     }
 
     /// Given a position span, extract the corresponding characters from a
     /// buffer.
+    #[must_use]
     pub fn as_ref(self, buf: &[u8]) -> &[u8] {
         &buf[self.start as usize..self.end as usize]
     }
@@ -151,7 +152,7 @@ pub type TokenIndex = i32;
 /// IDs are never reused after being released from the order, so they can be
 /// used safely as part of change-tracking structures.
 ///
-/// SegmentOrder implements the `Comparer` trait, allowing it to be used
+/// `SegmentOrder` implements the [`Comparer`] trait, allowing it to be used
 /// polymorphically with the `cmp` method to order lists of segments,
 /// statements, or tokens.
 #[derive(Clone, Debug, Default)]
@@ -163,6 +164,7 @@ pub struct SegmentOrder {
 
 impl SegmentOrder {
     /// Creates a new empty segment ordering.
+    #[must_use]
     pub fn new() -> Self {
         // pre-assign 1 as "start".  (think "cyclic order")
         SegmentOrder {
@@ -174,9 +176,7 @@ impl SegmentOrder {
 
     /// Each segment ordering has a single ID which will not be used otherwise;
     /// pass this to `new_before` to get an ID larger than all created IDs.
-    pub fn start(&self) -> SegmentId {
-        SegmentId(1)
-    }
+    pub const START: SegmentId = SegmentId(1);
 
     fn alloc_id(&mut self) -> SegmentId {
         let index = self.high_water;
@@ -197,7 +197,7 @@ impl SegmentOrder {
     ///
     /// The ID itself will not be reissued.
     pub fn free_id(&mut self, id: SegmentId) {
-        self.order.remove(self.reverse[id.0 as usize] as usize);
+        self.order.remove(self.reverse[id.0 as usize]);
         self.reindex();
     }
 
@@ -205,8 +205,7 @@ impl SegmentOrder {
     /// end if you pass `start()`.
     pub fn new_before(&mut self, after: SegmentId) -> SegmentId {
         let id = self.alloc_id();
-        self.order
-            .insert(self.reverse[after.0 as usize] as usize, id);
+        self.order.insert(self.reverse[after.0 as usize], id);
         self.reindex();
         id
     }
@@ -256,7 +255,8 @@ pub struct StatementAddress {
 
 impl StatementAddress {
     /// Constructs a statement address from its parts.
-    pub fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
+    #[must_use]
+    pub const fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
         StatementAddress { segment_id, index }
     }
 }
@@ -264,7 +264,8 @@ impl StatementAddress {
 impl StatementAddress {
     /// Convert a statement address into a statement range from here to the
     /// logical end of the database.
-    pub fn unbounded_range(self) -> GlobalRange {
+    #[must_use]
+    pub const fn unbounded_range(self) -> GlobalRange {
         GlobalRange {
             start: self,
             end: NO_STATEMENT,
@@ -287,7 +288,8 @@ pub struct TokenAddress {
 
 impl TokenAddress {
     /// Constructs a token address from parts.
-    pub fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
+    #[must_use]
+    pub const fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
         TokenAddress {
             statement: StatementAddress::new(segment_id, index),
             token_index: token,
@@ -324,12 +326,14 @@ pub type Token = Box<[u8]>;
 pub type TokenPtr<'a> = &'a [u8];
 
 /// Copies a non-owned token onto the heap.
-pub fn copy_token(ptr: TokenPtr) -> Token {
+#[must_use]
+pub fn copy_token(ptr: TokenPtr<'_>) -> Token {
     ptr.to_owned().into_boxed_slice()
 }
 
 /// Transmutes this token into a Rust string.
-pub fn as_str(ptr: TokenPtr) -> &str {
+#[must_use]
+pub fn as_str(ptr: TokenPtr<'_>) -> &str {
     str::from_utf8(ptr).expect("TokenPtr is supposed to be UTF8")
 }
 
@@ -352,7 +356,7 @@ pub enum SymbolType {
 }
 
 /// Extracted information for a statement label in a segment.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct LabelDef {
     /// The location of the labelled statement.
     pub index: StatementIndex,
@@ -387,7 +391,7 @@ pub struct FloatDef {
 /// Extracted information for a _non-global_ `$v` statement.
 ///
 /// These are used to populate the atom table in nameck.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct LocalVarDef {
     /// Local index of the variable-declaring statement.
     pub index: StatementIndex,
@@ -454,7 +458,7 @@ pub struct Segment {
 /// A pointer to a segment which knows its identity.
 ///
 /// `SegmentRef` objects are constructed from outside by the `segment_set`.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct SegmentRef<'a> {
     /// The underlying segment from the parser.
     pub segment: &'a Arc<Segment>,
@@ -473,6 +477,7 @@ impl<'a> Deref for SegmentRef<'a> {
 
 impl<'a> SegmentRef<'a> {
     /// Fetch a single statement from this segment by its local index.
+    #[must_use]
     pub fn statement(self, index: StatementIndex) -> StatementRef<'a> {
         StatementRef {
             segment: self,
@@ -483,6 +488,7 @@ impl<'a> SegmentRef<'a> {
 
     /// Returns the source size of the segment, a proxy for computational
     /// difficulty which drives the `database::Executor` bin-packing heuristics.
+    #[must_use]
     pub fn bytes(self) -> usize {
         self.buffer.len()
     }
@@ -556,11 +562,11 @@ impl Default for StatementType {
 }
 
 impl StatementType {
-    fn takes_label(self) -> bool {
+    const fn takes_label(self) -> bool {
         matches!(self, Axiom | Provable | Essential | Floating)
     }
 
-    fn takes_math(self) -> bool {
+    const fn takes_math(self) -> bool {
         matches!(
             self,
             Axiom | Provable | Essential | Floating | Disjoint | Constant | Variable
@@ -604,7 +610,7 @@ struct Statement {
 
 /// A reference to a statement which knows its address and can be used to fetch
 /// statement information.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct StatementRef<'a> {
     segment: SegmentRef<'a>,
     statement: &'a Statement,
@@ -613,22 +619,26 @@ pub struct StatementRef<'a> {
 
 impl<'a> StatementRef<'a> {
     /// Fetch the segment-local index of this statement.
-    pub fn index(self) -> StatementIndex {
+    #[must_use]
+    pub const fn index(self) -> StatementIndex {
         self.index
     }
 
     /// Back up from a statement reference to a segment reference.
-    pub fn segment(self) -> SegmentRef<'a> {
+    #[must_use]
+    pub const fn segment(self) -> SegmentRef<'a> {
         self.segment
     }
 
     /// Gets the type of this statement.  May be a pseudo-type.
-    pub fn statement_type(self) -> StatementType {
+    #[must_use]
+    pub const fn statement_type(self) -> StatementType {
         self.statement.stype
     }
 
     /// Obtain a globally-meaningful address for this statement.
-    pub fn address(self) -> StatementAddress {
+    #[must_use]
+    pub const fn address(self) -> StatementAddress {
         StatementAddress {
             segment_id: self.segment.id,
             index: self.index,
@@ -640,7 +650,8 @@ impl<'a> StatementRef<'a> {
     ///
     /// This is the end range of a hypothesis or variable defined in this
     /// statement.
-    pub fn scope_range(self) -> GlobalRange {
+    #[must_use]
+    pub const fn scope_range(self) -> GlobalRange {
         GlobalRange {
             start: self.address(),
             end: self.statement.group_end,
@@ -648,7 +659,8 @@ impl<'a> StatementRef<'a> {
     }
 
     /// True if there is a `${ $}` group wrapping this statement.
-    pub fn in_group(self) -> bool {
+    #[must_use]
+    pub const fn in_group(self) -> bool {
         self.statement.group_end != NO_STATEMENT
     }
 
@@ -656,11 +668,13 @@ impl<'a> StatementRef<'a> {
     ///
     /// This will be non-null iff the type requires a label; missing labels for
     /// types which use them cause an immediate rewrite to `Invalid`.
+    #[must_use]
     pub fn label(&self) -> &'a [u8] {
         self.statement.label.as_ref(&self.segment.segment.buffer)
     }
 
     /// An iterator for the symbols in a statement's math string.
+    #[must_use]
     pub fn math_iter(&self) -> TokenIter<'a> {
         let range = self.statement.math_start..self.statement.proof_start;
         TokenIter {
@@ -676,41 +690,48 @@ impl<'a> StatementRef<'a> {
     /// Does not include trailing white space or surrounding comments; will
     /// include leading white space, so a concatenation of spans for all
     /// statements will reconstruct the segment source.
-    pub fn span_full(&self) -> Span {
+    #[must_use]
+    pub const fn span_full(&self) -> Span {
         self.statement.span
     }
 
     /// The textual span of this statement within the segment's buffer.
     ///
     /// Does not include surrounding white space or comments, unlike `span_full()`.
-    pub fn span(&self) -> Span {
+    #[must_use]
+    pub const fn span(&self) -> Span {
         Span::new2(self.statement.label.start, self.span_full().end)
     }
 
     /// Count of symbols in this statement's math string.
-    pub fn math_len(&self) -> TokenIndex {
+    #[must_use]
+    pub const fn math_len(&self) -> TokenIndex {
         (self.statement.proof_start - self.statement.math_start) as TokenIndex
     }
 
     /// Count of tokens in this statement's proof string.
-    pub fn proof_len(&self) -> TokenIndex {
+    #[must_use]
+    pub const fn proof_len(&self) -> TokenIndex {
         (self.statement.proof_end - self.statement.proof_start) as TokenIndex
     }
 
     /// Given an index into this statement's math string, find a textual span
     /// into the segment buffer.
+    #[must_use]
     pub fn math_span(&self, ix: TokenIndex) -> Span {
         self.segment.span_pool[self.statement.math_start + ix as usize]
     }
 
     /// Given an index into this statement's proof string, find a textual span
     /// into the segment buffer.
+    #[must_use]
     pub fn proof_span(&self, ix: TokenIndex) -> Span {
         self.segment.span_pool[self.statement.proof_start + ix as usize]
     }
 
     /// Given an index into this statement's math string, get a reference to the
     /// math token.
+    #[must_use]
     pub fn math_at(&self, ix: TokenIndex) -> TokenRef<'a> {
         TokenRef {
             slice: self.math_span(ix).as_ref(&self.segment.segment.buffer),
@@ -722,12 +743,14 @@ impl<'a> StatementRef<'a> {
     }
 
     /// Obtains textual proof data by token index.
+    #[must_use]
     pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
         self.proof_span(ix).as_ref(&self.segment.segment.buffer)
     }
 
     /// Get the "documentation" comment immediately preceding a $a $p
     /// statement, if it exists.
+    #[must_use]
     pub fn associated_comment(&self) -> Option<StatementRef<'a>> {
         if self.index == 0 {
             return None;
@@ -745,6 +768,7 @@ impl<'a> StatementRef<'a> {
 ///
 /// This iterator knows the segment's global ID and can thus return proper
 /// `StatementRef`s.
+#[derive(Clone, Debug)]
 pub struct StatementIter<'a> {
     slice_iter: slice::Iter<'a, Statement>,
     segment: SegmentRef<'a>,
@@ -768,6 +792,7 @@ impl<'a> Iterator for StatementIter<'a> {
 }
 
 /// An iterator over symbols in the math string of a statement.
+#[derive(Clone, Debug)]
 pub struct TokenIter<'a> {
     slice_iter: slice::Iter<'a, Span>,
     buffer: &'a [u8],
@@ -778,7 +803,7 @@ pub struct TokenIter<'a> {
 /// A reference to a token within a math string that knows its address.
 ///
 /// Primarily used for iteration.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct TokenRef<'a> {
     /// Textual content of the token.
     pub slice: TokenPtr<'a>,
@@ -797,7 +822,8 @@ impl<'a> Deref for TokenRef<'a> {
 
 impl<'a> TokenRef<'a> {
     /// Get the local index of the token within the statement under iteration.
-    pub fn index(self) -> TokenIndex {
+    #[must_use]
+    pub const fn index(self) -> TokenIndex {
         self.address.token_index
     }
 }
@@ -864,7 +890,7 @@ const MM_VALID_SPACES: u64 =
 
 /// Check if a character which is known to be <= 32 is a valid Metamath
 /// whitespace.  May panic if out of range.
-fn is_mm_space_c0(byte: u8) -> bool {
+const fn is_mm_space_c0(byte: u8) -> bool {
     (MM_VALID_SPACES & (1u64 << byte)) != 0
 }
 
@@ -872,7 +898,7 @@ fn is_mm_space_c0(byte: u8) -> bool {
 ///
 /// We generally accept any C0 control as whitespace, with a diagnostic; this
 /// function only tests for fully legal whitespace though.
-fn is_mm_space(byte: u8) -> bool {
+const fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
 
@@ -916,7 +942,7 @@ impl<'a> Scanner<'a> {
     ///
     /// This function accepts any C0 character as whitespace, with a diagnostic.
     /// DEL and non-7bit characters invalidate the current token and cause it to
-    /// be omitted from the returned string.  `Span::null()` is returned when
+    /// be omitted from the returned string.  `Span::NULL` is returned when
     /// the end of the buffer is reached.
     ///
     /// This is _very_ hot, mostly due to the unpredicable branches in the
@@ -926,7 +952,7 @@ impl<'a> Scanner<'a> {
     fn get_raw(&mut self) -> Span {
         #[inline(never)]
         #[cold]
-        fn badchar(slf: &mut Scanner, ix: usize) -> Span {
+        fn badchar(slf: &mut Scanner<'_>, ix: usize) -> Span {
             let ch = slf.buffer[ix];
             slf.diag(Diagnostic::BadCharacter(ix, ch));
             // Restart the function from the beginning to reload self.buffer;
@@ -970,7 +996,7 @@ impl<'a> Scanner<'a> {
 
         self.position = ix as FilePos;
         if start == ix {
-            Span::null()
+            Span::NULL
         } else {
             Span::new(start, ix)
         }
@@ -1034,13 +1060,13 @@ impl<'a> Scanner<'a> {
     /// and handling unget.
     fn get(&mut self) -> Span {
         if !self.unget.is_null() {
-            return mem::replace(&mut self.unget, Span::null());
+            return mem::replace(&mut self.unget, Span::NULL);
         }
 
         loop {
             let tok = self.get_raw();
             if tok.is_null() {
-                return Span::null();
+                return Span::NULL;
             }
             let tok_ref = tok.as_ref(self.buffer);
             if tok_ref == b"$(" {
@@ -1074,22 +1100,21 @@ impl<'a> Scanner<'a> {
         let ftok = if self.unget.is_null() {
             self.get_raw()
         } else {
-            mem::replace(&mut self.unget, Span::null())
+            mem::replace(&mut self.unget, Span::NULL)
         };
-        if ftok != Span::null() {
+        if ftok != Span::NULL {
             let ftok_ref = ftok.as_ref(self.buffer);
             if ftok_ref == b"$(" {
                 let ctype = self.get_comment(ftok, false);
-                let stype = match ctype {
+                let s_type = match ctype {
                     CommentType::Typesetting => TypesettingComment,
                     CommentType::Heading(level) => HeadingComment(level),
                     CommentType::Extra => AdditionalInfoComment,
-                    _ => Comment,
+                    CommentType::Normal => Comment,
                 };
-                return Some(self.out_statement(stype, Span::new2(ftok.start, ftok.start)));
-            } else {
-                self.unget = ftok;
+                return Some(self.out_statement(s_type, Span::new2(ftok.start, ftok.start)));
             }
+            self.unget = ftok;
         }
         None
     }
@@ -1109,10 +1134,10 @@ impl<'a> Scanner<'a> {
             if lref.contains(&b'$') {
                 self.unget = ltok;
                 break;
-            } else if !is_valid_label(lref) {
-                self.diag(Diagnostic::BadLabel(ltok));
-            } else {
+            } else if is_valid_label(lref) {
                 self.labels.push(ltok);
+            } else {
+                self.diag(Diagnostic::BadLabel(ltok));
             }
         }
     }
@@ -1138,7 +1163,7 @@ impl<'a> Scanner<'a> {
             0 => {
                 self.diag(Diagnostic::MissingLabel);
                 self.invalidated = true;
-                Span::null()
+                Span::NULL
             }
             _ => {
                 for &addl in self.labels.iter().skip(1) {
@@ -1149,7 +1174,7 @@ impl<'a> Scanner<'a> {
                 }
                 // have to invalidate because we don't know which to use
                 self.invalidated = true;
-                Span::null()
+                Span::NULL
             }
         }
     }
@@ -1182,14 +1207,12 @@ impl<'a> Scanner<'a> {
                         self.diag(Diagnostic::SpuriousProof(tokn));
                     }
                     return true;
-                } else {
-                    // string is closed with no proof and with an error, whoops
-                    self.unget = tokn;
-                    break;
                 }
-            } else {
-                self.span_pool.push(tokn);
+                // string is closed with no proof and with an error, whoops
+                self.unget = tokn;
+                break;
             }
+            self.span_pool.push(tokn);
         }
 
         self.diag(if is_proof {
@@ -1249,7 +1272,7 @@ impl<'a> Scanner<'a> {
     ///
     /// Per the spec, filenames are restricted to the syntax of math tokens.
     fn get_file_include(&mut self) -> Span {
-        let mut res = Span::null();
+        let mut res = Span::NULL;
         let mut count = 0;
         loop {
             let tok = self.get();
@@ -1270,10 +1293,9 @@ impl<'a> Scanner<'a> {
                 return res;
             } else if !tref.is_empty() && tref[0] == b'$' {
                 break;
-            } else {
-                count += 1;
-                res = tok;
             }
+            count += 1;
+            res = tok;
         }
         self.diag(Diagnostic::UnclosedInclude);
         self.invalidated = true;
@@ -1372,7 +1394,7 @@ impl<'a> Scanner<'a> {
     fn get_segment(&mut self) -> (Segment, bool) {
         let mut seg = Segment {
             statements: Vec::new(),
-            next_file: Span::null(),
+            next_file: Span::NULL,
             symbols: Vec::new(),
             local_vars: Vec::new(),
             global_dvs: Vec::new(),
@@ -1466,7 +1488,7 @@ impl<'a> Scanner<'a> {
 /// need statement-specific intelligence.
 fn collect_definitions(seg: &mut Segment) {
     let buf: &[u8] = &seg.buffer;
-    for (index, &ref stmt) in seg.statements.iter().enumerate() {
+    for (index, stmt) in seg.statements.iter().enumerate() {
         let index = index as StatementIndex;
         if stmt.stype.takes_label() {
             seg.labels.push(LabelDef { index });
@@ -1557,7 +1579,7 @@ fn is_valid_label(label: &[u8]) -> bool {
 }
 
 /// Extract a section name from a comment
-fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
+fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr<'_> {
     let mut index = pos as usize;
     while index < buffer.len() {
         // is this line indented?
@@ -1591,7 +1613,7 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr {
 }
 
 /// Extract the parser commands out of a $j "additional information" comment
-fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter, Diagnostic> {
+fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
     let mut iter = CommandIter {
         buffer,
         index: pos as usize,
@@ -1611,11 +1633,11 @@ struct CommandIter<'a> {
 }
 
 impl CommandIter<'_> {
-    fn has_more(&self) -> bool {
+    const fn has_more(&self) -> bool {
         self.index < self.buffer.len()
     }
 
-    fn next_char(&self) -> u8 {
+    const fn next_char(&self) -> u8 {
         self.buffer[self.index]
     }
 
@@ -1628,6 +1650,7 @@ impl CommandIter<'_> {
         }
     }
 
+    #[allow(clippy::if_not_else)]
     fn expect(&mut self, c: u8) -> Result<(), Diagnostic> {
         if !self.has_more() {
             let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
@@ -1718,6 +1741,7 @@ impl Iterator for CommandIter<'_> {
 /// This is run before parsing so it can't take advantage of comment extraction;
 /// instead we look for the first indented line, within a heuristic limit of 500
 /// bytes.
+#[must_use]
 pub fn guess_buffer_name(buffer: &[u8]) -> &str {
     let buffer = &buffer[0..cmp::min(500, buffer.len())];
     let ptr = get_heading_name(buffer, 0);
@@ -1742,6 +1766,7 @@ pub fn guess_buffer_name(buffer: &[u8]) -> &str {
 /// between statements as if they were statements (SMM2 did this too; may
 /// revisit) and we require file inclusions to be between statements at the top
 /// nesting level (this has been approved by Norman Megill).
+#[must_use]
 pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
     let mut closed_spans = Vec::new();
     let mut scanner = Scanner {
@@ -1766,6 +1791,7 @@ pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
 ///
 /// Every error must be associated with a statement in our design, so associate
 /// it with the EOF statement of a zero-length segment.
+#[must_use]
 pub fn dummy_segment(diag: Diagnostic) -> Arc<Segment> {
     let mut seg = parse_segments(&Arc::new(Vec::new())).pop().unwrap();
     Arc::get_mut(&mut seg).unwrap().diagnostics.push((0, diag));
