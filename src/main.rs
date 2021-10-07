@@ -2,7 +2,7 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 
-use clap::{crate_version, App, Arg};
+use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::{DiagnosticClass, Notation};
 use metamath_knife::line_cache::LineCache;
@@ -18,129 +18,52 @@ fn positive_integer(val: String) -> Result<(), String> {
 }
 
 fn main() {
-    let matches = App::new("smetamath-knife")
-        .version(crate_version!())
-        .about("A Metamath database verifier and processing tool")
-        .arg(
-            Arg::with_name("DATABASE")
-                .help("Database file to load")
-                .required_unless("TEXT"),
-        )
-        .arg(
-            Arg::with_name("split")
-                .help("Process files > 1 MiB in multiple segments")
-                .long("split"),
-        )
-        .arg(
-            Arg::with_name("timing")
-                .help("Print milliseconds after each stage")
-                .long("timing"),
-        )
-        .arg(
-            Arg::with_name("verify")
-                .help("Check proof validity")
-                .long("verify")
-                .short("v"),
-        )
-        .arg(
-            Arg::with_name("outline")
-                .help("Show database outline")
-                .long("outline")
-                .short("O"),
-        )
-        .arg(
-            Arg::with_name("grammar")
-                .help("Check grammar")
-                .long("grammar")
-                .short("g"),
-        )
-        .arg(
-            Arg::with_name("parse-stmt")
-                .help("Parse statements according to the databases grammar")
-                .long("parse-stmt")
-                .short("p"),
-        )
-        .arg(
-            Arg::with_name("verify-parse-stmt")
-                .help("Check that printing parsed statements gives back the original formulas")
-                .long("verify-parse-stmt"),
-        )
-        .arg(
-            Arg::with_name("print-grammar")
-                .help("Print the database's grammar")
-                .long("print-grammar")
-                .short("G"),
-        )
-        .arg(
-            Arg::with_name("print-formula")
-                .help("Parse all statements according to the database's grammar")
-                .long("print-formula")
-                .short("F"),
-        )
-        .arg(
-            Arg::with_name("export-grammar-dot")
-                .help("Export the database's grammar in Graphviz DOT format for visualization")
-                .long("export-grammar-dot")
-                .short("E"),
-        )
-        .arg(
-            Arg::with_name("debug")
-                .help(
-                    "Activate debug logs, including for the grammar building and statement parsing",
-                )
-                .long("debug"),
-        )
-        .arg(
-            Arg::with_name("trace-recalc")
-                .help("Print segments as they are recalculated")
-                .long("trace-recalc"),
-        )
-        .arg(
-            Arg::with_name("free")
-                .help("Explicitly deallocate working memory before exit")
-                .long("free"),
-        )
-        .arg(
-            Arg::with_name("repeat")
-                .help("Demonstrate incremental verifier")
-                .long("repeat"),
-        )
-        .arg(
-            Arg::with_name("jobs")
-                .help("Number of threads to use for verification")
-                .long("jobs")
-                .short("j")
-                .takes_value(true)
-                .validator(positive_integer),
-        )
-        .arg(
-            Arg::with_name("export")
-                .help("Output a proof file")
-                .long("export")
-                .short("e")
-                .multiple(true)
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("TEXT")
-                .long("text")
-                .help("Provide raw database content on the command line")
-                .value_names(&["NAME", "TEXT"])
-                .multiple(true),
-        )
-        .get_matches();
+    let app = clap_app!(("smetamath-knife") =>
+        (version: crate_version!())
+        (about: "A Metamath database verifier and processing tool")
+        (@arg DATABASE: required_unless("TEXT") "Database file to load")
+        (@arg TEXT: --text value_names(&["NAME", "TEXT"]) ...
+            "Provide raw database content on the command line")
+        (@arg split: --split "Process files > 1 MiB in multiple segments")
+        (@arg timing: --timing "Print milliseconds after each stage")
+        (@arg verify: -v --verify "Check proof validity")
+        (@arg outline: -O --outline "Show database outline")
+        (@arg grammar: -g --grammar "Check grammar")
+        (@arg parse_stmt: -p --("parse-stmt")
+            "Parse all statements according to the database's grammar")
+        (@arg verify_parse_stmt: --("verify-parse-stmt")
+            "Check that printing parsed statements gives back the original formulas")
+        (@arg print_grammar: -G --("print-grammar") "Print the database's grammar")
+        (@arg print_formula: -F --("print-formula") "Dump the formulas of this database")
+        (@arg debug: --debug
+            "Activate debug logs, including for the grammar building and statement parsing")
+        (@arg trace_recalc: --("trace-recalc") "Print segments as they are recalculated")
+        (@arg free: --free "Explicitly deallocate working memory before exit")
+        (@arg repeat: --repeat "Demonstrate incremental verifier")
+        (@arg jobs: -j --jobs +takes_value validator(positive_integer)
+            "Number of threads to use for verification")
+        (@arg export: -e --export <LABEL> ... "Output a proof file")
+    );
+
+    #[cfg(feature = "dot")]
+    let app = clap_app!(@app (app)
+        (@arg export_grammar_dot: -E --("export-grammar-dot")
+            "Export the database's grammar in Graphviz DOT format for visualization")
+    );
+
+    let matches = app.get_matches();
 
     let options = DbOptions {
         autosplit: matches.is_present("split"),
         timing: matches.is_present("timing"),
-        trace_recalc: matches.is_present("trace-recalc"),
+        trace_recalc: matches.is_present("trace_recalc"),
         incremental: matches.is_present("repeat")
             || matches.is_present("grammar")
-            || matches.is_present("parse-stmt")
-            || matches.is_present("verify-parse-stmt")
-            || matches.is_present("export-grammar-dot")
-            || matches.is_present("print-grammar")
-            || matches.is_present("print-formula"),
+            || matches.is_present("parse_stmt")
+            || matches.is_present("verify_parse_stmt")
+            || matches.is_present("export_grammar_dot")
+            || matches.is_present("print_grammar")
+            || matches.is_present("print_formula"),
         jobs: usize::from_str(matches.value_of("jobs").unwrap_or("1"))
             .expect("validator should check this"),
     };
@@ -175,11 +98,11 @@ fn main() {
             types.push(DiagnosticClass::Grammar);
         }
 
-        if matches.is_present("parse-stmt") {
+        if matches.is_present("parse_stmt") {
             types.push(DiagnosticClass::StmtParse);
         }
 
-        if matches.is_present("verify-parse-stmt") {
+        if matches.is_present("verify_parse_stmt") {
             db.verify_parse_stmt();
         }
 
@@ -191,19 +114,16 @@ fn main() {
         }
         println!("{} diagnostics issued.", count);
 
-        if matches.is_present("print-grammar") {
+        if matches.is_present("print_grammar") {
             db.print_grammar();
         }
 
-        if matches.is_present("export-grammar-dot") {
-            #[cfg(feature = "dot")]
+        #[cfg(feature = "dot")]
+        if matches.is_present("export_grammar_dot") {
             db.export_grammar_dot();
-
-            #[cfg(not(feature = "dot"))]
-            println!("The program was not compiled with the `dot` feature. This is required to export in the DOT format.");
         }
 
-        if matches.is_present("print-formula") {
+        if matches.is_present("print_formula") {
             db.print_formula();
         }
 
