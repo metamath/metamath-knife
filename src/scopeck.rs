@@ -254,6 +254,19 @@ pub struct Frame {
     pub optional_dv: Box<[Bitset]>,
 }
 
+impl Frame {
+    /// The list of mandatory variables in the frame.
+    pub fn mandatory_vars(&self) -> &[Atom] {
+        &self.var_list[..self.mandatory_count]
+    }
+
+    /// The list of mandatory hypotheses in the frame.
+    /// Every [`Hyp`] in this list will be [`Hyp::Floating`].
+    pub fn mandatory_hyps(&self) -> &[Hyp] {
+        &self.hypotheses[..self.mandatory_count]
+    }
+}
+
 /// Data which is tracked during scope checking, but discarded when done.
 struct ScopeState<'a> {
     /// Accumulated errors for this segment.
