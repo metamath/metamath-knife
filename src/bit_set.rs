@@ -20,7 +20,7 @@ pub struct Bitset {
     // of small bitsets at the expense of large ones, as Option<Box> only
     // consumes one word of storage if empty, while Vec and Option<Vec> take
     // three.
-    #[allow(clippy::box_collection)]
+    #[allow(clippy::box_vec)]
     tail: Option<Box<Vec<usize>>>,
 }
 
