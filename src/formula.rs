@@ -1,16 +1,20 @@
-//! `Formula` stores the result of a parsing as the tree of its "synctactic proof"
-//! The formula nodes are the equivalent of MMJ2's "ParseNode"s, and the formula itself the equivalent of MMJ2's "ParseTree"
-//!
+//! `Formula` stores the result of a parsing as the tree of its "syntactic proof"
+//! The formula nodes are the equivalent of MMJ2's "ParseNode"s, and the formula
+//! itself the equivalent of MMJ2's "ParseTree"
 
-// There are several improvements which could be made to this implementation, without changing the API:
+// There are several improvements which could be made to this implementation,
+// without changing the API:
 //
 // - `sub_eq`:
-//      We could compute a hash of a formula and store it in every node, to speed up equality testing.
+//      We could compute a hash of a formula and store it in every node, to
+//      speed up equality testing.
 // - `substitute`:
-//      A more advanced implementation of `substitute` may act directly on the slice backing the formula to
-//      first copy in bulk the formula tree, which will remain mostly intact, then the substitutions,
-//      and then only change the nodes where the formula points to the substitutions.
-//      It would even be possible to reuse the nodes, pointing several times to the same node if a substituted variable appears several times
+//      A more advanced implementation of `substitute` may act directly on the
+//      slice backing the formula to first copy in bulk the formula tree, which
+//      will remain mostly intact, then the substitutions, and then
+//      only change the nodes where the formula points to the substitutions.
+//      It would even be possible to reuse the nodes, pointing several times
+//      to the same node if a substituted variable appears several times
 //      in the formula to be substituted.
 
 use crate::bit_set::Bitset;
@@ -105,8 +109,9 @@ impl Formula {
 
     /// Appends this formula to the provided stack buffer.
     ///
-    /// The [ProofBuilder] structure uses a dense representation of formulas as byte strings, using the high bit to mark
-    /// the end of each token. This funtion creates such a byte string, stores it in the provided buffer,
+    /// The [ProofBuilder] structure uses a dense representation of formulas as byte strings,
+    /// using the high bit to mark the end of each token.
+    /// This funtion creates such a byte string, stores it in the provided buffer,
     /// and returns the range the newly added string occupies on the buffer.
     ///
     /// See [crate::verify] for more about this format.
@@ -144,8 +149,10 @@ impl Formula {
 
     /// Stores and returns the index of a [ProofTree] in a [ProofBuilder],
     /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
-    // Formulas children nodes are stored in the order of appearance of the variables in the formula, which is efficient when parsing or rendering the formula from or into a string of tokens.
-    // However, proofs require children nodes sorted in the order of mandatory floating hypotheses.
+    // Formulas children nodes are stored in the order of appearance of the variables
+    // in the formula, which is efficient when parsing or rendering the formula from
+    // or into a string of tokens. However, proofs require children nodes
+    // sorted in the order of mandatory floating hypotheses.
     // This method performs this mapping.
     fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         &self,
@@ -226,7 +233,8 @@ impl Formula {
     }
 
     /// Unify this formula with the given formula model
-    /// If successful, this returns the substitutions which needs to be made in `other` in order to match this formula.
+    /// If successful, this returns the substitutions which needs to be made in
+    /// `other` in order to match this formula.
     pub fn unify(&self, other: &Formula) -> Option<Box<Substitutions>> {
         let mut substitutions = Substitutions(new_map());
         self.sub_unify(self.root, other, other.root, &mut substitutions)?;
@@ -273,7 +281,8 @@ impl Formula {
 
     /// Perform substitutions
     /// This returns a new `Formula` object, built from this formula,
-    /// where all instances of the variables specified in the substitutions are replaced by the corresponding formulas.
+    /// where all instances of the variables specified in the substitutions are
+    /// replaced by the corresponding formulas.
     pub fn substitute(&self, substitutions: &Substitutions) -> Formula {
         let mut formula_builder = FormulaBuilder::default();
         self.sub_substitute(self.root, substitutions, &mut formula_builder);
