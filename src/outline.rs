@@ -76,7 +76,8 @@ impl OutlineNode {
         as_str(&self.name)
     }
 
-    // TODO - it would be nice to also have a method returning the heading chapter comment, if there is any.
+    // TODO(tirix): it would be nice to also have a method returning the heading chapter comment,
+    // if there is any.
 }
 
 /// Builds the overall outline from the different segments

@@ -213,7 +213,7 @@ impl Formula {
     /// Returns a subformula, with its root at the given `node_id`
     fn sub_formula(&self, node_id: NodeId) -> Formula {
         Formula {
-            typecode: self.typecode, // TODO
+            typecode: self.typecode, // TODO(tirix)
             tree: self.tree.clone(),
             root: node_id,
             variables: self.variables.clone(),
@@ -290,7 +290,7 @@ impl Formula {
     }
 
     /// Perform substitutions on a sub-formula, starting from the given `node_id`
-    // TODO: shall we enforce that *all* variables occurring in this formula have a substitution?
+    // TODO(tirix): shall we enforce that *all* variables occurring in this formula have a substitution?
     fn sub_substitute(
         &self,
         node_id: NodeId,
@@ -298,7 +298,7 @@ impl Formula {
         formula_builder: &mut FormulaBuilder,
     ) {
         let mut done = false;
-        // TODO use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
+        // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
         if self.is_variable(node_id) {
             if let Some(formula) = substitutions.0.get(&self.tree[node_id]) {
                 // We encounter a variable, perform substitution.
@@ -402,7 +402,7 @@ impl<'a> Iterator for Flatten<'a> {
         }
     }
 
-    // TODO provide an implementation for size_hint?
+    // TODO(tirix): provide an implementation for size_hint?
 }
 
 #[derive(Default)]

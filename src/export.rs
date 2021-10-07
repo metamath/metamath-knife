@@ -103,7 +103,7 @@ pub fn export_mmp_proof_tree<W: Write>(
     arr: &ProofTreeArray,
     out: &mut W,
 ) -> Result<(), ExportError> {
-    // TODO remove hardcoded logical step symbol
+    // TODO(Mario): remove hardcoded logical step symbol
     let provable_tc = "|-".as_bytes();
     let provable_tc = nset.lookup_symbol(provable_tc).map(|_| provable_tc);
 

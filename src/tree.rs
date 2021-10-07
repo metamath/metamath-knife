@@ -93,7 +93,7 @@ impl<TreeItem> Index<NodeId> for Tree<TreeItem> {
     }
 }
 
-// TODO: remove and avoid cloning trees
+// TODO(tirix): remove and avoid cloning trees
 impl<TreeItem: Clone> Clone for TreeNode<TreeItem> {
     fn clone(&self) -> Self {
         TreeNode {
@@ -104,7 +104,7 @@ impl<TreeItem: Clone> Clone for TreeNode<TreeItem> {
     }
 }
 
-// TODO: remove and avoid cloning trees
+// TODO(tirix): remove and avoid cloning trees
 impl<TreeItem: Clone> Clone for Tree<TreeItem> {
     fn clone(&self) -> Self {
         Tree {
