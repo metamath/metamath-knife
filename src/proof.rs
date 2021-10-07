@@ -581,7 +581,7 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                         .expect("knapsack_fit returns elements in the array");
                     length_block.remove(n);
                 }
-                if !knapsack.is_empty() || line_pos >= width - 1 {
+                if knapsack.is_empty() || line_pos >= width - 1 {
                     line_pos = 0;
                 }
             }
