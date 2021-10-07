@@ -6,6 +6,8 @@ readme = "README.md"
 version = "3.1.2"
 description = "A parallel and incremental verifier for Metamath databases"
 repository = "https://github.com/david-a-wheeler/metamath-knife"
+keywords = ["theorem", "proving", "verifier", "proof", "assistant"]
+categories = ["command-line-utilities", "development-tools", "mathematics"]
 edition = "2018"
 
 [dependencies]

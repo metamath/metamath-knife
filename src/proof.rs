@@ -3,10 +3,7 @@
 use crate::diag::Diagnostic;
 use crate::nameck::Nameset;
 use crate::parser::as_str;
-use crate::parser::StatementAddress;
-use crate::parser::StatementRef;
-use crate::parser::StatementType::*;
-use crate::parser::TokenPtr;
+use crate::parser::{StatementAddress, StatementRef, StatementType, TokenPtr};
 use crate::scopeck::Hyp;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
@@ -58,6 +55,7 @@ impl Hash for ProofTree {
 
 impl ProofTree {
     /// Create a new proof tree using the given atom and children.
+    #[must_use]
     pub fn new(parent: &ProofTreeArray, address: StatementAddress, children: Vec<usize>) -> Self {
         let mut hasher = DefaultHasher::new();
         address.hash(&mut hasher);
@@ -120,8 +118,9 @@ pub enum RPNStep {
 
 impl ProofTreeArray {
     /// Get the index of a proof tree in the array
+    #[must_use]
     pub fn index(&self, tree: &ProofTree) -> Option<usize> {
-        self.map.get(&tree.hash).cloned()
+        self.map.get(&tree.hash).copied()
     }
 
     /// Create a proof tree array from the proof a single $p statement,
@@ -131,7 +130,7 @@ impl ProofTreeArray {
         sset: &SegmentSet,
         nset: &Nameset,
         scopes: &ScopeResult,
-        stmt: StatementRef,
+        stmt: StatementRef<'_>,
     ) -> Result<ProofTreeArray, Diagnostic> {
         let mut arr = ProofTreeArray::default();
         arr.qed = verify_one(sset, nset, scopes, &mut arr, stmt)?;
@@ -140,6 +139,7 @@ impl ProofTreeArray {
     }
 
     /// Get the minimum distance from each step to the QED step
+    #[must_use]
     pub fn indent(&self) -> &[u16] {
         &self.indent
     }
@@ -211,6 +211,7 @@ impl ProofTreeArray {
     }
 
     /// Get the number of parents of each step in the proof
+    #[must_use]
     pub fn count_parents(&self) -> Vec<usize> {
         let mut out = vec![0; self.trees.len()];
         for tree in &self.trees {
@@ -222,6 +223,7 @@ impl ProofTreeArray {
     }
 
     /// Write the proof as an RPN sequence with backrefs
+    #[must_use]
     pub fn to_rpn(&self, parents: &[usize], explicit: bool) -> Vec<RPNStep> {
         #[derive(Debug)]
         struct Env<'a> {
@@ -233,16 +235,16 @@ impl ProofTreeArray {
             count: usize,
         }
 
-        fn output_step(env: &mut Env, step: usize, hyp: Option<(StatementAddress, usize)>) {
+        fn output_step(env: &mut Env<'_>, step: usize, hyp: Option<(StatementAddress, usize)>) {
             let step = if env.backrefs[step] == 0 {
                 let tree = &env.arr.trees[step];
                 for (i, &hix) in tree.children.iter().enumerate() {
-                    let nhyp = if env.explicit {
+                    let n_hyp = if env.explicit {
                         Some((tree.address, i))
                     } else {
                         None
                     };
-                    output_step(env, hix, nhyp);
+                    output_step(env, hix, n_hyp);
                 }
                 RPNStep::Normal {
                     fwdref: if env.parents[step] > 1 && !tree.children.is_empty() {
@@ -278,7 +280,8 @@ impl ProofTreeArray {
     /// Produce an iterator over the steps in the proof in
     /// normal/uncompressed mode. (Because this can potentially
     /// be *very* long, we do not store the list and just stream it.)
-    pub fn normal_iter(&self, explicit: bool) -> NormalIter {
+    #[must_use]
+    pub fn normal_iter(&self, explicit: bool) -> NormalIter<'_> {
         NormalIter {
             arr: self,
             explicit,
@@ -351,17 +354,17 @@ impl ProofBuilder for ProofTreeArray {
             let ix = self.trees.len();
             self.map.insert(tree.hash, ix);
             self.trees.push(tree);
-            let mut uexpr = vec![b' '];
+            let mut u_expr = vec![b' '];
             for &chr in &pool[expr] {
                 if chr & 0x80 == 0 {
-                    uexpr.push(chr);
+                    u_expr.push(chr);
                 } else {
-                    uexpr.push(chr & 0x7F);
-                    uexpr.push(b' ');
+                    u_expr.push(chr & 0x7F);
+                    u_expr.push(b' ');
                 }
             }
-            uexpr.pop();
-            self.exprs.push(uexpr);
+            u_expr.pop();
+            self.exprs.push(u_expr);
             ix
         })
     }
@@ -385,14 +388,16 @@ pub enum ProofStyle {
 impl ProofStyle {
     /// Returns `true` if this is in explicit style (showing proof hypotheses labels
     /// on each step)
-    pub fn explicit(self) -> bool {
+    #[must_use]
+    pub const fn explicit(self) -> bool {
         matches!(self, ProofStyle::Explicit | ProofStyle::PackedExplicit)
     }
 
     /// Returns `true` if this is in packed style, meaning duplicate subtrees are
     /// referred to by backreferences instead of inlined. (Compressed proofs are
     /// considered packed by this definition.)
-    pub fn packed(self) -> bool {
+    #[must_use]
+    pub const fn packed(self) -> bool {
         matches!(
             self,
             ProofStyle::Compressed | ProofStyle::Packed | ProofStyle::PackedExplicit
@@ -401,6 +406,7 @@ impl ProofStyle {
 }
 
 /// A struct for storing display parameters for printing proofs.
+#[derive(Debug)]
 pub struct ProofTreePrinter<'a> {
     /// The segment set, for looking up statements
     pub sset: &'a SegmentSet,
@@ -424,7 +430,7 @@ pub struct ProofTreePrinter<'a> {
 
 /// The local variables of `ProofTreePrinter::fmt()`, extracted into a struct
 /// so that the inner functions can be broken out.
-struct ProofTreePrinterImpl<'a, 'b: 'a> {
+struct ProofTreePrinterImpl<'a, 'b> {
     p: &'a ProofTreePrinter<'a>,
     f: &'a mut fmt::Formatter<'b>,
     indent: String,
@@ -516,9 +522,10 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
     }
 
     fn fmt_compressed(&mut self) -> fmt::Result {
+        use StatementType::{Axiom, Essential, Floating, Provable};
         let parents = self.p.arr.count_parents();
         let rpn = self.p.arr.to_rpn(&parents, false);
-        let mut proof_ordered: Vec<(StatementRef, usize)> = vec![];
+        let mut proof_ordered: Vec<(StatementRef<'_>, usize)> = vec![];
         let frame = self.p.scope.get(self.p.thm_label).unwrap();
         for item in &rpn {
             if let RPNStep::Normal { addr, .. } = *item {
@@ -605,7 +612,7 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
         }
         self.write_word(")")?;
 
-        let mut ess_stmt: Vec<StatementRef> = frame
+        let mut ess_stmt: Vec<StatementRef<'_>> = frame
             .hypotheses
             .iter()
             .filter_map(|h| {
@@ -705,12 +712,13 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
 /// relevant), find the best fit of items whose total cost is no more than `size`,
 /// and return the result in the `included` array.
 ///
-/// Implements the algorithm given in https://en.wikipedia.org/wiki/Knapsack_problem#0.2F1_knapsack_problem.
+/// Implements the algorithm given in
+/// <https://en.wikipedia.org/wiki/Knapsack_problem#0.2F1_knapsack_problem>.
 fn knapsack_fit(items: &[usize], values: &[u16], mut size: usize, included: &mut VecDeque<usize>) {
     let mut worth: Vec<Vec<u16>> = vec![vec![0; size + 1]; items.len() + 1];
     for (i, &item) in items.iter().enumerate() {
         let value = values[item];
-        for s in 0..size + 1 {
+        for s in 0..=size {
             worth[i + 1][s] = if s >= value as usize {
                 max(worth[i][s], value + worth[i][s - value as usize])
             } else {
@@ -731,7 +739,7 @@ fn knapsack_fit(items: &[usize], values: &[u16], mut size: usize, included: &mut
 }
 
 impl<'a> fmt::Display for ProofTreePrinter<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut indent = "\n".to_string();
         for _ in 0..self.indent {
             indent.push(' ');

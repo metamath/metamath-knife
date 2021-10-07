@@ -40,7 +40,7 @@ use std::fmt::Write;
 #[cfg(feature = "dot")]
 use std::fs::File;
 
-/// An index to address [GrammarNode]'s
+/// An index to address [`GrammarNode`]'s
 type NodeId = usize;
 
 /// For the labels in DOT format
@@ -57,6 +57,7 @@ fn escape(str: &str) -> String {
 
 /// The grammar tree represents a Moore/Mealy Machine, where each node is a state of the automaton,
 /// and transitions are made between node based on the input tokens read from the math string to parse.
+#[derive(Debug)]
 struct GrammarTree(Vec<GrammarNode>);
 
 impl GrammarTree {
@@ -76,12 +77,12 @@ impl GrammarTree {
         self.0.len() - 1
     }
 
-    /// Retrieves a [GrammarNode] structure, given its [NodeId].
+    /// Retrieves a [`GrammarNode`] structure, given its [`NodeId`].
     fn get(&self, node_id: NodeId) -> &GrammarNode {
         &self.0[node_id]
     }
 
-    /// Retrieves a mutable [GrammarNode] structure, given its [NodeId].
+    /// Retrieves a mutable [`GrammarNode`] structure, given its [`NodeId`].
     fn get_mut(&mut self, node_id: NodeId) -> &mut GrammarNode {
         &mut self.0[node_id]
     }
@@ -99,11 +100,11 @@ impl GrammarTree {
         to_node_id: NodeId,
     ) -> (&GrammarNode, &mut GrammarNode) {
         if from_node_id < to_node_id {
-            let slice = &mut self.0[from_node_id..to_node_id + 1];
+            let slice = &mut self.0[from_node_id..=to_node_id];
             let (first_part, second_part) = slice.split_at_mut(to_node_id - from_node_id);
             (&first_part[0], &mut second_part[0])
         } else {
-            let slice = &mut self.0[to_node_id..from_node_id + 1];
+            let slice = &mut self.0[to_node_id..=from_node_id];
             let (first_part, second_part) = slice.split_at_mut(from_node_id - to_node_id);
             (&second_part[0], &mut first_part[0])
         }
@@ -153,7 +154,7 @@ impl GrammarTree {
 /// The grammar built from the database's syntactic axioms
 ///
 /// It is used to parse metamath statements into [Formula].
-/// See [StmtParse] for getting the formula for statements from the database.
+/// See [`StmtParse`] for getting the formula for statements from the database.
 ///
 /// Example:
 /// ```
@@ -170,6 +171,7 @@ impl GrammarTree {
 /// db.parse("set.mm".to_string(), vec![]);
 /// let grammar = db.grammar_result();
 /// ```
+#[derive(Debug)]
 pub struct Grammar {
     provable_type: TypeCode,
     logic_type: TypeCode,
@@ -195,7 +197,7 @@ struct Reduce {
 }
 
 impl Reduce {
-    fn new(label: Label, var_count: u8) -> Self {
+    const fn new(label: Label, var_count: u8) -> Self {
         Reduce {
             label,
             var_count,
@@ -204,7 +206,7 @@ impl Reduce {
         }
     }
 
-    fn new_variable(label: Label) -> Self {
+    const fn new_variable(label: Label) -> Self {
         Reduce {
             label,
             var_count: 0,
@@ -232,7 +234,7 @@ fn increment_offsets(rv: &mut ReduceVec) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct NextNode {
     next_node_id: NodeId,
     leaf_label: ReduceVec, // This deals with ambiguity in the grammar, performing one or several reduce then continuing
@@ -246,7 +248,7 @@ impl NextNode {
         }
     }
 
-    fn new_with_reduce_vec(next_node_id: NodeId, leaf_label: ReduceVec) -> Self {
+    const fn new_with_reduce_vec(next_node_id: NodeId, leaf_label: ReduceVec) -> Self {
         NextNode {
             next_node_id,
             leaf_label,
@@ -274,7 +276,8 @@ impl NextNode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+#[allow(variant_size_differences)]
 enum GrammarNode {
     Leaf {
         reduce: Reduce,
@@ -341,7 +344,7 @@ impl fmt::Debug for GrammarNodeDebug<'_> {
                         as_str(nset.atom_name(*symbol)),
                         node.next_node_id
                     )?;
-                    for reduce in node.leaf_label.into_iter() {
+                    for reduce in node.leaf_label {
                         write!(
                             f,
                             "({:?} {})",
@@ -359,7 +362,7 @@ impl fmt::Debug for GrammarNodeDebug<'_> {
                         as_str(nset.atom_name(*typecode)),
                         node.next_node_id
                     )?;
-                    for reduce in node.leaf_label.into_iter() {
+                    for reduce in node.leaf_label {
                         write!(
                             f,
                             "({:?} {})",
@@ -427,6 +430,7 @@ impl Grammar {
 
     /// Returns a list of errors that were generated during the grammar
     /// computation.
+    #[must_use]
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
         for (sa, diag) in &self.diagnostics {
@@ -490,12 +494,11 @@ impl Grammar {
                     SymbolType::Constant => cst_map,
                     SymbolType::Variable => var_map,
                 };
-                match map.get(&symbol) {
-                    Some(prev_node) => Err(prev_node.next_node_id), // Error : We want to add a leaf note, but there is already a branch.
-                    None => {
-                        map.insert(symbol, *leaf);
-                        Ok(leaf.next_node_id)
-                    }
+                if let Some(prev_node) = map.get(&symbol) {
+                    Err(prev_node.next_node_id)
+                } else {
+                    map.insert(symbol, *leaf);
+                    Ok(leaf.next_node_id)
                 }
             }
         }
@@ -510,23 +513,23 @@ impl Grammar {
         add_reduce: ReduceVec,
     ) -> Result<NodeId, NodeId> {
         match self.nodes.get_mut(to_node) {
-            GrammarNode::Leaf { .. } => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
+            GrammarNode::Leaf { .. } => {
+                Err(to_node) // Error: cannot add to a leaf node, `to_node` is the conflicting node
+            }
             GrammarNode::Branch { cst_map, var_map } => {
                 let map = match stype {
                     SymbolType::Constant => cst_map,
                     SymbolType::Variable => var_map,
                 };
                 match map.get(&symbol) {
-                    Some(prev_node) => {
-                        if prev_node.leaf_label != add_reduce {
-                            Err(prev_node.next_node_id)
-                        } else {
-                            Ok(prev_node.next_node_id)
-                        }
+                    Some(prev_node) if prev_node.leaf_label == add_reduce => {
+                        Ok(prev_node.next_node_id)
                     }
+                    Some(prev_node) => Err(prev_node.next_node_id),
                     None => {
                         let new_node_id = self.nodes.create_branch();
-                        // here we have to re-borrow from self after the creation, because the previous var_map and cst_map may not be valid pointers anymore
+                        // here we have to re-borrow from self after the creation,
+                        // because the previous var_map and cst_map may not be valid pointers anymore
                         if let GrammarNode::Branch { cst_map, var_map } =
                             self.nodes.get_mut(to_node)
                         {
@@ -551,9 +554,9 @@ impl Grammar {
     /// Build the parse tree, marking variables with their types
     fn add_axiom(
         &mut self,
-        sref: &StatementRef,
+        sref: &StatementRef<'_>,
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
+        names: &mut NameReader<'_>,
         type_conversions: &mut Vec<(TypeCode, TypeCode, Label)>,
     ) -> Result<(), Diagnostic> {
         let mut tokens = sref.math_iter().peekable();
@@ -621,9 +624,9 @@ impl Grammar {
     /// Add a floating variable node to the parse tree.
     fn add_floating(
         &mut self,
-        sref: &StatementRef,
+        sref: &StatementRef<'_>,
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
+        names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
         let mut tokens = sref.math_iter();
 
@@ -656,18 +659,22 @@ impl Grammar {
         match self.nodes.get_mut(self.root) {
             // We ignore the ambiguity in floats, since they are actually frame dependent.
             GrammarNode::Branch { cst_map, .. } => {
-                match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
-                    None => Ok(()),
-                    Some(_) => Ok(()), // Err(self.ambiguous(conflict_node.next_node_id, nset)),
-                }
+                cst_map.insert(symbol.atom, NextNode::new(leaf_node));
+                Ok(())
+                // match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
+                //     None => Ok(()),
+                //     Some(_) => Err(self.ambiguous(conflict_node.next_node_id, nset)),
+                // }
             }
-            _ => panic!("Root node shall be a branch node!"),
+            GrammarNode::Leaf { .. } => panic!("Root node shall be a branch node!"),
         }
     }
 
     /// Handle type conversion:
-    /// Go through each node and everywhere there is to_typecode(`class`), put a from_typecode(`setvar`),
+    /// Go through each node and everywhere there is
+    /// `to_typecode` (`class`), put a `from_typecode` (`setvar`),
     /// pointing to a copy of the next node with a leaf to first do a `cv`
+    #[allow(clippy::unnecessary_wraps)]
     fn perform_type_conversion(
         &mut self,
         from_typecode: TypeCode,
@@ -734,15 +741,18 @@ impl Grammar {
                 }) => Some((*next_node_id, leaf_label)),
                 _ => None,
             },
-            _ => None,
+            GrammarNode::Leaf { .. } => None,
         }
     }
 
-    /// Recursively clone the whole grammar tree starting from add_from_node_id
-    //  This implementation may needlessly duplicate some nodes: it creates new ones everytime, not checking if a duplicate was already created and could be reused.
-    //  A cleverer implementation would store the duplicates created, for example in a hashmap, and reuse them.
-    //  Branch nodes are recursively copied.
-    //  The `make_final` argument is a function building the final node from the reduce of the found leaf node and the final typecode.
+    /// Recursively clone the whole grammar tree starting from `add_from_node_id`
+    // This implementation may needlessly duplicate some nodes: it creates new ones everytime,
+    // not checking if a duplicate was already created and could be reused.
+    // A cleverer implementation would store the duplicates created, for example in a hashmap,
+    // and reuse them.
+    // Branch nodes are recursively copied.
+    // The `make_final` argument is a function building the final node from the reduce
+    // of the found leaf node and the final typecode.
     fn clone_branches<F>(
         &mut self,
         add_from_node_id: NodeId,
@@ -905,12 +915,13 @@ impl Grammar {
     ///
     // NOTE:
     //    Common prefix must be constant only, and both first differing symbols must be variables
+    #[allow(clippy::unnecessary_wraps)]
     fn handle_common_prefixes(
         &mut self,
         prefix: &[Token],
         shadows: &[Token],
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
+        names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
         let mut node_id = self.root;
         let mut index = 0;
@@ -1030,7 +1041,7 @@ impl Grammar {
         &mut self,
         sset: &Arc<SegmentSet>,
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
+        names: &mut NameReader<'_>,
         type_conversions: &[(TypeCode, TypeCode, Label)],
     ) -> Result<(), (StatementAddress, Diagnostic)> {
         for (address, command) in sset.parser_commands() {
@@ -1086,7 +1097,7 @@ impl Grammar {
         }
     }
 
-    fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
+    fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
         debug!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
         formula_builder.reduce(
             reduce.label,
@@ -1127,7 +1138,7 @@ impl Grammar {
             match self.nodes.get(e.node_id) {
                 GrammarNode::Leaf { reduce, typecode } => {
                     // We found a leaf: REDUCE
-                    self.do_reduce(&mut formula_builder, *reduce, nset);
+                    Self::do_reduce(&mut formula_builder, *reduce, nset);
 
                     if e.expected_typecodes.iter().any(|&t| *t == *typecode) {
                         // We found an expected typecode, pop from the stack and continue
@@ -1145,8 +1156,8 @@ impl Grammar {
                                     leaf_label,
                                 }) => {
                                     // Found a sub-formula: First optionally REDUCE and continue
-                                    for reduce in leaf_label.into_iter() {
-                                        self.do_reduce(&mut formula_builder, *reduce, nset);
+                                    for reduce in leaf_label {
+                                        Self::do_reduce(&mut formula_builder, *reduce, nset);
                                     }
 
                                     e.node_id = *next_node_id;
@@ -1163,8 +1174,8 @@ impl Grammar {
                             // There are still symbols to parse, continue from root
                             let (next_node_id, leaf_label) =
                                 self.next_var_node(self.root, *typecode).unwrap(); // TODO(tirix): error case
-                            for reduce in leaf_label.into_iter() {
-                                self.do_reduce(&mut formula_builder, *reduce, nset);
+                            for reduce in leaf_label {
+                                Self::do_reduce(&mut formula_builder, *reduce, nset);
                             }
                             e.node_id = next_node_id;
                         }
@@ -1173,8 +1184,8 @@ impl Grammar {
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) =
                             self.next_var_node(self.root, *typecode).unwrap(); // TODO(tirix): error case
-                        for reduce in leaf_label.into_iter() {
-                            self.do_reduce(&mut formula_builder, *reduce, nset);
+                        for reduce in leaf_label {
+                            Self::do_reduce(&mut formula_builder, *reduce, nset);
                         }
                         e.node_id = next_node_id;
                     }
@@ -1184,40 +1195,38 @@ impl Grammar {
                         ix = *index as i32;
                         debug!("   {:?}", as_str(nset.atom_name(*symbol)));
 
-                        match cst_map.get(symbol) {
-                            Some(NextNode {
-                                next_node_id,
-                                leaf_label,
-                            }) => {
-                                // Found an atom matching one of our next nodes: First optionally REDUCE and continue
-                                for reduce in leaf_label.into_iter() {
-                                    self.do_reduce(&mut formula_builder, *reduce, nset);
-                                }
-
-                                // Found an atom matching one of our next nodes: SHIFT, to the next node
-                                self.do_shift(&mut symbol_enum, nset);
-                                e.node_id = *next_node_id;
-                                debug!("   Next Node: {:?}", e.node_id);
+                        if let Some(NextNode {
+                            next_node_id,
+                            leaf_label,
+                        }) = cst_map.get(symbol)
+                        {
+                            // Found an atom matching one of our next nodes: First optionally REDUCE and continue
+                            for reduce in leaf_label {
+                                Self::do_reduce(&mut formula_builder, *reduce, nset);
                             }
-                            None => {
-                                // No matching constant, search among variables
-                                if var_map.is_empty() || e.node_id == self.root {
-                                    return Err(Diagnostic::UnparseableStatement(ix));
-                                }
 
-                                debug!(
-                                    " ++ Not in CST map, push stack element and expect {:?}",
-                                    var_map.keys()
-                                );
-                                stack.push(e);
-                                e = StackElement {
-                                    node_id: self.root,
-                                    expected_typecodes: var_map
-                                        .keys()
-                                        .collect::<Vec<&TypeCode>>()
-                                        .into_boxed_slice(),
-                                };
+                            // Found an atom matching one of our next nodes: SHIFT, to the next node
+                            self.do_shift(&mut symbol_enum, nset);
+                            e.node_id = *next_node_id;
+                            debug!("   Next Node: {:?}", e.node_id);
+                        } else {
+                            // No matching constant, search among variables
+                            if var_map.is_empty() || e.node_id == self.root {
+                                return Err(Diagnostic::UnparseableStatement(ix));
                             }
+
+                            debug!(
+                                " ++ Not in CST map, push stack element and expect {:?}",
+                                var_map.keys()
+                            );
+                            stack.push(e);
+                            e = StackElement {
+                                node_id: self.root,
+                                expected_typecodes: var_map
+                                    .keys()
+                                    .collect::<Vec<&TypeCode>>()
+                                    .into_boxed_slice(),
+                            };
                         }
                     } else {
                         return Err(Grammar::too_short(cst_map, nset));
@@ -1229,9 +1238,9 @@ impl Grammar {
 
     fn parse_statement(
         &self,
-        sref: &StatementRef,
+        sref: &StatementRef<'_>,
         nset: &Arc<Nameset>,
-        names: &mut NameReader,
+        names: &mut NameReader<'_>,
     ) -> Result<Option<Formula>, Diagnostic> {
         if sref.math_len() == 0 {
             return Err(Diagnostic::ParsedStatementNoTypeCode);
@@ -1267,6 +1276,7 @@ impl Grammar {
     }
 
     /// Returns the typecodes allowed in this grammar
+    #[must_use]
     pub fn typecodes(&self) -> Box<[&TypeCode]> {
         self.typecodes
             .iter()
@@ -1283,7 +1293,8 @@ impl Grammar {
     }
 
     #[cfg(feature = "dot")]
-    /// Exports the grammar tree in the "dot" format. See https://www.graphviz.org/doc/info/lang.html
+    /// Exports the grammar tree in the "dot" format.
+    /// See <https://www.graphviz.org/doc/info/lang.html>
     /// This dot file can then be converted to an SVG image using ` dot -Tsvg -o grammar.svg grammar.dot `
     pub fn export_dot(&self, nset: &Arc<Nameset>, write: &mut File) -> Result<(), ExportError> {
         let mut dot_writer = DotWriter::from(write);
@@ -1306,7 +1317,7 @@ impl Grammar {
                 GrammarNode::Branch { cst_map, var_map } => {
                     for (symbol, node) in cst_map {
                         let mut buf = String::new();
-                        for reduce in node.leaf_label.into_iter() {
+                        for reduce in node.leaf_label {
                             if reduce.offset > 0 {
                                 write!(
                                     buf,
@@ -1328,7 +1339,7 @@ impl Grammar {
                     for (typecode, node) in var_map {
                         let mut buf = String::new();
                         buf.write_str(escape(as_str(nset.atom_name(*typecode))).as_str())?;
-                        for reduce in node.leaf_label.into_iter() {
+                        for reduce in node.leaf_label {
                             if reduce.offset > 0 {
                                 write!(
                                     buf,
@@ -1354,12 +1365,13 @@ impl Grammar {
     }
 }
 
-/// Called by [crate::Database] to build the grammar from the syntax axioms in the database.
+/// Called by [`crate::Database`] to build the grammar from the syntax axioms in the database.
 ///
 /// The provided `sset`, and `nset` shall be the result of previous phases over the database.
 /// The provided `grammar` will be updated with the results of the grammar build.
-/// The grammar can then be used to parse the statements of the database (see [parse_statements]), or to parse a single statement.
-/// Use [Grammar::default] to get an initial state.
+/// The grammar can then be used to parse the statements of the database (see [`parse_statements`]),
+/// or to parse a single statement.
+/// Use [`Grammar::default`] to get an initial state.
 pub(crate) fn build_grammar<'a>(
     grammar: &mut Grammar,
     sset: &'a Arc<SegmentSet>,
@@ -1375,7 +1387,7 @@ pub(crate) fn build_grammar<'a>(
     // Build the initial grammar tree, just form syntax axioms and floats.
     let segments = sset.segments();
     assert!(!segments.is_empty(), "Parse returned no segment!");
-    for segment in segments.iter() {
+    for segment in &segments {
         for sref in *segment {
             if let Err(diag) = match sref.statement_type() {
                 StatementType::Axiom => {
@@ -1414,7 +1426,8 @@ pub(crate) fn build_grammar<'a>(
 /// let stmt_parse = db.stmt_parse_result();
 /// ```
 ///
-/// The parse tree for a given statement can then be obtained through [StmtParse::get_formula].
+/// The parse tree for a given statement can then be obtained through [`StmtParse::get_formula`].
+#[derive(Debug)]
 pub struct StmtParse {
     segments: HashMap<SegmentId, Arc<StmtParseSegment>>,
 }
@@ -1429,10 +1442,11 @@ impl Default for StmtParse {
 
 impl StmtParse {
     /// Returns a list of errors that were generated when parsing the database's statements.
+    #[must_use]
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
         for sps in self.segments.values() {
-            for (&sa, &ref diag) in &sps.diagnostics {
+            for (&sa, diag) in &sps.diagnostics {
                 out.push((sa, diag.clone()));
             }
         }
@@ -1447,7 +1461,7 @@ impl StmtParse {
         nset: &Arc<Nameset>,
     ) -> Result<(), (StatementAddress, Diagnostic)> {
         for sps in self.segments.values() {
-            for (&sa, &ref formula) in &sps.formulas {
+            for (&sa, formula) in &sps.formulas {
                 let sref = sset.statement(sa);
                 let math_iter = sref
                     .math_iter()
@@ -1465,7 +1479,7 @@ impl StmtParse {
     pub fn dump(&self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
         println!("Formula Dump:");
         for sps in self.segments.values() {
-            for (&sa, &ref formula) in &sps.formulas {
+            for (&sa, formula) in &sps.formulas {
                 let sref = sset.statement(sa);
                 println!(
                     "{}: {}",
@@ -1477,13 +1491,15 @@ impl StmtParse {
     }
 
     /// Returns the formula for a given statement
-    pub fn get_formula(&self, sref: &StatementRef) -> Option<&Formula> {
+    #[must_use]
+    pub fn get_formula(&self, sref: &StatementRef<'_>) -> Option<&Formula> {
         let stmt_parse_segment = self.segments.get(&sref.segment().id)?;
         stmt_parse_segment.formulas.get(&sref.address())
     }
 }
 
 /// Data generated by the statement parsing process for a single segment.
+#[derive(Debug)]
 struct StmtParseSegment {
     _source: Arc<Segment>,
     diagnostics: HashMap<StatementAddress, Diagnostic>,
@@ -1494,7 +1510,7 @@ struct StmtParseSegment {
 fn parse_statements_single<'a>(
     sset: &'a Arc<SegmentSet>,
     nset: &Arc<Nameset>,
-    names: &mut NameReader,
+    names: &mut NameReader<'_>,
     grammar: &Arc<Grammar>,
     sid: SegmentId,
 ) -> StmtParseSegment {
@@ -1528,12 +1544,13 @@ fn parse_statements_single<'a>(
     }
 }
 
-/// Called by [crate::Database] to parse all the statements in the database
+/// Called by [`crate::Database`] to parse all the statements in the database
 ///
 /// The provided `segments`, `nset`, and `grammar` shall be the result of previous phases over the database.
 /// The provided `stmt_parse` will be updated with the results of the parse.
-/// The parse tree for a given statement can then be obtained through [StmtParse::get_formula].
-/// Use [StmtParse::default] to get an initial state. Like for several other phases, this occurs in parallel.
+/// The parse tree for a given statement can then be obtained through [`StmtParse::get_formula`].
+/// Use [`StmtParse::default`] to get an initial state.
+/// Like for several other phases, this occurs in parallel.
 pub(crate) fn parse_statements<'a>(
     stmt_parse: &mut StmtParse,
     segments: &'a Arc<SegmentSet>,

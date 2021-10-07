@@ -29,11 +29,11 @@ fn test_fast_extend() {
 #[test]
 fn test_copy_portion() {
     let mut s = Vec::from(b"Hello world" as &[u8]);
-    util::copy_portion(&mut s, 2..4);
+    s.extend_from_within(2..4);
     assert_eq!(s, b"Hello worldll");
-    util::copy_portion(&mut s, 0..1);
+    s.extend_from_within(0..1);
     assert_eq!(s, b"Hello worldllH");
-    util::copy_portion(&mut s, 6..11);
+    s.extend_from_within(6..11);
     assert_eq!(s, b"Hello worldllHworld");
 }
 
@@ -41,7 +41,7 @@ fn test_copy_portion() {
 #[should_panic(expected = "out of range")]
 fn test_copy_portion_oob() {
     let mut s = Vec::from(b"Hello world" as &[u8]);
-    util::copy_portion(&mut s, 11..12);
+    s.extend_from_within(11..12);
 }
 
 #[test]

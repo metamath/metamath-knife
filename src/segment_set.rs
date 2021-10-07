@@ -16,7 +16,7 @@
 //! has changed; since we're responsible for ID assignment, we can't use IDs for
 //! caching inside this module.
 //!
-//! segment_set implements two levels of caching:
+//! `segment_set` implements two levels of caching:
 //!
 //! 1. When a file is loaded from disk, its pathname and modification time are
 //! saved, along with all of the segments which it generated.  If the file
@@ -131,13 +131,13 @@ struct SliceSR(Option<LongBuf>, Vec<Arc<Segment>>, Arc<SourceInfo>);
 #[derive(Debug, Clone)]
 struct FileSR(Option<(String, FileTime)>, Vec<SliceSR>);
 
-/// SegmentSet is a container for parsed databases.
+/// `SegmentSet` is a container for parsed databases.
 ///
 /// If you're not writing an analysis pass you want to handle this through
 /// `Database`, but if you are then aliasing prevents using that and you'll be
 /// using this directly.
 ///
-/// The SegmentSet tracks all of the segments reachable from the current start
+/// The `SegmentSet` tracks all of the segments reachable from the current start
 /// file with parsing results and cache information to allow fast incremental
 /// reloads.  It maintains the ordering of the segments, and provides a
 /// `SegmentOrder` object which can be used to compare segment IDs.  It is
@@ -177,9 +177,9 @@ impl SegmentSet {
     }
 
     /// Iterates over all loaded segments in logical order.
-    pub fn segments(&self) -> Vec<SegmentRef> {
+    pub fn segments(&self) -> Vec<SegmentRef<'_>> {
         // this might be an actual iterator in the future if needs be
-        let mut out: Vec<SegmentRef> = self
+        let mut out: Vec<SegmentRef<'_>> = self
             .segments
             .iter()
             .map(|(&seg_id, &(ref seg, ref _sinfo))| SegmentRef {
@@ -192,7 +192,7 @@ impl SegmentSet {
     }
 
     /// Fetch a handle to a loaded segment given its ID.
-    pub fn segment(&self, seg_id: SegmentId) -> SegmentRef {
+    pub fn segment(&self, seg_id: SegmentId) -> SegmentRef<'_> {
         SegmentRef {
             id: seg_id,
             segment: &self.segments[&seg_id].0,
@@ -200,7 +200,7 @@ impl SegmentSet {
     }
 
     /// Fetch a handle to a loaded segment given a possibly stale ID.
-    pub fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef> {
+    pub fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef<'_>> {
         self.segments
             .get(&seg_id)
             .map(|&(ref seg, ref _srcinfo)| SegmentRef {
@@ -215,7 +215,7 @@ impl SegmentSet {
     }
 
     /// Fetches a handle to a statement given a global address.
-    pub fn statement(&self, addr: StatementAddress) -> StatementRef {
+    pub fn statement(&self, addr: StatementAddress) -> StatementRef<'_> {
         self.segment(addr.segment_id).statement(addr.index)
     }
 
@@ -315,23 +315,20 @@ impl SegmentSet {
                 let cachekey = LongBuf(partbuf.clone());
 
                 // probe the old second cache
-                match state.old_by_content.get(&cachekey) {
-                    Some(eseg) => {
-                        // hit, don't queue a job.  keep the name so that it
-                        // gets reinserted into the new second cache.
-                        let sres = SliceSR(Some(cachekey), eseg.clone(), srcinfo);
-                        promises.push(Promise::new(sres));
-                    }
-                    None => {
-                        let trace = state.options.trace_recalc;
-                        // parse it on a worker thread
-                        promises.push(state.exec.exec(partbuf.len(), move || {
-                            if trace {
-                                println!("parse({:?})", parser::guess_buffer_name(&partbuf));
-                            }
-                            SliceSR(Some(cachekey), parser::parse_segments(&partbuf), srcinfo)
-                        }));
-                    }
+                if let Some(eseg) = state.old_by_content.get(&cachekey) {
+                    // hit, don't queue a job.  keep the name so that it
+                    // gets reinserted into the new second cache.
+                    let sres = SliceSR(Some(cachekey), eseg.clone(), srcinfo);
+                    promises.push(Promise::new(sres));
+                } else {
+                    let trace = state.options.trace_recalc;
+                    // parse it on a worker thread
+                    promises.push(state.exec.exec(partbuf.len(), move || {
+                        if trace {
+                            println!("parse({:?})", parser::guess_buffer_name(&partbuf));
+                        }
+                        SliceSR(Some(cachekey), parser::parse_segments(&partbuf), srcinfo)
+                    }));
                 }
             }
             // make a wrapper promise to build the proper file result.  this
@@ -351,18 +348,17 @@ impl SegmentSet {
             let time = FileTime::from_last_modification_time(&metadata);
 
             // probe 1st cache
-            match state.old_by_time.get(&(path.clone(), time)) {
-                Some(old_fsr) => Ok(Promise::new(old_fsr.clone())),
-                None => {
-                    // miss, but we have the file size, so try to read in one
-                    // call to a buffer we won't have to move
-                    let mut fh = File::open(&path)?;
-                    let mut buf = Vec::with_capacity(metadata.len() as usize + 1);
-                    // note: File's read_to_end uses the buffer capacity to choose how much to read
-                    fh.read_to_end(&mut buf)?;
+            if let Some(old_fsr) = state.old_by_time.get(&(path.clone(), time)) {
+                Ok(Promise::new(old_fsr.clone()))
+            } else {
+                // miss, but we have the file size, so try to read in one
+                // call to a buffer we won't have to move
+                let mut fh = File::open(&path)?;
+                let mut buf = Vec::with_capacity(metadata.len() as usize + 1);
+                // note: File's read_to_end uses the buffer capacity to choose how much to read
+                fh.read_to_end(&mut buf)?;
 
-                    Ok(split_and_parse(state, path, Some(time), buf))
-                }
+                Ok(split_and_parse(state, path, Some(time), buf))
             }
         }
 
@@ -386,7 +382,7 @@ impl SegmentSet {
                         let sinfo = SourceInfo {
                             name: path.clone(),
                             text: Arc::new(Vec::new()),
-                            span: Span::null(),
+                            span: Span::NULL,
                         };
                         let seg = parser::dummy_segment(From::from(cerr));
                         // cache keys are None so this won't pollute any caches
@@ -429,7 +425,7 @@ impl SegmentSet {
             let mut promises = VecDeque::new();
 
             for seg in &segments {
-                if seg.0.next_file != Span::null() {
+                if seg.0.next_file != Span::NULL {
                     let chain = str::from_utf8(seg.0.next_file.as_ref(&seg.0.buffer))
                         .expect("parser verified ASCII")
                         .to_owned();
@@ -438,7 +434,7 @@ impl SegmentSet {
                 }
             }
             for seg in segments {
-                let has_next = seg.0.next_file != Span::null();
+                let has_next = seg.0.next_file != Span::NULL;
                 state.segments.push(seg);
                 if has_next {
                     // wait for include to be done parsing, incorporate it and
@@ -520,7 +516,7 @@ impl SegmentSet {
         }
 
         let before = if old_r.end == old_segs.len() {
-            order.start()
+            SegmentOrder::START
         } else {
             old_segs[old_r.end].0
         };

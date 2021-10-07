@@ -108,7 +108,7 @@ fn main() {
 
         let mut lc = LineCache::default();
         let mut count = 0;
-        for notation in db.diag_notations(types) {
+        for notation in db.diag_notations(&types) {
             print_annotation(&mut lc, notation);
             count += 1;
         }

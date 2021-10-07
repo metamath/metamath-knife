@@ -62,7 +62,7 @@ use std::u32;
 /// Presently, atoms are also allocated for _statement labels_ if `incremental`
 /// is true, but not if `incremental` is false.  This is likely to change with
 /// [more sophisticated incremental processing][INC]; when this happens, expect
-/// a new type like "LAtom" for labels, with "Atom" for symbols only.
+/// a new type like `LAtom` for labels, with `Atom` for symbols only.
 ///
 /// [INC]: https://github.com/sorear/smetamath-rs/issues/11
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Hash)]
@@ -82,8 +82,8 @@ where
     slot.sort_by(|x, y| comparer.cmp(&x.0, &y.0));
 }
 
-fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: A) {
-    slot.retain(|x| x.0 != address);
+fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: &A) {
+    slot.retain(|x| x.0 != *address);
 }
 
 fn autoviv<K: Hash + Eq, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V {
@@ -134,7 +134,7 @@ struct AtomTable {
     reverse: Vec<Token>,
 }
 
-fn intern(table: &mut AtomTable, tok: TokenPtr) -> Atom {
+fn intern(table: &mut AtomTable, tok: TokenPtr<'_>) -> Atom {
     let next = Atom(table.table.len() as u32 + 1);
     assert!(next.0 < u32::max_value(), "atom table overflowed");
     if let Some(&atom) = table.table.get(tok) {
@@ -169,6 +169,7 @@ pub struct Nameset {
 
 impl Nameset {
     /// Called by Database to construct a new empty index.
+    #[must_use]
     pub fn new() -> Nameset {
         Nameset::default()
     }
@@ -199,11 +200,11 @@ impl Nameset {
         }
 
         for sref in segs.segments() {
-            self.add_segment(sref.id, sref.segment.clone());
+            self.add_segment(sref.id, sref.segment);
         }
     }
 
-    fn add_segment(&mut self, id: SegmentId, seg: Arc<Segment>) {
+    fn add_segment(&mut self, id: SegmentId, segment: &Arc<Segment>) {
         if self.segments.contains_key(&id) {
             return;
         }
@@ -211,10 +212,10 @@ impl Nameset {
         // for each entity in the segment that we're adding: find the slot, bump
         // the generation, add it
 
-        self.segments.insert(id, seg.clone());
-        let sref = SegmentRef { segment: &seg, id };
+        self.segments.insert(id, segment.clone());
+        let sref = SegmentRef { segment, id };
 
-        for symdef in &seg.symbols {
+        for symdef in &segment.symbols {
             let slot = autoviv(&mut self.symbols, symdef.name.clone());
             slot.generation = self.generation;
             if slot.atom == Atom::default() {
@@ -227,12 +228,12 @@ impl Nameset {
             }
         }
 
-        for lsymdef in &seg.local_vars {
+        for lsymdef in &segment.local_vars {
             let name = &sref.statement(lsymdef.index).math_at(lsymdef.ordinal);
             intern(&mut self.atom_table, name);
         }
 
-        for labdef in &seg.labels {
+        for labdef in &segment.labels {
             let labelr = sref.statement(labdef.index).label();
             let label = copy_token(labelr);
             let slot = autoviv(&mut self.labels, label);
@@ -248,7 +249,7 @@ impl Nameset {
             );
         }
 
-        for floatdef in &seg.floats {
+        for floatdef in &segment.floats {
             let slot = autoviv(&mut self.symbols, floatdef.name.clone());
             slot.generation = self.generation;
             if slot.atom == Atom::default() {
@@ -264,7 +265,7 @@ impl Nameset {
             );
         }
 
-        for dvdef in &seg.global_dvs {
+        for dvdef in &segment.global_dvs {
             let vars = dvdef
                 .vars
                 .iter()
@@ -290,8 +291,8 @@ impl Nameset {
                 deviv(&mut self.symbols, &symdef.name, |slot| {
                     let address = TokenAddress::new3(id, symdef.start, symdef.ordinal);
                     slot.generation = gen;
-                    slot_remove(&mut slot.all, address);
-                    slot_remove(&mut slot.constant, address);
+                    slot_remove(&mut slot.all, &address);
+                    slot_remove(&mut slot.constant, &address);
                 });
             }
 
@@ -299,7 +300,7 @@ impl Nameset {
                 let label = sref.statement(labdef.index).label();
                 deviv(&mut self.labels, label, |slot| {
                     slot.generation = gen;
-                    slot_remove(&mut slot.labels, StatementAddress::new(id, labdef.index));
+                    slot_remove(&mut slot.labels, &StatementAddress::new(id, labdef.index));
                 });
             }
 
@@ -307,21 +308,22 @@ impl Nameset {
                 deviv(&mut self.symbols, &floatdef.name, |slot| {
                     let address = StatementAddress::new(id, floatdef.start);
                     slot.generation = gen;
-                    slot_remove(&mut slot.float, address);
+                    slot_remove(&mut slot.float, &address);
                 });
             }
 
             for dvdef in &seg.global_dvs {
                 self.dv_gen = gen;
-                slot_remove(&mut self.dv_info, StatementAddress::new(id, dvdef.start));
+                slot_remove(&mut self.dv_info, &StatementAddress::new(id, dvdef.start));
             }
         }
     }
 
     /// Given a name which is known to represent a defined atom, get the atom.
     ///
-    /// If you don't know about the name, use lookup_symbol instead.
-    pub fn get_atom(&self, name: TokenPtr) -> Atom {
+    /// If you don't know about the name, use [`lookup_symbol`](Self::lookup_symbol) instead.
+    #[must_use]
+    pub fn get_atom(&self, name: TokenPtr<'_>) -> Atom {
         *self
             .atom_table
             .table
@@ -334,12 +336,14 @@ impl Nameset {
     /// Since atoms never change over the lifetime of a database container, it
     /// is not necessary to track the dependencies, which is why this lives here
     /// and not on `NameReader`.
-    pub fn atom_name(&self, atom: Atom) -> TokenPtr {
+    #[must_use]
+    pub fn atom_name(&self, atom: Atom) -> TokenPtr<'_> {
         &self.atom_table.reverse[atom.0 as usize]
     }
 
     /// Looks up the address and atom for a statement label.
-    pub fn lookup_label(&self, label: TokenPtr) -> Option<LookupLabel> {
+    #[must_use]
+    pub fn lookup_label(&self, label: TokenPtr<'_>) -> Option<LookupLabel> {
         self.labels.get(label).and_then(|lslot| {
             lslot.labels.first().map(|&(addr, _)| LookupLabel {
                 atom: lslot.atom,
@@ -349,7 +353,8 @@ impl Nameset {
     }
 
     /// Looks up the address and type for a math symbol.
-    pub fn lookup_symbol(&self, symbol: TokenPtr) -> Option<LookupSymbol> {
+    #[must_use]
+    pub fn lookup_symbol(&self, symbol: TokenPtr<'_>) -> Option<LookupSymbol> {
         self.symbols.get(symbol).and_then(|syminfo| {
             syminfo.all.first().map(|&(addr, stype)| LookupSymbol {
                 stype,
@@ -361,13 +366,15 @@ impl Nameset {
     }
 
     /// Looks up the atom from a $f statement.
-    pub fn var_atom(&self, sref: StatementRef) -> Option<Atom> {
+    #[must_use]
+    pub fn var_atom(&self, sref: StatementRef<'_>) -> Option<Atom> {
         self.lookup_symbol(&sref.math_at(1))
             .map(|lookup| lookup.atom)
     }
 
     /// The name of a statement - utility function to easily print statement names
-    pub fn statement_name(&self, sref: &StatementRef) -> TokenPtr {
+    #[must_use]
+    pub fn statement_name(&self, sref: &StatementRef<'_>) -> TokenPtr<'_> {
         self.atom_name(
             self.lookup_label(sref.label())
                 .map_or(Atom::default(), |l| l.atom),
@@ -377,6 +384,7 @@ impl Nameset {
 
 /// A reference to a nameset which can read name mappings while tracking
 /// dependencies.
+#[derive(Debug)]
 pub struct NameReader<'a> {
     nameset: &'a Nameset,
     incremental: bool,
@@ -387,6 +395,7 @@ pub struct NameReader<'a> {
 }
 
 /// Usage data extracted from a `NameReader` at cycle end.
+#[derive(Debug)]
 pub struct NameUsage {
     generation: usize,
     incremental: bool,
@@ -397,6 +406,7 @@ pub struct NameUsage {
 }
 
 /// A representation of the data which is recorded for each label.
+#[derive(Copy, Clone, Debug)]
 pub struct LookupLabel {
     /// Address of topmost statement with this label.
     pub address: StatementAddress,
@@ -405,6 +415,7 @@ pub struct LookupLabel {
 }
 
 /// A representation of that which is stored for each math symbol.
+#[derive(Copy, Clone, Debug)]
 pub struct LookupSymbol {
     /// The type of the symbol's topmost defintion.
     pub stype: SymbolType,
@@ -419,6 +430,7 @@ pub struct LookupSymbol {
 
 /// A representation of that which is stored for each variable in relation to
 /// global $f statements.  All fields apply to the topmost such statement.
+#[derive(Debug)]
 pub struct LookupFloat<'a> {
     /// Address of the $f statement.
     pub address: StatementAddress,
@@ -432,6 +444,7 @@ pub struct LookupFloat<'a> {
 
 /// Data which can be fetched for each non-nested $d statement.  This is
 /// deliberately not well optimized, as set.mm does not use non-nested $d.
+#[derive(Debug)]
 pub struct LookupGlobalDv<'a> {
     /// Address of the statement.
     pub address: StatementAddress,
@@ -442,6 +455,7 @@ pub struct LookupGlobalDv<'a> {
 impl<'a> NameReader<'a> {
     /// Constructs a reading interface for a nameset and starts recording names
     /// used.
+    #[must_use]
     pub fn new(nameset: &'a Nameset) -> Self {
         NameReader {
             nameset,
@@ -455,6 +469,8 @@ impl<'a> NameReader<'a> {
 
     /// Stops the reading process.  The returned usage object can be used to
     /// efficiently test for relevant updates.
+    #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn into_usage(self) -> NameUsage {
         NameUsage {
             generation: self.nameset.generation,
@@ -469,7 +485,7 @@ impl<'a> NameReader<'a> {
     // TODO(sorear): add versions which fetch less data, to reduce dep tracking overhead
 
     /// Looks up the address and atom for a statement label.
-    pub fn lookup_label(&mut self, label: TokenPtr) -> Option<LookupLabel> {
+    pub fn lookup_label(&mut self, label: TokenPtr<'_>) -> Option<LookupLabel> {
         let out = self.nameset.lookup_label(label);
         if self.incremental {
             if let Some(ref lookup) = out {
@@ -482,7 +498,7 @@ impl<'a> NameReader<'a> {
     }
 
     /// Looks up the address and type for a math symbol.
-    pub fn lookup_symbol(&mut self, symbol: TokenPtr) -> Option<LookupSymbol> {
+    pub fn lookup_symbol(&mut self, symbol: TokenPtr<'_>) -> Option<LookupSymbol> {
         let out = self.nameset.lookup_symbol(symbol);
         if self.incremental {
             if let Some(ref lookup) = out {
@@ -496,34 +512,32 @@ impl<'a> NameReader<'a> {
 
     // TODO(sorear): consider merging this with lookup_symbol
     /// Looks up the float declaration for a math symbol.
-    pub fn lookup_float(&mut self, symbol: TokenPtr) -> Option<LookupFloat<'a>> {
-        match self.nameset.symbols.get(symbol) {
-            Some(&ref syminfo) => {
-                if self.incremental {
-                    self.found_symbol.insert(syminfo.atom);
-                }
-                syminfo
-                    .float
-                    .first()
-                    .map(|&(addr, (ref label, ref typecode, tcatom))| LookupFloat {
-                        address: addr,
-                        label,
-                        typecode,
-                        typecode_atom: tcatom,
-                    })
+    pub fn lookup_float(&mut self, symbol: TokenPtr<'_>) -> Option<LookupFloat<'a>> {
+        if let Some(syminfo) = self.nameset.symbols.get(symbol) {
+            if self.incremental {
+                self.found_symbol.insert(syminfo.atom);
             }
-            None => {
-                if self.incremental {
-                    self.not_found_symbol.insert(copy_token(symbol));
-                }
-                None
+            syminfo
+                .float
+                .first()
+                .map(|&(addr, (ref label, ref typecode, tcatom))| LookupFloat {
+                    address: addr,
+                    label,
+                    typecode,
+                    typecode_atom: tcatom,
+                })
+        } else {
+            if self.incremental {
+                self.not_found_symbol.insert(copy_token(symbol));
             }
+            None
         }
     }
 
     /// Looks up the list of all global $d statements.
     #[inline]
-    pub fn lookup_global_dv(&self) -> &Vec<(StatementAddress, Vec<Atom>)> {
+    #[must_use]
+    pub const fn lookup_global_dv(&self) -> &Vec<(StatementAddress, Vec<Atom>)> {
         &self.nameset.dv_info
     }
 }
@@ -531,6 +545,7 @@ impl<'a> NameReader<'a> {
 impl NameUsage {
     /// Check if there have been any observable changes since the usage was
     /// recorded.
+    #[must_use]
     pub fn valid(&self, nameset: &Nameset) -> bool {
         if nameset.dv_gen > self.generation {
             // we don't track fine-grained global DV usage

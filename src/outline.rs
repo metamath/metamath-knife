@@ -30,16 +30,17 @@ pub struct OutlineNode {
 
 impl OutlineNode {
     /// Build the root node for a database
-    fn root_node(segments: &[SegmentRef]) -> Self {
+    fn root_node(segments: &[SegmentRef<'_>]) -> Self {
         OutlineNode {
-            name: copy_token("Database".as_bytes()),
+            name: copy_token(b"Database"),
             level: HeadingLevel::Database,
             stmt_address: StatementAddress::new(segments[0].id, 0),
             children: vec![],
         }
     }
 
-    /// Build an outline node, with a generic statement address, from a HeadingDef, which is specific to a segment
+    /// Build an outline node, with a generic statement address, from a [`HeadingDef`],
+    /// which is specific to a segment
     fn from_heading_def(heading: &HeadingDef, segment_id: SegmentId) -> Self {
         OutlineNode {
             name: heading.name.clone(),
@@ -72,6 +73,7 @@ impl OutlineNode {
     }
 
     /// Returns the name of that node, i.e. the heading title
+    #[must_use]
     pub fn get_name(&self) -> &str {
         as_str(&self.name)
     }
@@ -86,7 +88,7 @@ pub fn build_outline(node: &mut OutlineNode, sset: &Arc<SegmentSet>) {
     assert!(!segments.is_empty(), "Parse returned no segment!");
     *node = OutlineNode::root_node(&segments);
 
-    for vsr in segments.iter() {
+    for vsr in &segments {
         for heading in &vsr.segment.outline {
             let new_node = OutlineNode::from_heading_def(heading, vsr.id);
             node.add_child(new_node);

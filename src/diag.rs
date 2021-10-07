@@ -44,7 +44,7 @@ pub enum DiagnosticClass {
 ///
 /// Each diagnostic applies to precisely one statement.  Some diagnostics
 /// reference statements other than the one they are attached to; the fanout is
-/// handled by to_annotations.
+/// handled by `to_annotations`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum Diagnostic {
@@ -145,6 +145,7 @@ use self::Level::*;
 
 /// A notation is a human-readable description of a diagnostic, with a single
 /// structure, named fields, and identifying a single source location.
+#[derive(Debug)]
 pub struct Notation {
     /// Reference to source data, including the filename and text which could be
     /// used to calculate line numbers or print an invalid excerpt.
@@ -164,6 +165,7 @@ pub struct Notation {
 }
 
 /// Converts a collection of raw diagnostics to a notation list before output.
+#[must_use]
 pub fn to_annotations(
     sset: &SegmentSet,
     mut diags: Vec<(StatementAddress, Diagnostic)>,
@@ -179,7 +181,7 @@ pub fn to_annotations(
 fn annotate_diagnostic(
     notes: &mut Vec<Notation>,
     sset: &SegmentSet,
-    stmt: StatementRef,
+    stmt: StatementRef<'_>,
     diag: &Diagnostic,
 ) {
     struct AnnInfo<'a> {
@@ -191,7 +193,7 @@ fn annotate_diagnostic(
         args: Vec<(&'static str, String)>,
     }
 
-    fn ann(info: &mut AnnInfo, mut span: Span) {
+    fn ann(info: &mut AnnInfo<'_>, mut span: Span) {
         if span.is_null() {
             span = info.stmt.span();
         }
@@ -289,7 +291,7 @@ fn annotate_diagnostic(
             info.stmt = sset.statement(prevstmt);
             info.s = "Label was previously used here";
             info.level = Note;
-            ann(&mut info, Span::null());
+            ann(&mut info, Span::NULL);
         }
         EmptyFilename => {
             info.s = "Filename included by a $[ directive must not be empty";
@@ -331,7 +333,7 @@ fn annotate_diagnostic(
             info.stmt = sset.statement(saddr);
             info.s = "Previous $f was here";
             info.level = Note;
-            ann(&mut info, Span::null());
+            ann(&mut info, Span::NULL);
         }
         FormulaVerificationFailed => {
             info.s = "Formula verification failed at this symbol";
@@ -343,7 +345,7 @@ fn annotate_diagnostic(
             info.stmt = sset.statement(prevstmt);
             info.s = "Collision with this statement:";
             info.level = Note;
-            ann(&mut info, Span::null());
+            ann(&mut info, Span::NULL);
         }
         GrammarProvableFloat => {
             info.s = "Floating declaration of provable type";
@@ -352,7 +354,7 @@ fn annotate_diagnostic(
         IoError(ref err) => {
             info.s = "Source file could not be read (error: {error})";
             info.args.push(("error", err.clone()));
-            ann(&mut info, Span::null());
+            ann(&mut info, Span::NULL);
         }
         LocalLabelAmbiguous(span) => {
             info.s = "Local label conflicts with the name of an existing statement";
@@ -451,12 +453,12 @@ fn annotate_diagnostic(
             info.s = "Final step typecode does not match assertion";
             ann(&mut info, stmt.span());
         }
-        RepeatedLabel(lspan, fspan) => {
+        RepeatedLabel(l_span, f_span) => {
             info.s = "A statement may have only one label";
-            ann(&mut info, lspan);
+            ann(&mut info, l_span);
             info.s = "First label was here";
             info.level = Note;
-            ann(&mut info, fspan);
+            ann(&mut info, f_span);
         }
         SpuriousLabel(lspan) => {
             info.s = "Labels are only permitted for statements of type $a, $e, $f, or $p";
@@ -506,7 +508,7 @@ fn annotate_diagnostic(
             info.stmt = sset.statement(saddr);
             info.s = "Symbol was used as a label here";
             info.level = Note;
-            ann(&mut info, Span::null());
+            ann(&mut info, Span::NULL);
         }
         SymbolRedeclared(index, taddr) => {
             info.s = "This symbol is already active in this scope";
@@ -527,7 +529,7 @@ fn annotate_diagnostic(
             info.stmt = stmt.segment().statement(index);
             info.s = "Include statement is here";
             info.level = Note;
-            ann(&mut info, Span::null());
+            ann(&mut info, Span::NULL);
         }
         UnclosedComment(comment) => {
             info.s = "Comment requires closing $) before end of file";
