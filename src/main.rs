@@ -42,7 +42,7 @@ fn main() {
         (@arg repeat: --repeat "Demonstrate incremental verifier")
         (@arg jobs: -j --jobs +takes_value validator(positive_integer)
             "Number of threads to use for verification")
-        (@arg export: -e --export <LABEL> ... "Output a proof file")
+        (@arg export: -e --export [LABEL] ... "Output a proof file")
     );
 
     #[cfg(feature = "dot")]
