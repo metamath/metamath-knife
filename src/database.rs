@@ -594,19 +594,16 @@ impl Database {
     }
 
     /// Export an mmp file for a given statement.
-    pub fn export(&mut self, stmt: String) {
+    pub fn export(&mut self, stmt: &str) {
         time(&self.options.clone(), "export", || {
             let parse = self.parse_result().clone();
             let scope = self.scope_result().clone();
             let name = self.name_result().clone();
-            let sref = self.statement(&stmt).unwrap_or_else(|| {
-                panic!(
-                    "Label {} did not correspond to an existing statement",
-                    &stmt
-                )
+            let sref = self.statement(stmt).unwrap_or_else(|| {
+                panic!("Label {} did not correspond to an existing statement", stmt)
             });
 
-            File::create(format!("{}.mmp", stmt.clone()))
+            File::create(format!("{}.mmp", stmt))
                 .map_err(export::ExportError::Io)
                 .and_then(|mut file| export::export_mmp(&parse, &name, &scope, sref, &mut file))
                 .unwrap()

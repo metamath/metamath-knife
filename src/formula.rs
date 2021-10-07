@@ -117,13 +117,13 @@ impl Formula {
     /// See [crate::verify] for more about this format.
     pub fn append_to_stack_buffer(
         &self,
-        mut stack_buffer: &mut Vec<u8>,
+        stack_buffer: &mut Vec<u8>,
         sset: &Arc<SegmentSet>,
         nset: &Arc<Nameset>,
     ) -> Range<usize> {
         let tos = stack_buffer.len();
         for symbol in self.iter(sset, nset) {
-            fast_extend(&mut stack_buffer, nset.atom_name(symbol));
+            fast_extend(stack_buffer, nset.atom_name(symbol));
             *stack_buffer.last_mut().unwrap() |= 0x80;
         }
         let ntos = stack_buffer.len();

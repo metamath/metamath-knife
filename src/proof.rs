@@ -124,7 +124,7 @@ impl ProofTreeArray {
         self.map.get(&tree.hash).cloned()
     }
 
-    /// Create a proof tree array from the proof  a single $p statement,
+    /// Create a proof tree array from the proof a single $p statement,
     /// returning the result of the given proof builder, or an error if the
     /// proof is faulty
     pub fn new(
