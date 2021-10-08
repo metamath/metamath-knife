@@ -347,7 +347,7 @@ pub struct GlobalDv {
 }
 
 /// Types of math symbols in declarations.
-#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+#[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 pub enum SymbolType {
     /// `$v`
     Variable,

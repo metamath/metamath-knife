@@ -4,30 +4,18 @@
 // Possibly: Remove branch/leaf and keep only the optional leaf? (then final leaf = no next node id)
 
 use crate::diag::Diagnostic;
-use crate::formula::Formula;
-use crate::formula::FormulaBuilder;
-use crate::formula::Label;
-use crate::formula::Symbol;
-use crate::formula::TypeCode;
-use crate::nameck::Atom;
-use crate::nameck::NameReader;
-use crate::nameck::Nameset;
-use crate::parser::as_str;
-use crate::parser::copy_token;
-use crate::parser::Segment;
-use crate::parser::SegmentId;
-use crate::parser::StatementAddress;
-use crate::parser::StatementRef;
-use crate::parser::StatementType;
-use crate::parser::SymbolType;
-use crate::parser::Token;
+use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
+use crate::nameck::{Atom, NameReader, Nameset};
+use crate::parser::{
+    as_str, copy_token, Segment, SegmentId, StatementAddress, StatementRef, StatementType,
+    SymbolType, Token,
+};
 use crate::segment_set::SegmentSet;
-use crate::util::new_map;
-use crate::util::HashMap;
+use crate::util::{new_map, HashMap};
 use log::{debug, warn};
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::fmt::Formatter;
-use std::ops::Index;
 use std::sync::Arc;
 use tinyvec::ArrayVec;
 
@@ -63,11 +51,7 @@ struct GrammarTree(Vec<GrammarNode>);
 impl GrammarTree {
     /// Create a new, empty branch node
     fn create_branch(&mut self) -> NodeId {
-        self.0.push(GrammarNode::Branch {
-            cst_map: new_map(),
-            var_map: new_map(),
-        });
-        //if self.0.len() - 1 == 1413 { panic!("Created 1413!"); }
+        self.0.push(GrammarNode::Branch { map: new_map() });
         self.0.len() - 1
     }
 
@@ -120,28 +104,21 @@ impl GrammarTree {
         match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
             // TODO(tirix): here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
             (
-                GrammarNode::Branch { cst_map, var_map },
+                GrammarNode::Branch { map },
                 GrammarNode::Branch {
-                    cst_map: ref mut to_cst_map,
-                    var_map: ref mut to_var_map,
+                    map: ref mut to_map,
                 },
             ) => {
-                for (symbol, next_node) in cst_map.iter() {
-                    if to_cst_map.get(symbol).is_some() { // TODO(tirix): later use map_try_insert #82766
-                         // Skip error here, do nothing for now...
-                         //return Err(conflict_next_node.next_node_id);
-                         //panic!("Conflict when copying constant grammar branches!");
-                    } else {
-                        to_cst_map.insert(*symbol, next_node.with_reduce(add_reduce));
-                    }
-                }
-                for (typecode, next_node) in var_map.iter() {
-                    if to_var_map.get(typecode).is_some() { // TODO(tirix): later use map_try_insert #82766
-                         // Skip error here, do nothing for now...
-                         //return Err(conflict_next_node.next_node_id);
-                         //panic!("Conflict when copying variable grammar branches!");
-                    } else {
-                        to_var_map.insert(*typecode, next_node.with_reduce(add_reduce));
+                for (&(stype, symbol), next_node) in map.iter() {
+                    match to_map.entry((stype, symbol)) {
+                        Entry::Occupied(_) => {
+                            // Skip error here, do nothing for now...
+                            //return Err(conflict_next_node.next_node_id);
+                            //panic!("Conflict when copying constant grammar branches!");
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert(next_node.with_reduce(add_reduce));
+                        }
                     }
                 }
                 Ok(())
@@ -284,38 +261,32 @@ enum GrammarNode {
         typecode: TypeCode,
     },
     Branch {
-        cst_map: HashMap<Symbol, NextNode>, // Table of choices leading to the next node when a constant is encountered
-        var_map: HashMap<TypeCode, NextNode>, // Table of choices leading to the next node when a variable is successfully parsed
+        // Table of choices leading to the next node when a constant/variable is encountered
+        map: HashMap<(SymbolType, Atom), NextNode>,
     },
 }
 
-impl Index<SymbolType> for GrammarNode {
-    type Output = HashMap<Atom, NextNode>;
+// impl Index<(SymbolType, Atom)> for GrammarNode {
+//     type Output = NextNode;
 
-    fn index(&self, index: SymbolType) -> &Self::Output {
-        if let GrammarNode::Branch { cst_map, var_map } = self {
-            match index {
-                SymbolType::Constant => cst_map,
-                SymbolType::Variable => var_map,
-            }
-        } else {
-            panic!("Only index branch nodes!");
-        }
-    }
-}
+//     fn index(&self, index: SymbolType) -> &Self::Output {
+//         if let GrammarNode::Branch { map } = self {
+//             match index {
+//                 SymbolType::Constant => cst_map,
+//                 SymbolType::Variable => var_map,
+//             }
+//         } else {
+//             panic!("Only index branch nodes!");
+//         }
+//     }
+// }
 
 impl GrammarNode {
     /// Next node
     fn next_node(&self, symbol: Symbol, stype: SymbolType) -> Option<&NextNode> {
         match self {
             GrammarNode::Leaf { .. } => None,
-            GrammarNode::Branch { cst_map, var_map } => {
-                let map = match stype {
-                    SymbolType::Constant => cst_map,
-                    SymbolType::Variable => var_map,
-                };
-                map.get(&symbol)
-            }
+            GrammarNode::Branch { map } => map.get(&(stype, symbol)),
         }
     }
 }
@@ -335,42 +306,45 @@ impl fmt::Debug for GrammarNodeDebug<'_> {
                     reduce.var_count
                 )
             }
-            GrammarNode::Branch { cst_map, var_map } => {
-                write!(f, "Branch CST={{")?;
-                for (symbol, node) in cst_map {
-                    write!(
-                        f,
-                        "{}: {:?}",
-                        as_str(nset.atom_name(*symbol)),
-                        node.next_node_id
-                    )?;
-                    for reduce in node.leaf_label {
-                        write!(
-                            f,
-                            "({:?} {})",
-                            as_str(nset.atom_name(reduce.label)),
-                            reduce.var_count
-                        )?;
+            GrammarNode::Branch { map } => {
+                write!(f, "Branch {{")?;
+                for (key, node) in map {
+                    match key {
+                        (SymbolType::Constant, symbol) => {
+                            write!(
+                                f,
+                                "CST {}: {:?}",
+                                as_str(nset.atom_name(*symbol)),
+                                node.next_node_id
+                            )?;
+                            for reduce in node.leaf_label {
+                                write!(
+                                    f,
+                                    "({:?} {})",
+                                    as_str(nset.atom_name(reduce.label)),
+                                    reduce.var_count
+                                )?;
+                            }
+                            write!(f, ", ")?;
+                        }
+                        (SymbolType::Variable, typecode) => {
+                            write!(
+                                f,
+                                "VAR {}: {:?}",
+                                as_str(nset.atom_name(*typecode)),
+                                node.next_node_id
+                            )?;
+                            for reduce in node.leaf_label {
+                                write!(
+                                    f,
+                                    "({:?} {})",
+                                    as_str(nset.atom_name(reduce.label)),
+                                    reduce.var_count
+                                )?;
+                            }
+                            write!(f, ", ")?;
+                        }
                     }
-                    write!(f, ", ")?;
-                }
-                write!(f, "}} VAR={{")?;
-                for (typecode, node) in var_map {
-                    write!(
-                        f,
-                        "{}: {:?}",
-                        as_str(nset.atom_name(*typecode)),
-                        node.next_node_id
-                    )?;
-                    for reduce in node.leaf_label {
-                        write!(
-                            f,
-                            "({:?} {})",
-                            as_str(nset.atom_name(reduce.label)),
-                            reduce.var_count
-                        )?;
-                    }
-                    write!(f, ", ")?;
                 }
                 write!(f, "}}")
             }
@@ -446,9 +420,9 @@ impl Grammar {
         let mut node = start_node;
         loop {
             match self.nodes.get(node) {
-                GrammarNode::Branch { cst_map, .. } => {
+                GrammarNode::Branch { map, .. } => {
                     // It shall be safe to unwrap here, as we shall never insert a branch without a leaf
-                    node = cst_map.values().next().unwrap().next_node_id;
+                    node = map.values().next().unwrap().next_node_id;
                 }
                 GrammarNode::Leaf { reduce, .. } => {
                     let sa = nset
@@ -461,19 +435,16 @@ impl Grammar {
         }
     }
 
-    fn too_short(map: &HashMap<Symbol, NextNode>, nset: &Arc<Nameset>) -> Diagnostic {
-        let expected_symbol = *map.keys().next().unwrap();
+    fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Arc<Nameset>) -> Diagnostic {
+        let expected_symbol = map.keys().find(|k| k.0 == SymbolType::Constant).unwrap().1;
         let expected_token = copy_token(nset.atom_name(expected_symbol));
         Diagnostic::ParsedStatementTooShort(expected_token)
     }
 
-    /// Gets the maps of a branch
-    fn get_branch(
-        &self,
-        node_id: NodeId,
-    ) -> (&HashMap<Symbol, NextNode>, &HashMap<TypeCode, NextNode>) {
-        if let GrammarNode::Branch { cst_map, var_map } = &self.nodes.get(node_id) {
-            (cst_map, var_map)
+    /// Gets the map of a branch
+    fn get_branch(&self, node_id: NodeId) -> &HashMap<(SymbolType, Atom), NextNode> {
+        if let GrammarNode::Branch { map } = &self.nodes.get(node_id) {
+            map
         } else {
             panic!("Expected branch for node {}!", node_id);
         }
@@ -489,15 +460,11 @@ impl Grammar {
     ) -> Result<NodeId, NodeId> {
         match self.nodes.get_mut(to_node) {
             GrammarNode::Leaf { .. } => Err(to_node), // Error: cannot add to a leaf node, `to_node` is the conflicting node
-            GrammarNode::Branch { cst_map, var_map } => {
-                let map = match stype {
-                    SymbolType::Constant => cst_map,
-                    SymbolType::Variable => var_map,
-                };
-                if let Some(prev_node) = map.get(&symbol) {
+            GrammarNode::Branch { map } => {
+                if let Some(prev_node) = map.get(&(stype, symbol)) {
                     Err(prev_node.next_node_id)
                 } else {
-                    map.insert(symbol, *leaf);
+                    map.insert((stype, symbol), *leaf);
                     Ok(leaf.next_node_id)
                 }
             }
@@ -516,12 +483,8 @@ impl Grammar {
             GrammarNode::Leaf { .. } => {
                 Err(to_node) // Error: cannot add to a leaf node, `to_node` is the conflicting node
             }
-            GrammarNode::Branch { cst_map, var_map } => {
-                let map = match stype {
-                    SymbolType::Constant => cst_map,
-                    SymbolType::Variable => var_map,
-                };
-                match map.get(&symbol) {
+            GrammarNode::Branch { map } => {
+                match map.get(&(stype, symbol)) {
                     Some(prev_node) if prev_node.leaf_label == add_reduce => {
                         Ok(prev_node.next_node_id)
                     }
@@ -530,15 +493,9 @@ impl Grammar {
                         let new_node_id = self.nodes.create_branch();
                         // here we have to re-borrow from self after the creation,
                         // because the previous var_map and cst_map may not be valid pointers anymore
-                        if let GrammarNode::Branch { cst_map, var_map } =
-                            self.nodes.get_mut(to_node)
-                        {
-                            let map = match stype {
-                                SymbolType::Constant => cst_map,
-                                SymbolType::Variable => var_map,
-                            };
+                        if let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) {
                             map.insert(
-                                symbol,
+                                (stype, symbol),
                                 NextNode::new_with_reduce_vec(new_node_id, add_reduce),
                             );
                             Ok(new_node_id)
@@ -658,8 +615,11 @@ impl Grammar {
 
         match self.nodes.get_mut(self.root) {
             // We ignore the ambiguity in floats, since they are actually frame dependent.
-            GrammarNode::Branch { cst_map, .. } => {
-                cst_map.insert(symbol.atom, NextNode::new(leaf_node));
+            GrammarNode::Branch { map } => {
+                map.insert(
+                    (SymbolType::Constant, symbol.atom),
+                    NextNode::new(leaf_node),
+                );
                 Ok(())
                 // match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
                 //     None => Ok(()),
@@ -684,10 +644,10 @@ impl Grammar {
     ) -> Result<(), Diagnostic> {
         let len = self.nodes.len();
         for node_id in 0..len {
-            if let GrammarNode::Branch { var_map, .. } = self.nodes.get(node_id) {
-                if let Some(ref_next_node) = var_map.get(&to_typecode) {
+            if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
+                if let Some(ref_next_node) = map.get(&(SymbolType::Variable, to_typecode)) {
                     let next_node_id = ref_next_node.next_node_id;
-                    match var_map.get(&from_typecode) {
+                    match map.get(&(SymbolType::Variable, from_typecode)) {
                         None => {
                             // No branch exist for the converted type: create one, with a leaf label.
                             debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
@@ -734,7 +694,7 @@ impl Grammar {
 
     fn next_var_node(&self, node_id: NodeId, typecode: TypeCode) -> Option<(NodeId, &ReduceVec)> {
         match self.nodes.get(node_id) {
-            GrammarNode::Branch { var_map, .. } => match var_map.get(&typecode) {
+            GrammarNode::Branch { map } => match map.get(&(SymbolType::Variable, typecode)) {
                 Some(NextNode {
                     next_node_id,
                     leaf_label,
@@ -766,20 +726,23 @@ impl Grammar {
         debug!("Clone {} to {}", add_from_node_id, add_to_node_id);
         debug!("{:?}", GrammarNodeIdDebug(self, add_from_node_id, nset));
         debug!("{:?}", GrammarNodeIdDebug(self, add_to_node_id, nset));
-        for stype in &[SymbolType::Constant, SymbolType::Variable] {
-            let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
-            if *stype == SymbolType::Variable {
+        let map = &self.get_branch(add_from_node_id).clone(); // can we prevent cloning here?
+        for &stype in &[SymbolType::Constant, SymbolType::Variable] {
+            if stype == SymbolType::Variable {
                 increment_offsets(&mut stored_reduces);
             }
-            for (symbol, next_node) in map {
+            for (&(stype2, symbol), next_node) in map {
+                if stype != stype2 {
+                    continue;
+                }
                 if next_node.next_node_id == add_to_node_id {
                     // avoid infinite recursion
                     continue;
                 }
                 if let GrammarNode::Leaf {
-                    reduce: r,
+                    reduce: ref r,
                     typecode,
-                } = self.nodes.get(next_node.next_node_id)
+                } = *self.nodes.get(next_node.next_node_id)
                 {
                     let mut reduce_vec = ReduceVec::new();
                     for reduce in stored_reduces {
@@ -790,8 +753,8 @@ impl Grammar {
                         "LEAF for {} to {} {:?}",
                         add_from_node_id, add_to_node_id, reduce_vec
                     );
-                    let final_node = make_final(&reduce_vec, *typecode);
-                    match self.add_branch(add_to_node_id, *symbol, *stype, &final_node) {
+                    let final_node = make_final(&reduce_vec, typecode);
+                    match self.add_branch(add_to_node_id, symbol, stype, &final_node) {
                         Ok(_) => {}
                         Err(conflict_node_id) => {
                             debug!("Conflict Node = {}", conflict_node_id);
@@ -813,8 +776,8 @@ impl Grammar {
                     );
                     let (new_next_node_id, new_stored_reduces) = match self.add_branch_with_reduce(
                         add_to_node_id,
-                        *symbol,
-                        *stype,
+                        symbol,
+                        stype,
                         next_node.leaf_label,
                     ) {
                         Ok(new_next_node_id) => (new_next_node_id, stored_reduces),
@@ -856,17 +819,15 @@ impl Grammar {
             "Clone with reduce {} to {}",
             add_from_node_id, add_to_node_id
         );
-        for stype in &[SymbolType::Constant, SymbolType::Variable] {
-            let map = &(*self.nodes.get(add_from_node_id)).clone()[*stype]; // can we prevent cloning here?
-            for (symbol, next_node) in map {
-                self.add_branch(
-                    add_to_node_id,
-                    *symbol,
-                    *stype,
-                    &next_node.with_reduce_vec(reduce_vec),
-                )
-                .expect("Double conflict!");
-            }
+        let map = &self.get_branch(add_from_node_id).clone(); // can we prevent cloning here?
+        for (&(stype, symbol), next_node) in map {
+            self.add_branch(
+                add_to_node_id,
+                symbol,
+                stype,
+                &next_node.with_reduce_vec(reduce_vec),
+            )
+            .expect("Double conflict!");
         }
     }
 
@@ -932,10 +893,10 @@ impl Grammar {
                 break;
             }
             // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
-            if let GrammarNode::Branch { cst_map, .. } = self.nodes.get(node_id) {
+            if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
                 let prefix_symbol = nset.lookup_symbol(prefix[index].as_ref()).unwrap().atom;
-                let next_node = cst_map
-                    .get(&prefix_symbol)
+                let next_node = map
+                    .get(&(SymbolType::Constant, prefix_symbol))
                     .expect("Prefix cannot be parsed!");
                 node_id = next_node.next_node_id;
                 index += 1;
@@ -1118,12 +1079,12 @@ impl Grammar {
     pub fn parse_formula(
         &self,
         symbol_iter: &mut dyn Iterator<Item = Symbol>,
-        expected_typecodes: Box<[&TypeCode]>,
+        expected_typecodes: Box<[TypeCode]>,
         nset: &Arc<Nameset>,
     ) -> Result<Formula, Diagnostic> {
-        struct StackElement<'a> {
+        struct StackElement {
             node_id: NodeId,
-            expected_typecodes: Box<[&'a TypeCode]>,
+            expected_typecodes: Box<[TypeCode]>,
         }
 
         let mut formula_builder = FormulaBuilder::default();
@@ -1135,29 +1096,29 @@ impl Grammar {
         };
         let mut stack = vec![];
         loop {
-            match self.nodes.get(e.node_id) {
+            match *self.nodes.get(e.node_id) {
                 GrammarNode::Leaf { reduce, typecode } => {
                     // We found a leaf: REDUCE
-                    Self::do_reduce(&mut formula_builder, *reduce, nset);
+                    Self::do_reduce(&mut formula_builder, reduce, nset);
 
-                    if e.expected_typecodes.iter().any(|&t| *t == *typecode) {
+                    if e.expected_typecodes.contains(&typecode) {
                         // We found an expected typecode, pop from the stack and continue
                         if let Some(popped) = stack.pop() {
                             e = popped;
                             debug!(
                                 " ++ Finished parsing formula, found typecode {:?}, back to {}",
-                                as_str(nset.atom_name(*typecode)),
+                                as_str(nset.atom_name(typecode)),
                                 e.node_id
                             );
-                            let (_, var_map) = self.get_branch(e.node_id);
-                            match var_map.get(typecode) {
+                            let map = self.get_branch(e.node_id);
+                            match map.get(&(SymbolType::Variable, typecode)) {
                                 Some(NextNode {
                                     next_node_id,
                                     leaf_label,
                                 }) => {
                                     // Found a sub-formula: First optionally REDUCE and continue
-                                    for reduce in leaf_label {
-                                        Self::do_reduce(&mut formula_builder, *reduce, nset);
+                                    for &reduce in leaf_label {
+                                        Self::do_reduce(&mut formula_builder, reduce, nset);
                                     }
 
                                     e.node_id = *next_node_id;
@@ -1169,13 +1130,13 @@ impl Grammar {
                             }
                         } else if symbol_enum.peek().is_none() {
                             // We popped the last element from the stack and we are at the end of the math string, success
-                            return Ok(formula_builder.build(*typecode));
+                            return Ok(formula_builder.build(typecode));
                         } else {
                             // There are still symbols to parse, continue from root
                             let (next_node_id, leaf_label) =
-                                self.next_var_node(self.root, *typecode).unwrap(); // TODO(tirix): error case
-                            for reduce in leaf_label {
-                                Self::do_reduce(&mut formula_builder, *reduce, nset);
+                                self.next_var_node(self.root, typecode).unwrap(); // TODO(tirix): error case
+                            for &reduce in leaf_label {
+                                Self::do_reduce(&mut formula_builder, reduce, nset);
                             }
                             e.node_id = next_node_id;
                         }
@@ -1183,26 +1144,26 @@ impl Grammar {
                         // We have not found the expected typecode, continue from root
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) =
-                            self.next_var_node(self.root, *typecode).unwrap(); // TODO(tirix): error case
-                        for reduce in leaf_label {
-                            Self::do_reduce(&mut formula_builder, *reduce, nset);
+                            self.next_var_node(self.root, typecode).unwrap(); // TODO(tirix): error case
+                        for &reduce in leaf_label {
+                            Self::do_reduce(&mut formula_builder, reduce, nset);
                         }
                         e.node_id = next_node_id;
                     }
                 }
-                GrammarNode::Branch { cst_map, var_map } => {
-                    if let Some((index, symbol)) = symbol_enum.peek() {
-                        ix = *index as i32;
-                        debug!("   {:?}", as_str(nset.atom_name(*symbol)));
+                GrammarNode::Branch { ref map } => {
+                    if let Some(&(index, symbol)) = symbol_enum.peek() {
+                        ix = index as i32;
+                        debug!("   {:?}", as_str(nset.atom_name(symbol)));
 
                         if let Some(NextNode {
                             next_node_id,
                             leaf_label,
-                        }) = cst_map.get(symbol)
+                        }) = map.get(&(SymbolType::Constant, symbol))
                         {
                             // Found an atom matching one of our next nodes: First optionally REDUCE and continue
-                            for reduce in leaf_label {
-                                Self::do_reduce(&mut formula_builder, *reduce, nset);
+                            for &reduce in leaf_label {
+                                Self::do_reduce(&mut formula_builder, reduce, nset);
                             }
 
                             // Found an atom matching one of our next nodes: SHIFT, to the next node
@@ -1211,25 +1172,28 @@ impl Grammar {
                             debug!("   Next Node: {:?}", e.node_id);
                         } else {
                             // No matching constant, search among variables
-                            if var_map.is_empty() || e.node_id == self.root {
+                            if map.is_empty() || e.node_id == self.root {
                                 return Err(Diagnostic::UnparseableStatement(ix));
                             }
 
                             debug!(
                                 " ++ Not in CST map, push stack element and expect {:?}",
-                                var_map.keys()
+                                map.keys()
                             );
                             stack.push(e);
                             e = StackElement {
                                 node_id: self.root,
-                                expected_typecodes: var_map
+                                expected_typecodes: map
                                     .keys()
-                                    .collect::<Vec<&TypeCode>>()
-                                    .into_boxed_slice(),
+                                    .filter_map(|k| match *k {
+                                        (SymbolType::Variable, typecode) => Some(typecode),
+                                        _ => None,
+                                    })
+                                    .collect(),
                             };
                         }
                     } else {
-                        return Err(Grammar::too_short(cst_map, nset));
+                        return Err(Grammar::too_short(map, nset));
                     }
                 }
             }
@@ -1271,7 +1235,7 @@ impl Grammar {
             .math_iter()
             .skip(1)
             .map(|token| names.lookup_symbol(token.slice).unwrap().atom);
-        let formula = self.parse_formula(&mut symbol_iter, Box::new([&expected_typecode]), nset)?;
+        let formula = self.parse_formula(&mut symbol_iter, Box::new([expected_typecode]), nset)?;
         Ok(Some(formula))
     }
 
@@ -1314,49 +1278,52 @@ impl Grammar {
                             .as_str(),
                         ); // , escape(as_str(nset.atom_name(*typecode))), reduce.var_count
                 }
-                GrammarNode::Branch { cst_map, var_map } => {
-                    for (symbol, node) in cst_map {
+                GrammarNode::Branch { map } => {
+                    for (&key, node) in map {
                         let mut buf = String::new();
-                        for reduce in node.leaf_label {
-                            if reduce.offset > 0 {
-                                write!(
-                                    buf,
-                                    "{}({}) / ",
-                                    as_str(nset.atom_name(reduce.label)),
-                                    reduce.offset
-                                )?;
-                            } else {
-                                write!(buf, "{} / ", as_str(nset.atom_name(reduce.label)))?;
+                        match key {
+                            (SymbolType::Constant, symbol) => {
+                                for reduce in node.leaf_label {
+                                    if reduce.offset > 0 {
+                                        write!(
+                                            buf,
+                                            "{}({}) / ",
+                                            as_str(nset.atom_name(reduce.label)),
+                                            reduce.offset
+                                        )?;
+                                    } else {
+                                        write!(buf, "{} / ", as_str(nset.atom_name(reduce.label)))?;
+                                    }
+                                }
+                                write!(buf, "{}", escape(as_str(nset.atom_name(symbol))).as_str())?;
+                                digraph
+                                    .edge(as_string(node_id), as_string(node.next_node_id))
+                                    .attributes()
+                                    .set_label(buf.as_str())
+                                    .set_font("Courier");
+                            }
+                            (SymbolType::Variable, typecode) => {
+                                buf.write_str(escape(as_str(nset.atom_name(typecode))).as_str())?;
+                                for reduce in node.leaf_label {
+                                    if reduce.offset > 0 {
+                                        write!(
+                                            buf,
+                                            " / {}({})",
+                                            as_str(nset.atom_name(reduce.label)),
+                                            reduce.offset
+                                        )?;
+                                    } else {
+                                        write!(buf, " / {}", as_str(nset.atom_name(reduce.label)))?;
+                                    }
+                                }
+                                digraph
+                                    .edge(as_string(node_id), as_string(node.next_node_id))
+                                    .attributes()
+                                    .set_label(buf.as_str())
+                                    .set_color(Color::Blue)
+                                    .set_font_color(Color::Blue);
                             }
                         }
-                        write!(buf, "{}", escape(as_str(nset.atom_name(*symbol))).as_str())?;
-                        digraph
-                            .edge(as_string(node_id), as_string(node.next_node_id))
-                            .attributes()
-                            .set_label(buf.as_str())
-                            .set_font("Courier");
-                    }
-                    for (typecode, node) in var_map {
-                        let mut buf = String::new();
-                        buf.write_str(escape(as_str(nset.atom_name(*typecode))).as_str())?;
-                        for reduce in node.leaf_label {
-                            if reduce.offset > 0 {
-                                write!(
-                                    buf,
-                                    " / {}({})",
-                                    as_str(nset.atom_name(reduce.label)),
-                                    reduce.offset
-                                )?;
-                            } else {
-                                write!(buf, " / {}", as_str(nset.atom_name(reduce.label)))?;
-                            }
-                        }
-                        digraph
-                            .edge(as_string(node_id), as_string(node.next_node_id))
-                            .attributes()
-                            .set_label(buf.as_str())
-                            .set_color(Color::Blue)
-                            .set_font_color(Color::Blue);
                     }
                 }
             }
