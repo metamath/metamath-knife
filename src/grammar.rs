@@ -1454,7 +1454,7 @@ impl StmtParse {
     }
 
     /// Check that printing parsed statements gives back the original formulas
-    // TODO(sorear): this could be parallelized
+    // TODO(tirix): this could be parallelized
     pub fn verify(
         &self,
         sset: &Arc<SegmentSet>,
