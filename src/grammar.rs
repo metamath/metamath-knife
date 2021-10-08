@@ -266,21 +266,6 @@ enum GrammarNode {
     },
 }
 
-// impl Index<(SymbolType, Atom)> for GrammarNode {
-//     type Output = NextNode;
-
-//     fn index(&self, index: SymbolType) -> &Self::Output {
-//         if let GrammarNode::Branch { map } = self {
-//             match index {
-//                 SymbolType::Constant => cst_map,
-//                 SymbolType::Variable => var_map,
-//             }
-//         } else {
-//             panic!("Only index branch nodes!");
-//         }
-//     }
-// }
-
 impl GrammarNode {
     /// Next node
     fn next_node(&self, symbol: Symbol, stype: SymbolType) -> Option<&NextNode> {
