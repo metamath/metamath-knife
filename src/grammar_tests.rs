@@ -86,7 +86,7 @@ fn test_parse_formula() {
     let formula = grammar
         .parse_formula(
             &mut fmla_vec.clone().into_iter(),
-            Box::new([&wff, &class]),
+            Box::new([wff, class]),
             &names,
         )
         .unwrap();
