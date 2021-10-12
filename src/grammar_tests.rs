@@ -98,6 +98,40 @@ fn test_parse_formula() {
     assert!(formula.iter(&sset, &names).eq(fmla_vec.into_iter()));
 }
 
+// This grammar exposes issue #32 in the statement parser
+const GRAMMAR_DB_32: &[u8] = b"
+    $c |- wff class setvar ( ) = e. |-> $.
+    $( $j syntax 'class'; syntax 'setvar'; syntax 'wff'; syntax '|-' as 'wff'; type_conversions; $)
+    $v A B C x $.
+    cA $f class A $.
+    cB $f class B $.
+    cC $f class C $.
+    vx $f setvar x $.
+    cv $a class x $.
+    weq $a wff A = B $.
+    cov $a class ( A B C ) $.
+    cmpt $a class ( x e. A |-> B ) $.
+    check $a |- ( x A B ) = C $.
+";
+
+#[test]
+fn test_db_32_formula() {
+    let mut db = mkdb(GRAMMAR_DB_32);
+    let stmt_parse = db.stmt_parse_result().clone();
+    let names = db.name_result().clone();
+    {
+        let sref = db.statement("check").unwrap();
+        let formula = stmt_parse.get_formula(&sref).unwrap();
+        assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cov");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "cv");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1, 1]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 3]).unwrap())) == "cB");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cC");
+    }
+}
+
 // A minimal set.mm-like database with "Garden Paths"
 const GARDEN_PATH_DB: &[u8] = b"
     $c |- wff class setvar { } <. >. , | e. = $.
