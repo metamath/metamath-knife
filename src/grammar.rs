@@ -1240,11 +1240,8 @@ impl Grammar {
 
     /// Returns the typecodes allowed in this grammar
     #[must_use]
-    pub fn typecodes(&self) -> Box<[&TypeCode]> {
-        self.typecodes
-            .iter()
-            .collect::<Vec<&TypeCode>>()
-            .into_boxed_slice()
+    pub fn typecodes(&self) -> Box<[TypeCode]> {
+        self.typecodes.clone().into_boxed_slice()
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
