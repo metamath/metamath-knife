@@ -102,7 +102,6 @@ impl GrammarTree {
         add_reduce: Reduce,
     ) -> Result<(), NodeId> {
         match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
-            // TODO(tirix): here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
             (
                 GrammarNode::Branch { map },
                 GrammarNode::Branch {
