@@ -102,7 +102,6 @@ impl GrammarTree {
         add_reduce: Reduce,
     ) -> Result<(), NodeId> {
         match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
-            // TODO(tirix): here we might have to reduce with offset (e.g. ` ( a o b ) `, after ` o ` )
             (
                 GrammarNode::Branch { map },
                 GrammarNode::Branch {
@@ -117,7 +116,11 @@ impl GrammarTree {
                             //panic!("Conflict when copying constant grammar branches!");
                         }
                         Entry::Vacant(e) => {
-                            e.insert(next_node.with_reduce(add_reduce));
+                            if stype == SymbolType::Variable {
+                                e.insert(next_node.with_offset_reduce(add_reduce));
+                            } else {
+                                e.insert(next_node.with_reduce(add_reduce));
+                            }
                         }
                     }
                 }
@@ -228,6 +231,17 @@ impl NextNode {
     const fn new_with_reduce_vec(next_node_id: NodeId, leaf_label: ReduceVec) -> Self {
         NextNode {
             next_node_id,
+            leaf_label,
+        }
+    }
+
+    fn with_offset_reduce(&self, reduce: Reduce) -> Self {
+        let mut r = reduce;
+        r.offset += 1;
+        let mut leaf_label = self.leaf_label;
+        leaf_label.insert(0, r);
+        NextNode {
+            next_node_id: self.next_node_id,
             leaf_label,
         }
     }
