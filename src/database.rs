@@ -128,7 +128,7 @@ use std::time::Instant;
 /// for the lifetime of the database container.
 ///
 /// Some of these could theoretically support modification.
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct DbOptions {
     /// If true, the automatic splitting of large files described above is
     /// enabled, with the caveat about chapter comments inside grouping
@@ -150,6 +150,18 @@ pub struct DbOptions {
     pub incremental: bool,
     /// Number of jobs to run in parallel at any given time.
     pub jobs: usize,
+}
+
+impl Default for DbOptions {
+    fn default() -> Self {
+        Self {
+            autosplit: false,
+            timing: false,
+            trace_recalc: false,
+            incremental: false,
+            jobs: 1,
+        }
+    }
 }
 
 /// Wraps a heap-allocated closure with a difficulty score which can be used for
@@ -375,6 +387,12 @@ pub struct Database {
     outline: Option<Arc<OutlineNode>>,
     grammar: Option<Arc<Grammar>>,
     stmt_parse: Option<Arc<StmtParse>>,
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        Self::new(DbOptions::default())
+    }
 }
 
 fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
