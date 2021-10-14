@@ -126,7 +126,7 @@ impl ProofTreeArray {
     /// Create a proof tree array from the proof a single $p statement,
     /// returning the result of the given proof builder, or an error if the
     /// proof is faulty
-    pub fn new(
+    pub(crate) fn new(
         sset: &SegmentSet,
         nset: &Nameset,
         scopes: &ScopeResult,
@@ -409,23 +409,23 @@ impl ProofStyle {
 #[derive(Debug)]
 pub struct ProofTreePrinter<'a> {
     /// The segment set, for looking up statements
-    pub sset: &'a SegmentSet,
+    pub(crate) sset: &'a SegmentSet,
     /// The nameset, for looking up statements
-    pub nset: &'a Nameset,
+    pub(crate) nset: &'a Nameset,
     /// The scoping pass, for looking up statements
-    pub scope: &'a ScopeResult,
+    pub(crate) scope: &'a ScopeResult,
     /// The current statement label (only used in explicit style)
-    pub thm_label: TokenPtr<'a>,
+    pub(crate) thm_label: TokenPtr<'a>,
     /// The type of output (normal, compressed, packed, ...)
-    pub style: ProofStyle,
+    pub(crate) style: ProofStyle,
     /// The source data
-    pub arr: &'a ProofTreeArray,
+    pub(crate) arr: &'a ProofTreeArray,
     /// The initial cursor character number on the current line
-    pub initial_chr: u16,
+    pub(crate) initial_chr: u16,
     /// The amount of leading whitespace to print
-    pub indent: u16,
+    pub(crate) indent: u16,
     /// The number of characters to fit before going to a new line
-    pub line_width: u16,
+    pub(crate) line_width: u16,
 }
 
 /// The local variables of `ProofTreePrinter::fmt()`, extracted into a struct

@@ -12,6 +12,7 @@ use crate::parser::{
 };
 use crate::segment_set::SegmentSet;
 use crate::util::{new_map, HashMap};
+use crate::Database;
 use log::{debug, warn};
 use std::collections::hash_map::Entry;
 use std::fmt;
@@ -149,7 +150,7 @@ impl GrammarTree {
 /// // Create an empty database and load any file provided
 /// let mut db = Database::new(options);
 /// db.parse("set.mm".to_string(), vec![]);
-/// let grammar = db.grammar_result();
+/// let grammar = db.grammar_pass();
 /// ```
 #[derive(Debug)]
 pub struct Grammar {
@@ -290,7 +291,7 @@ impl GrammarNode {
     }
 }
 
-struct GrammarNodeDebug<'a>(&'a GrammarNode, &'a Arc<Nameset>);
+struct GrammarNodeDebug<'a>(&'a GrammarNode, &'a Nameset);
 impl fmt::Debug for GrammarNodeDebug<'_> {
     /// Lists the contents of the grammar node
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -351,7 +352,7 @@ impl fmt::Debug for GrammarNodeDebug<'_> {
     }
 }
 
-struct GrammarNodeIdDebug<'a>(&'a Grammar, NodeId, &'a Arc<Nameset>);
+struct GrammarNodeIdDebug<'a>(&'a Grammar, NodeId, &'a Nameset);
 impl fmt::Debug for GrammarNodeIdDebug<'_> {
     /// Lists the contents of the grammar node, given the grammar and a node id
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -383,7 +384,7 @@ impl Default for Grammar {
 
 impl Grammar {
     /// Initializes the grammar using the parser commands
-    fn initialize(&mut self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
+    fn initialize(&mut self, sset: &SegmentSet, nset: &Nameset) {
         for (_, command) in sset.parser_commands() {
             assert!(!command.is_empty(), "Empty parser command!");
             if &command[0].as_ref() == b"syntax" {
@@ -415,7 +416,7 @@ impl Grammar {
     /// Creates an "Ambiguous" diagnostic for the grammar
     /// The node given is the other node found with the same syntax.
     /// We're looking for any label in that branch.
-    fn ambiguous(&self, start_node: NodeId, nset: &Arc<Nameset>) -> Diagnostic {
+    fn ambiguous(&self, start_node: NodeId, nset: &Nameset) -> Diagnostic {
         let mut node = start_node;
         loop {
             match self.nodes.get(node) {
@@ -434,7 +435,7 @@ impl Grammar {
         }
     }
 
-    fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Arc<Nameset>) -> Diagnostic {
+    fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Nameset) -> Diagnostic {
         let expected_symbol = map.keys().find(|k| k.0 == SymbolType::Constant).unwrap().1;
         let expected_token = copy_token(nset.atom_name(expected_symbol));
         Diagnostic::ParsedStatementTooShort(expected_token)
@@ -511,7 +512,7 @@ impl Grammar {
     fn add_axiom(
         &mut self,
         sref: &StatementRef<'_>,
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
         names: &mut NameReader<'_>,
         type_conversions: &mut Vec<(TypeCode, TypeCode, Label)>,
     ) -> Result<(), Diagnostic> {
@@ -581,7 +582,7 @@ impl Grammar {
     fn add_floating(
         &mut self,
         sref: &StatementRef<'_>,
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
         names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
         let mut tokens = sref.math_iter();
@@ -639,7 +640,7 @@ impl Grammar {
         from_typecode: TypeCode,
         to_typecode: TypeCode,
         label: Label,
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
     ) -> Result<(), Diagnostic> {
         let len = self.nodes.len();
         for node_id in 0..len {
@@ -716,7 +717,7 @@ impl Grammar {
         &mut self,
         add_from_node_id: NodeId,
         add_to_node_id: NodeId,
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
         mut stored_reduces: ReduceVec,
         make_final: F,
     ) where
@@ -837,7 +838,7 @@ impl Grammar {
         to_node: NodeId,
         symbol: Symbol,
         stype: SymbolType,
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
     ) -> NodeId {
         let next_node_id_from_root = self
             .nodes
@@ -880,7 +881,7 @@ impl Grammar {
         &mut self,
         prefix: &[Token],
         shadows: &[Token],
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
         names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
         let mut node_id = self.root;
@@ -999,8 +1000,8 @@ impl Grammar {
     /// `
     fn handle_commands(
         &mut self,
-        sset: &Arc<SegmentSet>,
-        nset: &Arc<Nameset>,
+        sset: &SegmentSet,
+        nset: &Nameset,
         names: &mut NameReader<'_>,
         type_conversions: &[(TypeCode, TypeCode, Label)],
     ) -> Result<(), (StatementAddress, Diagnostic)> {
@@ -1045,11 +1046,7 @@ impl Grammar {
         Ok(())
     }
 
-    fn do_shift(
-        &self,
-        symbol_iter: &mut dyn Iterator<Item = (usize, Symbol)>,
-        nset: &Arc<Nameset>,
-    ) {
+    fn do_shift(&self, symbol_iter: &mut dyn Iterator<Item = (usize, Symbol)>, nset: &Nameset) {
         if let Some((_ix, symbol)) = symbol_iter.next() {
             if self.debug {
                 debug!("   SHIFT {:?}", as_str(nset.atom_name(symbol)));
@@ -1057,7 +1054,7 @@ impl Grammar {
         }
     }
 
-    fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Arc<Nameset>) {
+    fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Nameset) {
         debug!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
         formula_builder.reduce(
             reduce.label,
@@ -1079,7 +1076,7 @@ impl Grammar {
         &self,
         symbol_iter: &mut impl Iterator<Item = Symbol>,
         expected_typecodes: &[TypeCode],
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
     ) -> Result<Formula, Diagnostic> {
         struct StackElement {
             node_id: NodeId,
@@ -1206,7 +1203,7 @@ impl Grammar {
     fn parse_statement(
         &self,
         sref: &StatementRef<'_>,
-        nset: &Arc<Nameset>,
+        nset: &Nameset,
         names: &mut NameReader<'_>,
     ) -> Result<Option<Formula>, Diagnostic> {
         if sref.math_len() == 0 {
@@ -1249,7 +1246,7 @@ impl Grammar {
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
-    pub fn dump(&self, nset: &Arc<Nameset>) {
+    pub fn dump(&self, nset: &Nameset) {
         println!("Grammar tree has {:?} nodes.", self.nodes.len());
         for i in 0..self.nodes.len() {
             println!("{:?}", GrammarNodeIdDebug(self, i, nset));
@@ -1260,7 +1257,7 @@ impl Grammar {
     /// Exports the grammar tree in the "dot" format.
     /// See <https://www.graphviz.org/doc/info/lang.html>
     /// This dot file can then be converted to an SVG image using ` dot -Tsvg -o grammar.svg grammar.dot `
-    pub fn export_dot(&self, nset: &Arc<Nameset>, write: &mut File) -> Result<(), ExportError> {
+    pub fn export_dot(&self, nset: &Nameset, write: &mut File) -> Result<(), ExportError> {
         let mut dot_writer = DotWriter::from(write);
         let mut digraph = dot_writer.digraph();
         for node_id in 0..self.nodes.len() {
@@ -1339,11 +1336,7 @@ impl Grammar {
 /// The grammar can then be used to parse the statements of the database (see [`parse_statements`]),
 /// or to parse a single statement.
 /// Use [`Grammar::default`] to get an initial state.
-pub(crate) fn build_grammar<'a>(
-    grammar: &mut Grammar,
-    sset: &'a Arc<SegmentSet>,
-    nset: &Arc<Nameset>,
-) {
+pub(crate) fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Nameset) {
     // Read information about the grammar from the parser commands
     grammar.initialize(sset, nset);
     grammar.root = grammar.nodes.create_branch();
@@ -1390,7 +1383,7 @@ pub(crate) fn build_grammar<'a>(
 /// // Create an empty database and load any file provided
 /// let mut db = Database::new(options);
 /// db.parse("set.mm".to_string(), vec![]);
-/// let stmt_parse = db.stmt_parse_result();
+/// let stmt_parse = db.stmt_parse();
 /// ```
 ///
 /// The parse tree for a given statement can then be obtained through [`StmtParse::get_formula`].
@@ -1422,18 +1415,16 @@ impl StmtParse {
 
     /// Check that printing parsed statements gives back the original formulas
     // TODO(tirix): this could be parallelized
-    pub fn verify(
-        &self,
-        sset: &Arc<SegmentSet>,
-        nset: &Arc<Nameset>,
-    ) -> Result<(), (StatementAddress, Diagnostic)> {
+    pub(crate) fn verify(&self, db: &Database) -> Result<(), (StatementAddress, Diagnostic)> {
+        let sset = db.parse_result();
+        let nset = db.name_result();
         for sps in self.segments.values() {
             for (&sa, formula) in &sps.formulas {
                 let sref = sset.statement(sa);
                 let math_iter = sref
                     .math_iter()
                     .map(|token| nset.lookup_symbol(token.slice).unwrap().atom);
-                let fmla_iter = formula.iter(sset, nset);
+                let fmla_iter = formula.as_ref(db).iter();
                 if math_iter.ne(fmla_iter) {
                     return Err((sa, Diagnostic::FormulaVerificationFailed));
                 }
@@ -1443,15 +1434,17 @@ impl StmtParse {
     }
 
     /// Writes down all formulas
-    pub fn dump(&self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) {
+    pub(crate) fn dump(&self, db: &Database) {
         println!("Formula Dump:");
+        let sset = db.parse_result();
+        let nset = db.name_result();
         for sps in self.segments.values() {
             for (&sa, formula) in &sps.formulas {
                 let sref = sset.statement(sa);
                 println!(
                     "{}: {}",
                     as_str(nset.statement_name(&sref)),
-                    formula.display(sset, nset)
+                    formula.as_ref(db)
                 );
             }
         }
@@ -1475,10 +1468,10 @@ struct StmtParseSegment {
 
 /// Runs statement parsing for a single segment.
 fn parse_statements_single<'a>(
-    sset: &'a Arc<SegmentSet>,
-    nset: &Arc<Nameset>,
+    sset: &'a SegmentSet,
+    nset: &Nameset,
     names: &mut NameReader<'_>,
-    grammar: &Arc<Grammar>,
+    grammar: &Grammar,
     sid: SegmentId,
 ) -> StmtParseSegment {
     let segment = sset.segment(sid);
@@ -1518,9 +1511,9 @@ fn parse_statements_single<'a>(
 /// The parse tree for a given statement can then be obtained through [`StmtParse::get_formula`].
 /// Use [`StmtParse::default`] to get an initial state.
 /// Like for several other phases, this occurs in parallel.
-pub(crate) fn parse_statements<'a>(
+pub(crate) fn parse_statements(
     stmt_parse: &mut StmtParse,
-    segments: &'a Arc<SegmentSet>,
+    segments: &Arc<SegmentSet>,
     nset: &Arc<Nameset>,
     grammar: &Arc<Grammar>,
 ) {

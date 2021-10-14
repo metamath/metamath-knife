@@ -66,7 +66,7 @@ impl error::Error for ExportError {
 }
 
 /// Export an mmp file for a given statement.
-pub fn export_mmp<W: Write>(
+pub(crate) fn export_mmp<W: Write>(
     sset: &SegmentSet,
     nset: &Nameset,
     scope: &ScopeResult,
@@ -95,7 +95,7 @@ pub fn export_mmp<W: Write>(
 }
 
 /// Export an mmp file for a given proof tree.
-pub fn export_mmp_proof_tree<W: Write>(
+fn export_mmp_proof_tree<W: Write>(
     sset: &SegmentSet,
     nset: &Nameset,
     scope: &ScopeResult,

@@ -105,7 +105,6 @@ use crate::grammar;
 use crate::grammar::Grammar;
 use crate::grammar::StmtParse;
 use crate::nameck::Nameset;
-use crate::outline;
 use crate::outline::OutlineNode;
 use crate::parser::StatementRef;
 use crate::scopeck;
@@ -471,26 +470,29 @@ impl Database {
     ///
     /// Unlike the other accessors, this is not lazy (subject to change when the
     /// modification API goes in.)
-    pub fn parse_result(&mut self) -> &Arc<SegmentSet> {
+    pub(crate) fn parse_result(&self) -> &Arc<SegmentSet> {
         self.segments.as_ref().unwrap()
     }
 
     /// Calculates and returns the name to definition lookup table.
-    pub fn name_result(&mut self) -> &Arc<Nameset> {
+    pub fn name_pass(&mut self) -> &Arc<Nameset> {
         if self.nameset.is_none() {
             time(&self.options.clone(), "nameck", || {
-                if self.prev_nameset.is_none() {
-                    self.prev_nameset = Some(Arc::new(Nameset::new()));
-                }
-                let pr = self.parse_result().clone();
-                {
-                    let ns = Arc::make_mut(self.prev_nameset.as_mut().unwrap());
-                    ns.update(&pr);
-                }
-                self.nameset = self.prev_nameset.clone();
+                let mut ns = self.prev_nameset.take().unwrap_or_default();
+                let pr = self.parse_result();
+                Arc::make_mut(&mut ns).update(pr);
+                self.prev_nameset = Some(ns.clone());
+                self.nameset = Some(ns);
             });
         }
 
+        self.name_result()
+    }
+
+    /// Returns the name to definition lookup table.
+    /// Panics if [`Database::name_pass`] was not previously called.
+    #[must_use]
+    pub fn name_result(&self) -> &Arc<Nameset> {
         self.nameset.as_ref().unwrap()
     }
 
@@ -499,24 +501,28 @@ impl Database {
     ///
     /// All logical properties of the database (as opposed to surface syntactic
     /// properties) can be obtained from this object.
-    pub fn scope_result(&mut self) -> &Arc<ScopeResult> {
+    pub fn scope_pass(&mut self) -> &Arc<ScopeResult> {
         if self.scopes.is_none() {
-            self.name_result();
+            self.name_pass();
             time(&self.options.clone(), "scopeck", || {
-                if self.prev_scopes.is_none() {
-                    self.prev_scopes = Some(Arc::new(ScopeResult::default()));
-                }
-
-                let parse = self.parse_result().clone();
-                let name = self.name_result().clone();
-                {
-                    let ns = Arc::make_mut(self.prev_scopes.as_mut().unwrap());
-                    scopeck::scope_check(ns, &parse, &name);
-                }
-                self.scopes = self.prev_scopes.clone();
+                let mut sc = self.prev_scopes.take().unwrap_or_default();
+                let parse = self.parse_result();
+                let name = self.name_result();
+                scopeck::scope_check(Arc::make_mut(&mut sc), parse, name);
+                self.prev_scopes = Some(sc.clone());
+                self.scopes = Some(sc);
             });
         }
+        self.scope_result()
+    }
 
+    /// Returns the frames for this database, i.e. the actual logical system.
+    /// Panics if [`Database::scope_pass`] was not previously called.
+    ///
+    /// All logical properties of the database (as opposed to surface syntactic
+    /// properties) can be obtained from this object.
+    #[must_use]
+    pub fn scope_result(&self) -> &Arc<ScopeResult> {
         self.scopes.as_ref().unwrap()
     }
 
@@ -524,71 +530,97 @@ impl Database {
     ///
     /// This is an optimized verifier which returns no useful information other
     /// than error diagnostics.  It does not save any parsed proof data.
-    pub fn verify_result(&mut self) -> &Arc<VerifyResult> {
+    pub fn verify_pass(&mut self) -> &Arc<VerifyResult> {
         if self.verify.is_none() {
-            self.name_result();
-            self.scope_result();
+            self.name_pass();
+            self.scope_pass();
             time(&self.options.clone(), "verify", || {
-                if self.prev_verify.is_none() {
-                    self.prev_verify = Some(Arc::new(VerifyResult::default()));
-                }
-
-                let parse = self.parse_result().clone();
-                let scope = self.scope_result().clone();
-                let name = self.name_result().clone();
-                {
-                    let ver = Arc::make_mut(self.prev_verify.as_mut().unwrap());
-                    verify::verify(ver, &parse, &name, &scope);
-                }
-                self.verify = self.prev_verify.clone();
+                let mut ver = self.prev_verify.take().unwrap_or_default();
+                let parse = self.parse_result();
+                let scope = self.scope_result();
+                let name = self.name_result();
+                verify::verify(Arc::make_mut(&mut ver), parse, name, scope);
+                self.prev_verify = Some(ver.clone());
+                self.verify = Some(ver);
             });
         }
+        self.verify_result()
+    }
+
+    /// Calculates and returns verification information for the database.
+    ///
+    /// This is an optimized verifier which returns no useful information other
+    /// than error diagnostics.  It does not save any parsed proof data.
+    #[must_use]
+    pub fn verify_result(&self) -> &Arc<VerifyResult> {
         self.verify.as_ref().unwrap()
     }
 
-    /// Returns the root node of the outline
-    pub fn outline_result(&mut self) -> &Arc<OutlineNode> {
+    /// Computes and returns the root node of the outline.
+    pub fn outline_pass(&mut self) -> &Arc<OutlineNode> {
         if self.outline.is_none() {
             time(&self.options.clone(), "outline", || {
                 let parse = self.parse_result().clone();
                 let mut outline = OutlineNode::default();
-                outline::build_outline(&mut outline, &parse);
+                parse.build_outline(&mut outline);
                 self.outline = Some(Arc::new(outline));
             })
         }
+        self.outline_result()
+    }
+
+    /// Returns the root node of the outline.
+    /// Panics if [`Database::outline_pass`] was not previously called.
+    #[must_use]
+    pub fn outline_result(&self) -> &Arc<OutlineNode> {
         self.outline.as_ref().unwrap()
     }
 
-    /// Builds and returns the grammar
-    pub fn grammar_result(&mut self) -> &Arc<Grammar> {
+    /// Builds and returns the grammar.
+    pub fn grammar_pass(&mut self) -> &Arc<Grammar> {
         if self.grammar.is_none() {
-            self.name_result();
-            self.scope_result();
+            self.name_pass();
+            self.scope_pass();
             time(&self.options.clone(), "grammar", || {
-                let parse = self.parse_result().clone();
-                let name = self.name_result().clone();
+                let parse = self.parse_result();
+                let name = self.name_result();
                 let mut grammar = Grammar::default();
-                grammar::build_grammar(&mut grammar, &parse, &name);
+                grammar::build_grammar(&mut grammar, parse, name);
                 self.grammar = Some(Arc::new(grammar));
             })
         }
+        self.grammar_result()
+    }
+
+    /// Returns the grammar.
+    /// Panics if [`Database::grammar_pass`] was not previously called.
+    #[must_use]
+    pub fn grammar_result(&self) -> &Arc<Grammar> {
         self.grammar.as_ref().unwrap()
     }
 
-    /// Parses the statements using the grammar
-    pub fn stmt_parse_result(&mut self) -> &Arc<StmtParse> {
+    /// Parses the statements using the grammar.
+    pub fn stmt_parse(&mut self) -> &Arc<StmtParse> {
         if self.stmt_parse.is_none() {
-            self.name_result();
-            self.scope_result();
+            self.name_pass();
+            self.scope_pass();
+            self.grammar_pass();
             time(&self.options.clone(), "stmt_parse", || {
-                let parse = self.parse_result().clone();
-                let name = self.name_result().clone();
-                let grammar = self.grammar_result().clone();
+                let parse = self.parse_result();
+                let name = self.name_result();
+                let grammar = self.grammar_result();
                 let mut stmt_parse = StmtParse::default();
-                grammar::parse_statements(&mut stmt_parse, &parse, &name, &grammar);
+                grammar::parse_statements(&mut stmt_parse, parse, name, grammar);
                 self.stmt_parse = Some(Arc::new(stmt_parse));
             })
         }
+        self.stmt_parse_result()
+    }
+
+    /// Returns the statements parsed using the grammar.
+    /// Panics if [`Database::stmt_parse`] was not previously called.
+    #[must_use]
+    pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
         self.stmt_parse.as_ref().unwrap()
     }
 
@@ -599,83 +631,78 @@ impl Database {
     }
 
     /// Get a statement by label.
-    pub fn statement(&mut self, name: &str) -> Option<StatementRef<'_>> {
+    #[must_use]
+    pub fn statement(&self, name: &str) -> Option<StatementRef<'_>> {
         let lookup = self.name_result().lookup_label(name.as_bytes())?;
         Some(self.parse_result().statement(lookup.address))
     }
 
     /// Export an mmp file for a given statement.
-    pub fn export(&mut self, stmt: &str) {
-        time(&self.options.clone(), "export", || {
-            let parse = self.parse_result().clone();
-            let scope = self.scope_result().clone();
-            let name = self.name_result().clone();
+    pub fn export(&self, stmt: &str) {
+        time(&self.options, "export", || {
+            let parse = self.parse_result();
+            let scope = self.scope_result();
+            let name = self.name_result();
             let sref = self.statement(stmt).unwrap_or_else(|| {
                 panic!("Label {} did not correspond to an existing statement", stmt)
             });
 
             File::create(format!("{}.mmp", stmt))
                 .map_err(export::ExportError::Io)
-                .and_then(|mut file| export::export_mmp(&parse, &name, &scope, sref, &mut file))
+                .and_then(|mut file| export::export_mmp(parse, name, scope, sref, &mut file))
                 .unwrap()
         })
     }
 
     /// Export the grammar of this database in DOT format.
     #[cfg(feature = "dot")]
-    pub fn export_grammar_dot(&mut self) {
-        time(&self.options.clone(), "export_grammar_dot", || {
-            let name = self.name_result().clone();
-            let grammar = self.grammar_result().clone();
+    pub fn export_grammar_dot(&self) {
+        time(&self.options, "export_grammar_dot", || {
+            let name = self.name_result();
+            let grammar = self.grammar_result();
 
             File::create("grammar.dot")
                 .map_err(export::ExportError::Io)
-                .and_then(|mut file| grammar.export_dot(&name, &mut file))
+                .and_then(|mut file| grammar.export_dot(name, &mut file))
                 .unwrap()
         })
     }
 
     /// Dump the grammar of this database.
-    pub fn print_grammar(&mut self) {
-        time(&self.options.clone(), "print_grammar", || {
-            let name = self.name_result().clone();
-            let grammar = self.grammar_result().clone();
-            grammar.dump(&name);
+    pub fn print_grammar(&self) {
+        time(&self.options, "print_grammar", || {
+            let name = self.name_result();
+            let grammar = self.grammar_result();
+            grammar.dump(name);
         })
     }
 
     /// Dump the formulas of this database.
-    pub fn print_formula(&mut self) {
-        time(&self.options.clone(), "print_formulas", || {
-            let parse = self.parse_result().clone();
-            let name = self.name_result().clone();
-            let stmt_parse = self.stmt_parse_result().clone();
-            stmt_parse.dump(&parse, &name);
+    pub fn print_formula(&self) {
+        time(&self.options, "print_formulas", || {
+            self.stmt_parse_result().dump(self);
         })
     }
 
     /// Verify that printing the formulas of this database gives back the original formulas
-    pub fn verify_parse_stmt(&mut self) {
-        time(&self.options.clone(), "verify_parse_stmt", || {
-            let parse = self.parse_result().clone();
-            let name = self.name_result().clone();
-            let stmt_parse = self.stmt_parse_result().clone();
-            if let Err(diag) = stmt_parse.verify(&parse, &name) {
+    pub fn verify_parse_stmt(&self) {
+        time(&self.options, "verify_parse_stmt", || {
+            if let Err(diag) = self.stmt_parse_result().verify(self) {
                 drop(diag::to_annotations(self.parse_result(), vec![diag]));
             }
         })
     }
 
     /// Dump the outline of this database.
-    pub fn print_outline(&mut self) {
-        time(&self.options.clone(), "print_outline", || {
-            let root_node = self.outline_result().clone();
-            self.print_outline_node(&root_node, 0);
+    pub fn print_outline(&self) {
+        time(&self.options, "print_outline", || {
+            let root_node = self.outline_result();
+            self.print_outline_node(root_node, 0);
         })
     }
 
     /// Dump the outline of this database.
-    fn print_outline_node(&mut self, node: &OutlineNode, indent: usize) {
+    fn print_outline_node(&self, node: &OutlineNode, indent: usize) {
         // let indent = (node.level as usize) * 3
         println!(
             "{:indent$} {:?} {:?}",
@@ -703,16 +730,16 @@ impl Database {
             diags.extend(self.parse_result().parse_diagnostics());
         }
         if types.contains(&DiagnosticClass::Scope) {
-            diags.extend(self.scope_result().diagnostics());
+            diags.extend(self.scope_pass().diagnostics());
         }
         if types.contains(&DiagnosticClass::Verify) {
-            diags.extend(self.verify_result().diagnostics());
+            diags.extend(self.verify_pass().diagnostics());
         }
         if types.contains(&DiagnosticClass::Grammar) {
-            diags.extend(self.grammar_result().diagnostics());
+            diags.extend(self.grammar_pass().diagnostics());
         }
         if types.contains(&DiagnosticClass::StmtParse) {
-            diags.extend(self.stmt_parse_result().diagnostics());
+            diags.extend(self.stmt_parse().diagnostics());
         }
         time(&self.options.clone(), "diag", || {
             diag::to_annotations(self.parse_result(), diags)

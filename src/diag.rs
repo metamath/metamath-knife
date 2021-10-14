@@ -166,7 +166,7 @@ pub struct Notation {
 
 /// Converts a collection of raw diagnostics to a notation list before output.
 #[must_use]
-pub fn to_annotations(
+pub(crate) fn to_annotations(
     sset: &SegmentSet,
     mut diags: Vec<(StatementAddress, Diagnostic)>,
 ) -> Vec<Notation> {

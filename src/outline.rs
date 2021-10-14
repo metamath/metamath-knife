@@ -83,15 +83,17 @@ impl OutlineNode {
 }
 
 /// Builds the overall outline from the different segments
-pub fn build_outline(node: &mut OutlineNode, sset: &Arc<SegmentSet>) {
-    let segments = sset.segments();
-    assert!(!segments.is_empty(), "Parse returned no segment!");
-    *node = OutlineNode::root_node(&segments);
+impl SegmentSet {
+    pub(crate) fn build_outline(&self, node: &mut OutlineNode) {
+        let segments = self.segments();
+        assert!(!segments.is_empty(), "Parse returned no segment!");
+        *node = OutlineNode::root_node(&segments);
 
-    for vsr in &segments {
-        for heading in &vsr.segment.outline {
-            let new_node = OutlineNode::from_heading_def(heading, vsr.id);
-            node.add_child(new_node);
+        for vsr in &segments {
+            for heading in &vsr.segment.outline {
+                let new_node = OutlineNode::from_heading_def(heading, vsr.id);
+                node.add_child(new_node);
+            }
         }
     }
 }

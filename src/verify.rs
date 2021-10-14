@@ -870,7 +870,7 @@ fn verify_segment(
 }
 
 /// Calculates or updates the verification result for a database.
-pub fn verify(
+pub(crate) fn verify(
     result: &mut VerifyResult,
     segments: &Arc<SegmentSet>,
     nset: &Arc<Nameset>,
@@ -909,7 +909,7 @@ pub fn verify(
 
 /// Parse a single $p statement, returning the result of the given
 /// proof builder, or an error if the proof is faulty
-pub fn verify_one<P: ProofBuilder>(
+pub(crate) fn verify_one<P: ProofBuilder>(
     sset: &SegmentSet,
     nset: &Nameset,
     scopes: &ScopeResult,
