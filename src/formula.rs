@@ -53,12 +53,12 @@ pub type Label = Atom;
 #[derive(Debug)]
 pub struct Substitutions(HashMap<Label, Formula>);
 
-impl Index<&Label> for Substitutions {
+impl Index<Label> for Substitutions {
     type Output = Formula;
 
     #[inline]
-    fn index(&self, label: &Label) -> &Self::Output {
-        &self.0[label]
+    fn index(&self, label: Label) -> &Self::Output {
+        &self.0[&label]
     }
 }
 
