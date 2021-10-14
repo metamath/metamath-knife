@@ -373,7 +373,7 @@ impl<T> Promise<T> {
 #[derive(Debug)]
 pub struct Database {
     options: Arc<DbOptions>,
-    segments: Option<Arc<SegmentSet>>,
+    segments: Arc<SegmentSet>,
     /// We track the "current" and "previous" for all known passes, so that each
     /// pass can use its most recent results for optimized incremental
     /// processing.  Any change to the segment vector zeroizes the current
@@ -414,7 +414,7 @@ impl Drop for Database {
             self.scopes = None;
             self.prev_nameset = None;
             self.nameset = None;
-            self.segments = None;
+            Arc::make_mut(&mut self.segments).clear();
             self.outline = None;
         });
     }
@@ -430,7 +430,7 @@ impl Database {
         let options = Arc::new(options);
         let exec = Executor::new(options.jobs);
         Database {
-            segments: Some(Arc::new(SegmentSet::new(options.clone(), &exec))),
+            segments: Arc::new(SegmentSet::new(options.clone(), &exec)),
             options,
             nameset: None,
             scopes: None,
@@ -475,7 +475,7 @@ impl Database {
     /// appropriate.
     pub fn parse(&mut self, start: String, text: Vec<(String, Vec<u8>)>) {
         time(&self.options.clone(), "parse", || {
-            Arc::make_mut(self.segments.as_mut().unwrap()).read(start, text);
+            Arc::make_mut(&mut self.segments).read(start, text);
             self.nameset = None;
             self.scopes = None;
             self.verify = None;
@@ -488,8 +488,8 @@ impl Database {
     ///
     /// Unlike the other accessors, this is not lazy (subject to change when the
     /// modification API goes in.)
-    pub(crate) fn parse_result(&self) -> &Arc<SegmentSet> {
-        self.segments.as_ref().unwrap()
+    pub(crate) const fn parse_result(&self) -> &Arc<SegmentSet> {
+        &self.segments
     }
 
     /// Calculates and returns the name to definition lookup table.
@@ -644,8 +644,8 @@ impl Database {
 
     /// A getter method which does not build the outline
     #[must_use]
-    pub const fn get_outline(&self) -> &Option<Arc<OutlineNode>> {
-        &self.outline
+    pub const fn get_outline(&self) -> Option<&Arc<OutlineNode>> {
+        self.outline.as_ref()
     }
 
     /// Get a statement by label.

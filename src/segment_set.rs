@@ -176,6 +176,14 @@ impl SegmentSet {
         }
     }
 
+    /// Reset the segment set to the empty state.
+    pub(crate) fn clear(&mut self) {
+        *Arc::make_mut(&mut self.order) = SegmentOrder::new();
+        self.segments = new_map();
+        self.parse_cache = new_map();
+        self.file_cache = new_map();
+    }
+
     /// Iterates over all loaded segments in logical order.
     pub(crate) fn segments(&self) -> Vec<SegmentRef<'_>> {
         // this might be an actual iterator in the future if needs be
