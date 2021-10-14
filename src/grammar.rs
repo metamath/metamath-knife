@@ -1078,7 +1078,7 @@ impl Grammar {
     pub fn parse_formula(
         &self,
         symbol_iter: &mut impl Iterator<Item = Symbol>,
-        expected_typecodes: Box<[TypeCode]>,
+        expected_typecodes: &[TypeCode],
         nset: &Arc<Nameset>,
     ) -> Result<Formula, Diagnostic> {
         struct StackElement {
@@ -1091,7 +1091,11 @@ impl Grammar {
         let mut ix;
         let mut e = StackElement {
             node_id: self.root,
-            expected_typecodes,
+            expected_typecodes: expected_typecodes
+                .iter()
+                .copied()
+                .collect::<Vec<TypeCode>>()
+                .into_boxed_slice(),
         };
         let mut stack = vec![];
         loop {
@@ -1234,7 +1238,7 @@ impl Grammar {
             .math_iter()
             .skip(1)
             .map(|token| names.lookup_symbol(token.slice).unwrap().atom);
-        let formula = self.parse_formula(&mut symbol_iter, Box::new([expected_typecode]), nset)?;
+        let formula = self.parse_formula(&mut symbol_iter, &[expected_typecode], nset)?;
         Ok(Some(formula))
     }
 

@@ -84,11 +84,7 @@ fn test_parse_formula() {
     let close_parens = names.lookup_symbol(b")").unwrap().atom;
     let fmla_vec = vec![a, eq, open_parens, b, plus, a, close_parens];
     let formula = grammar
-        .parse_formula(
-            &mut fmla_vec.clone().into_iter(),
-            Box::new([wff, class]),
-            &names,
-        )
+        .parse_formula(&mut fmla_vec.clone().into_iter(), &[wff, class], &names)
         .unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
     assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
