@@ -103,6 +103,7 @@ fn main() {
         }
 
         if matches.is_present("verify_parse_stmt") {
+            db.stmt_parse();
             db.verify_parse_stmt();
         }
 
