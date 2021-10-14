@@ -11,6 +11,7 @@ use crate::proof::ProofTreeArray;
 use crate::proof::ProofTreePrinter;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
+use crate::Database;
 use regex::Regex;
 use std::error;
 use std::fmt;
@@ -62,6 +63,20 @@ impl error::Error for ExportError {
             ExportError::Verify(_) => None,
             ExportError::Format(ref err) => Some(err),
         }
+    }
+}
+
+impl Database {
+    /// Export an mmp file for a given statement.
+    pub fn export_mmp<W: Write>(
+        &self,
+        stmt: StatementRef<'_>,
+        out: &mut W,
+    ) -> Result<(), ExportError> {
+        let sset = self.parse_result();
+        let nset = self.name_result();
+        let scope = self.scope_result();
+        export_mmp(sset, nset, scope, stmt, out)
     }
 }
 
