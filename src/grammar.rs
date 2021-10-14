@@ -1077,7 +1077,7 @@ impl Grammar {
     /// Parses the given list of symbols into a formula syntax tree.
     pub fn parse_formula(
         &self,
-        symbol_iter: &mut dyn Iterator<Item = Symbol>,
+        symbol_iter: &mut impl Iterator<Item = Symbol>,
         expected_typecodes: Box<[TypeCode]>,
         nset: &Arc<Nameset>,
     ) -> Result<Formula, Diagnostic> {

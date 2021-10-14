@@ -142,7 +142,7 @@ impl Formula {
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         &self,
         stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = Vec<I>>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
         sset: &Arc<SegmentSet>,
         nset: &Arc<Nameset>,
         scope: &Arc<ScopeResult>,
