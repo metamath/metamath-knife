@@ -24,7 +24,6 @@ use crate::parser::as_str;
 use crate::parser::SymbolType;
 use crate::parser::TokenIter;
 use crate::scopeck::Hyp;
-use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::tree::NodeId;
 use crate::tree::SiblingIter;
@@ -92,81 +91,6 @@ impl Formula {
     #[must_use]
     pub const fn as_ref<'a>(&'a self, db: &'a Database) -> FormulaRef<'a> {
         FormulaRef { db, formula: self }
-    }
-
-    /// Appends this formula to the provided stack buffer.
-    ///
-    /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,
-    /// using the high bit to mark the end of each token.
-    /// This function creates such a byte string, stores it in the provided buffer,
-    /// and returns the range the newly added string occupies on the buffer.
-    ///
-    /// See [`crate::verify`] for more about this format.
-    fn append_to_stack_buffer(&self, stack_buffer: &mut Vec<u8>, db: &Database) -> Range<usize> {
-        let tos = stack_buffer.len();
-        let nset = &**db.name_result();
-        for symbol in self.as_ref(db) {
-            fast_extend(stack_buffer, nset.atom_name(symbol));
-            *stack_buffer.last_mut().unwrap() |= 0x80;
-        }
-        let n_tos = stack_buffer.len();
-        tos..n_tos
-    }
-
-    /// Builds the syntax proof for this formula.
-    ///
-    /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
-    /// This methos builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
-    /// stores that proof tree in the provided [`ProofBuilder`] `arr`,
-    /// and returns the index of that `ProofTree` within `arr`.
-    pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
-        &self,
-        stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
-        db: &Database,
-    ) -> I {
-        let nset = db.name_result();
-        let scope = db.scope_result();
-        self.sub_build_syntax_proof(self.root, stack_buffer, arr, db, nset, scope)
-    }
-
-    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
-    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
-    // Formulas children nodes are stored in the order of appearance of the variables
-    // in the formula, which is efficient when parsing or rendering the formula from
-    // or into a string of tokens. However, proofs require children nodes
-    // sorted in the order of mandatory floating hypotheses.
-    // This method performs this mapping.
-    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
-        &self,
-        node_id: NodeId,
-        stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
-        db: &Database,
-        nset: &Nameset,
-        scope: &ScopeResult,
-    ) -> I {
-        let token = nset.atom_name(self.tree[node_id]);
-        let address = nset.lookup_label(token).unwrap().address;
-        let frame = scope.get(token).unwrap();
-        let children_hyps = self
-            .tree
-            .children_iter(node_id)
-            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr, db, nset, scope))
-            .collect::<Box<[I]>>();
-        let hyps = frame
-            .hypotheses
-            .iter()
-            .filter_map(|hyp| {
-                if let Hyp::Floating(_sa, index, _) = hyp {
-                    Some(children_hyps[*index])
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let range = self.append_to_stack_buffer(stack_buffer, db);
-        arr.build(address, hyps, stack_buffer, range)
     }
 
     /// Debug only, dumps the internal structure of the formula.
@@ -345,7 +269,7 @@ impl<'a> FormulaRef<'a> {
     /// Convert the formula back to a flat list of symbols
     /// This is slow and shall not normally be called except for showing a result to the user.
     #[must_use]
-    pub(crate) fn iter(&self) -> Flatten<'a> {
+    pub(crate) fn iter(self) -> Flatten<'a> {
         let mut f = Flatten {
             formula: self.formula,
             stack: vec![],
@@ -354,6 +278,77 @@ impl<'a> FormulaRef<'a> {
         };
         f.step_into(self.root);
         f
+    }
+
+    /// Appends this formula to the provided stack buffer.
+    ///
+    /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,
+    /// using the high bit to mark the end of each token.
+    /// This function creates such a byte string, stores it in the provided buffer,
+    /// and returns the range the newly added string occupies on the buffer.
+    ///
+    /// See [`crate::verify`] for more about this format.
+    fn append_to_stack_buffer(self, stack_buffer: &mut Vec<u8>) -> Range<usize> {
+        let tos = stack_buffer.len();
+        let nset = &**self.db.name_result();
+        for symbol in self {
+            fast_extend(stack_buffer, nset.atom_name(symbol));
+            *stack_buffer.last_mut().unwrap() |= 0x80;
+        }
+        let n_tos = stack_buffer.len();
+        tos..n_tos
+    }
+
+    /// Builds the syntax proof for this formula.
+    ///
+    /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
+    /// This methos builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
+    /// stores that proof tree in the provided [`ProofBuilder`] `arr`,
+    /// and returns the index of that `ProofTree` within `arr`.
+    pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
+        self,
+        stack_buffer: &mut Vec<u8>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+    ) -> I {
+        self.sub_build_syntax_proof(self.root, stack_buffer, arr)
+    }
+
+    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
+    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
+    // Formulas children nodes are stored in the order of appearance of the variables
+    // in the formula, which is efficient when parsing or rendering the formula from
+    // or into a string of tokens. However, proofs require children nodes
+    // sorted in the order of mandatory floating hypotheses.
+    // This method performs this mapping.
+    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
+        self,
+        node_id: NodeId,
+        stack_buffer: &mut Vec<u8>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+    ) -> I {
+        let nset = self.db.name_result();
+
+        let token = nset.atom_name(self.tree[node_id]);
+        let address = nset.lookup_label(token).unwrap().address;
+        let frame = self.db.scope_result().get(token).unwrap();
+        let children_hyps = self
+            .tree
+            .children_iter(node_id)
+            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr))
+            .collect::<Box<[I]>>();
+        let hyps = frame
+            .hypotheses
+            .iter()
+            .filter_map(|hyp| {
+                if let Hyp::Floating(_sa, index, _) = hyp {
+                    Some(children_hyps[*index])
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let range = self.append_to_stack_buffer(stack_buffer);
+        arr.build(address, hyps, stack_buffer, range)
     }
 }
 
