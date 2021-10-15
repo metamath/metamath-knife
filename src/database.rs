@@ -565,7 +565,8 @@ impl Database {
         self.verify_result()
     }
 
-    /// Calculates and returns verification information for the database.
+    /// Returns verification information for the database.
+    /// Panics if [`Database::verify_pass`] was not previously called.
     ///
     /// This is an optimized verifier which returns no useful information other
     /// than error diagnostics.  It does not save any parsed proof data.

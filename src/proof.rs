@@ -11,6 +11,7 @@ use crate::util::new_map;
 use crate::util::HashMap;
 use crate::verify::verify_one;
 use crate::verify::ProofBuilder;
+use crate::Database;
 use std::cmp::max;
 use std::cmp::Ord;
 use std::cmp::Ordering;
@@ -126,14 +127,9 @@ impl ProofTreeArray {
     /// Create a proof tree array from the proof a single $p statement,
     /// returning the result of the given proof builder, or an error if the
     /// proof is faulty
-    pub(crate) fn new(
-        sset: &SegmentSet,
-        nset: &Nameset,
-        scopes: &ScopeResult,
-        stmt: StatementRef<'_>,
-    ) -> Result<ProofTreeArray, Diagnostic> {
+    pub(crate) fn new(db: &Database, stmt: StatementRef<'_>) -> Result<ProofTreeArray, Diagnostic> {
         let mut arr = ProofTreeArray::default();
-        arr.qed = verify_one(sset, nset, scopes, &mut arr, stmt)?;
+        arr.qed = verify_one(db, &mut arr, stmt)?;
         arr.calc_indent();
         Ok(arr)
     }
