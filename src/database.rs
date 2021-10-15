@@ -509,6 +509,7 @@ impl Database {
 
     /// Returns the name to definition lookup table.
     /// Panics if [`Database::name_pass`] was not previously called.
+    #[inline]
     #[must_use]
     pub fn name_result(&self) -> &Arc<Nameset> {
         self.nameset.as_ref().unwrap()
@@ -539,6 +540,7 @@ impl Database {
     ///
     /// All logical properties of the database (as opposed to surface syntactic
     /// properties) can be obtained from this object.
+    #[inline]
     #[must_use]
     pub fn scope_result(&self) -> &Arc<ScopeResult> {
         self.scopes.as_ref().unwrap()
@@ -570,6 +572,7 @@ impl Database {
     ///
     /// This is an optimized verifier which returns no useful information other
     /// than error diagnostics.  It does not save any parsed proof data.
+    #[inline]
     #[must_use]
     pub fn verify_result(&self) -> &Arc<VerifyResult> {
         self.verify.as_ref().unwrap()
@@ -590,6 +593,7 @@ impl Database {
 
     /// Returns the root node of the outline.
     /// Panics if [`Database::outline_pass`] was not previously called.
+    #[inline]
     #[must_use]
     pub fn outline_result(&self) -> &Arc<OutlineNode> {
         self.outline.as_ref().unwrap()
@@ -601,11 +605,7 @@ impl Database {
             self.name_pass();
             self.scope_pass();
             time(&self.options.clone(), "grammar", || {
-                let parse = self.parse_result();
-                let name = self.name_result();
-                let mut grammar = Grammar::default();
-                grammar::build_grammar(&mut grammar, parse, name);
-                self.grammar = Some(Arc::new(grammar));
+                self.grammar = Some(Arc::new(Grammar::new(self)));
             })
         }
         self.grammar_result()
@@ -613,6 +613,7 @@ impl Database {
 
     /// Returns the grammar.
     /// Panics if [`Database::grammar_pass`] was not previously called.
+    #[inline]
     #[must_use]
     pub fn grammar_result(&self) -> &Arc<Grammar> {
         self.grammar.as_ref().unwrap()
@@ -638,12 +639,14 @@ impl Database {
 
     /// Returns the statements parsed using the grammar.
     /// Panics if [`Database::stmt_parse`] was not previously called.
+    #[inline]
     #[must_use]
     pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
         self.stmt_parse.as_ref().unwrap()
     }
 
     /// A getter method which does not build the outline
+    #[inline]
     #[must_use]
     pub const fn get_outline(&self) -> Option<&Arc<OutlineNode>> {
         self.outline.as_ref()
@@ -687,9 +690,7 @@ impl Database {
     /// Dump the grammar of this database.
     pub fn print_grammar(&self) {
         time(&self.options, "print_grammar", || {
-            let name = self.name_result();
-            let grammar = self.grammar_result();
-            grammar.dump(name);
+            self.grammar_result().dump(self);
         })
     }
 

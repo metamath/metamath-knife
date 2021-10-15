@@ -291,8 +291,8 @@ impl GrammarNode {
     }
 }
 
-struct GrammarNodeDebug<'a>(&'a GrammarNode, &'a Nameset);
-impl fmt::Debug for GrammarNodeDebug<'_> {
+struct GrammarNodeRef<'a>(&'a GrammarNode, &'a Nameset);
+impl fmt::Debug for GrammarNodeRef<'_> {
     /// Lists the contents of the grammar node
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let nset = self.1;
@@ -352,18 +352,20 @@ impl fmt::Debug for GrammarNodeDebug<'_> {
     }
 }
 
-struct GrammarNodeIdDebug<'a>(&'a Grammar, NodeId, &'a Nameset);
-impl fmt::Debug for GrammarNodeIdDebug<'_> {
+struct GrammarNodeIdRef<'a> {
+    grammar: &'a Grammar,
+    node_id: NodeId,
+    nset: &'a Nameset,
+}
+
+impl fmt::Debug for GrammarNodeIdRef<'_> {
     /// Lists the contents of the grammar node, given the grammar and a node id
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let grammar = self.0;
-        let node_id = self.1;
-        let nset = self.2;
         write!(
             f,
             "{}: {:?}",
-            node_id,
-            GrammarNodeDebug(&grammar.nodes.0[node_id], nset)
+            self.node_id,
+            GrammarNodeRef(&self.grammar.nodes.0[self.node_id], self.nset)
         )
     }
 }
@@ -640,7 +642,7 @@ impl Grammar {
         from_typecode: TypeCode,
         to_typecode: TypeCode,
         label: Label,
-        nset: &Nameset,
+        db: &Database,
     ) -> Result<(), Diagnostic> {
         let len = self.nodes.len();
         for node_id in 0..len {
@@ -651,7 +653,7 @@ impl Grammar {
                         None => {
                             // No branch exist for the converted type: create one, with a leaf label.
                             debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
-                            debug!("{:?}", GrammarNodeIdDebug(self, node_id, nset));
+                            debug!("{:?}", self.node_id(db, node_id));
                             let mut leaf_label = ref_next_node.leaf_label;
                             leaf_label.insert(0, Reduce::new(label, 1));
                             self.add_branch(
@@ -671,11 +673,8 @@ impl Grammar {
                                 "Type Conv copying to {} node id {}",
                                 next_node_id, existing_next_node.next_node_id
                             );
-                            debug!("{:?}", GrammarNodeIdDebug(self, next_node_id, nset));
-                            debug!(
-                                "{:?}",
-                                GrammarNodeIdDebug(self, existing_next_node.next_node_id, nset)
-                            );
+                            debug!("{:?}", self.node_id(db, next_node_id));
+                            debug!("{:?}", self.node_id(db, existing_next_node.next_node_id));
                             let existing_next_node_id = existing_next_node.next_node_id;
                             self.nodes
                                 .copy_branches(
@@ -717,15 +716,15 @@ impl Grammar {
         &mut self,
         add_from_node_id: NodeId,
         add_to_node_id: NodeId,
-        nset: &Nameset,
+        db: &Database,
         mut stored_reduces: ReduceVec,
         make_final: F,
     ) where
         F: FnOnce(&ReduceVec, TypeCode) -> NextNode + Copy,
     {
         debug!("Clone {} to {}", add_from_node_id, add_to_node_id);
-        debug!("{:?}", GrammarNodeIdDebug(self, add_from_node_id, nset));
-        debug!("{:?}", GrammarNodeIdDebug(self, add_to_node_id, nset));
+        debug!("{:?}", self.node_id(db, add_from_node_id));
+        debug!("{:?}", self.node_id(db, add_to_node_id));
         let map = &self.get_branch(add_from_node_id).clone(); // can we prevent cloning here?
         for &stype in &[SymbolType::Constant, SymbolType::Variable] {
             if stype == SymbolType::Variable {
@@ -795,7 +794,7 @@ impl Grammar {
                     self.clone_branches(
                         next_node.next_node_id,
                         new_next_node_id,
-                        nset,
+                        db,
                         new_stored_reduces,
                         make_final,
                     );
@@ -838,7 +837,7 @@ impl Grammar {
         to_node: NodeId,
         symbol: Symbol,
         stype: SymbolType,
-        nset: &Nameset,
+        db: &Database,
     ) -> NodeId {
         let next_node_id_from_root = self
             .nodes
@@ -853,7 +852,7 @@ impl Grammar {
         self.clone_branches(
             next_node_id_from_root,
             new_node_id,
-            nset,
+            db,
             ReduceVec::new(),
             |rv, t| {
                 node_from_root
@@ -881,7 +880,7 @@ impl Grammar {
         &mut self,
         prefix: &[Token],
         shadows: &[Token],
-        nset: &Nameset,
+        db: &Database,
         names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
         let mut node_id = self.root;
@@ -894,7 +893,11 @@ impl Grammar {
             }
             // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
             if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
-                let prefix_symbol = nset.lookup_symbol(prefix[index].as_ref()).unwrap().atom;
+                let prefix_symbol = db
+                    .name_result()
+                    .lookup_symbol(prefix[index].as_ref())
+                    .unwrap()
+                    .atom;
                 let next_node = map
                     .get(&(SymbolType::Constant, prefix_symbol))
                     .expect("Prefix cannot be parsed!");
@@ -940,7 +943,7 @@ impl Grammar {
                 .next_node(shadowing_atom, shadowing_stype)
             {
                 Some(next_node) => next_node.next_node_id,
-                None => self.expand_tree(add_from_node_id, shadowing_atom, shadowing_stype, nset),
+                None => self.expand_tree(add_from_node_id, shadowing_atom, shadowing_stype, db),
             }
         }
 
@@ -963,13 +966,7 @@ impl Grammar {
         };
         match self.nodes.get(add_from_node_id) {
             GrammarNode::Branch { .. } => {
-                self.clone_branches(
-                    add_from_node_id,
-                    node_id,
-                    nset,
-                    ReduceVec::new(),
-                    make_final,
-                );
+                self.clone_branches(add_from_node_id, node_id, db, ReduceVec::new(), make_final);
             }
             GrammarNode::Leaf { reduce, .. } => {
                 let rv = single_reduce(*reduce);
@@ -1000,12 +997,12 @@ impl Grammar {
     /// `
     fn handle_commands(
         &mut self,
-        sset: &SegmentSet,
-        nset: &Nameset,
+        db: &Database,
         names: &mut NameReader<'_>,
         type_conversions: &[(TypeCode, TypeCode, Label)],
     ) -> Result<(), (StatementAddress, Diagnostic)> {
-        for (address, command) in sset.parser_commands() {
+        let nset = db.name_result();
+        for (address, command) in db.parse_result().parser_commands() {
             assert!(!command.is_empty(), "Empty parser command!");
             if &command[0].as_ref() == b"syntax" {
                 if command.len() == 4 && &command[2].as_ref() == b"as" {
@@ -1027,7 +1024,7 @@ impl Grammar {
                     .expect("'=>' not present in 'garden_path' command!");
                 let (prefix, shadows) = command.split_at(split_index);
                 if let Err(diag) =
-                    self.handle_common_prefixes(&prefix[1..], &shadows[1..], nset, names)
+                    self.handle_common_prefixes(&prefix[1..], &shadows[1..], db, names)
                 {
                     return Err((address, diag));
                 }
@@ -1036,7 +1033,7 @@ impl Grammar {
             if &command[0].as_ref() == b"type_conversions" {
                 for (from_typecode, to_typecode, label) in type_conversions {
                     if let Err(diag) =
-                        self.perform_type_conversion(*from_typecode, *to_typecode, *label, nset)
+                        self.perform_type_conversion(*from_typecode, *to_typecode, *label, db)
                     {
                         return Err((address, diag));
                     }
@@ -1246,10 +1243,18 @@ impl Grammar {
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
-    pub fn dump(&self, nset: &Nameset) {
+    pub fn dump(&self, db: &Database) {
         println!("Grammar tree has {:?} nodes.", self.nodes.len());
         for i in 0..self.nodes.len() {
-            println!("{:?}", GrammarNodeIdDebug(self, i, nset));
+            println!("{:?}", self.node_id(db, i));
+        }
+    }
+
+    fn node_id<'a>(&'a self, db: &'a Database, node_id: NodeId) -> GrammarNodeIdRef<'a> {
+        GrammarNodeIdRef {
+            grammar: self,
+            node_id,
+            nset: db.name_result(),
         }
     }
 
@@ -1329,42 +1334,47 @@ impl Grammar {
     }
 }
 
-/// Called by [`crate::Database`] to build the grammar from the syntax axioms in the database.
-///
-/// The provided `sset`, and `nset` shall be the result of previous phases over the database.
-/// The provided `grammar` will be updated with the results of the grammar build.
-/// The grammar can then be used to parse the statements of the database (see [`parse_statements`]),
-/// or to parse a single statement.
-/// Use [`Grammar::default`] to get an initial state.
-pub(crate) fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>, nset: &Nameset) {
-    // Read information about the grammar from the parser commands
-    grammar.initialize(sset, nset);
-    grammar.root = grammar.nodes.create_branch();
+impl Grammar {
+    /// Called by [`crate::Database`] to build the grammar from the syntax axioms in the database.
+    ///
+    /// The provided `sset`, and `nset` shall be the result of previous phases over the database.
+    /// The provided `grammar` will be updated with the results of the grammar build.
+    /// The grammar can then be used to parse the statements of the database (see [`parse_statements`]),
+    /// or to parse a single statement.
+    /// Use [`Grammar::default`] to get an initial state.
+    pub(crate) fn new(db: &Database) -> Grammar {
+        let mut grammar = Grammar::default();
+        let sset = db.parse_result();
+        let nset = db.name_result();
+        // Read information about the grammar from the parser commands
+        grammar.initialize(sset, nset);
+        grammar.root = grammar.nodes.create_branch();
 
-    let mut names = NameReader::new(nset);
-    let mut type_conversions = Vec::new();
+        let mut names = NameReader::new(nset);
+        let mut type_conversions = Vec::new();
 
-    // Build the initial grammar tree, just form syntax axioms and floats.
-    let segments = sset.segments();
-    assert!(!segments.is_empty(), "Parse returned no segment!");
-    for segment in &segments {
-        for sref in *segment {
-            if let Err(diag) = match sref.statement_type() {
-                StatementType::Axiom => {
-                    grammar.add_axiom(&sref, nset, &mut names, &mut type_conversions)
+        // Build the initial grammar tree, just form syntax axioms and floats.
+        let segments = sset.segments();
+        assert!(!segments.is_empty(), "Parse returned no segment!");
+        for segment in &segments {
+            for sref in *segment {
+                if let Err(diag) = match sref.statement_type() {
+                    StatementType::Axiom => {
+                        grammar.add_axiom(&sref, nset, &mut names, &mut type_conversions)
+                    }
+                    StatementType::Floating => grammar.add_floating(&sref, nset, &mut names),
+                    _ => Ok(()),
+                } {
+                    grammar.diagnostics.insert(sref.address(), diag);
                 }
-                StatementType::Floating => grammar.add_floating(&sref, nset, &mut names),
-                _ => Ok(()),
-            } {
-                grammar.diagnostics.insert(sref.address(), diag);
             }
         }
-    }
 
-    // Post-treatement (type conversion and garden paths) as instructed by $j parser commands
-    if let Err((address, diag)) = grammar.handle_commands(sset, nset, &mut names, &type_conversions)
-    {
-        grammar.diagnostics.insert(address, diag);
+        // Post-treatement (type conversion and garden paths) as instructed by $j parser commands
+        if let Err((address, diag)) = grammar.handle_commands(db, &mut names, &type_conversions) {
+            grammar.diagnostics.insert(address, diag);
+        }
+        grammar
     }
 }
 
