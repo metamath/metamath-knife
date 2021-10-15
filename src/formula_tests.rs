@@ -25,7 +25,7 @@ const FORMULA_DB: &[u8] = b"
 /// Shall result in ` A := 1 ` and  ` B := 2 `
 fn test_unify() {
     let mut db = mkdb(FORMULA_DB);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     let goal = stmt_parse
         .get_formula(&db.statement("1p2com").unwrap())
@@ -44,7 +44,7 @@ fn test_unify() {
 /// Unification of ` ( 1 + 2 ) = ( 2 + 1 ) ` with ` ( A + 1 ) = ( B + 1 ) ` shall fail.
 fn test_unify_fail() {
     let mut db = mkdb(FORMULA_DB);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let goal = stmt_parse
         .get_formula(&db.statement("1p2com").unwrap())
         .unwrap();
@@ -59,7 +59,7 @@ fn test_unify_fail() {
 /// Shall result in ` ( ( 1 + 2 ) + 1 ) = ( ( 2 + 1 ) + 1 ) `
 fn test_substitute() {
     let mut db = mkdb(FORMULA_DB);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     let goal = stmt_parse
         .get_formula(&db.statement("1p2com").unwrap())

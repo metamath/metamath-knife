@@ -44,7 +44,7 @@ fn test_db_stmt_parse() {
     let mut db = mkdb(GRAMMAR_DB);
     let sset = db.parse_result().clone();
     let grammar = db.grammar_pass().clone();
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     assert!(sset.parse_diagnostics().is_empty());
     assert!(grammar.diagnostics().is_empty());
     assert!(stmt_parse.diagnostics().is_empty());
@@ -53,7 +53,7 @@ fn test_db_stmt_parse() {
 #[test]
 fn test_db_formula() {
     let mut db = mkdb(GRAMMAR_DB);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     {
         let sref = db.statement("ax-com").unwrap();
@@ -112,7 +112,7 @@ const GRAMMAR_DB_32: &[u8] = b"
 #[test]
 fn test_db_32_formula() {
     let mut db = mkdb(GRAMMAR_DB_32);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     {
         let sref = db.statement("check").unwrap();
@@ -155,7 +155,7 @@ const GARDEN_PATH_DB: &[u8] = b"
 fn test_garden_path_1() {
     let mut db = mkdb(GARDEN_PATH_DB);
     let sset = db.parse_result().clone();
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     assert!(sset.parse_diagnostics().is_empty());
     let sref = db.statement("formula1").unwrap();
@@ -171,7 +171,7 @@ fn test_garden_path_1() {
 #[test]
 fn test_garden_path_2() {
     let mut db = mkdb(GARDEN_PATH_DB);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     let sref = db.statement("formula2").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
@@ -188,7 +188,7 @@ fn test_garden_path_2() {
 #[test]
 fn test_garden_path_3() {
     let mut db = mkdb(GARDEN_PATH_DB);
-    let stmt_parse = db.stmt_parse().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     let sref = db.statement("formula3").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();

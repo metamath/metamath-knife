@@ -1383,7 +1383,7 @@ pub(crate) fn build_grammar<'a>(grammar: &mut Grammar, sset: &'a Arc<SegmentSet>
 /// // Create an empty database and load any file provided
 /// let mut db = Database::new(options);
 /// db.parse("set.mm".to_string(), vec![]);
-/// let stmt_parse = db.stmt_parse();
+/// let stmt_parse = db.stmt_parse_pass();
 /// ```
 ///
 /// The parse tree for a given statement can then be obtained through [`StmtParse::get_formula`].

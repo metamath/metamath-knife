@@ -619,7 +619,7 @@ impl Database {
     }
 
     /// Parses the statements using the grammar.
-    pub fn stmt_parse(&mut self) -> &Arc<StmtParse> {
+    pub fn stmt_parse_pass(&mut self) -> &Arc<StmtParse> {
         if self.stmt_parse.is_none() {
             self.name_pass();
             self.scope_pass();
@@ -755,7 +755,7 @@ impl Database {
             diags.extend(self.grammar_pass().diagnostics());
         }
         if types.contains(&DiagnosticClass::StmtParse) {
-            diags.extend(self.stmt_parse().diagnostics());
+            diags.extend(self.stmt_parse_pass().diagnostics());
         }
         time(&self.options.clone(), "diag", || {
             diag::to_annotations(self.parse_result(), diags)
