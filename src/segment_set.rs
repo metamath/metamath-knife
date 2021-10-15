@@ -145,14 +145,14 @@ struct FileSR(Option<(String, FileTime)>, Vec<SliceSR>);
 /// option block and the work queue executor, although those responsibilities
 /// may be moved.
 #[derive(Debug, Clone)]
-pub struct SegmentSet {
+pub(crate) struct SegmentSet {
     /// The option block controlling this database.
-    pub options: Arc<DbOptions>,
+    pub(crate) options: Arc<DbOptions>,
     /// The work queue for use with this database.
-    pub exec: Executor,
+    pub(crate) exec: Executor,
     /// Order structure which records the relative order of segment IDs created
     /// by the SegmentSet.
-    pub order: Arc<SegmentOrder>,
+    pub(crate) order: Arc<SegmentOrder>,
     /// Track segment and source info in parallel so they can be updated
     /// independently in the slicing case and if a file is renamed.
     segments: HashMap<SegmentId, (Arc<Segment>, Arc<SourceInfo>)>,
@@ -165,7 +165,7 @@ pub struct SegmentSet {
 impl SegmentSet {
     /// Start a new empty segment set in the context of an option block and
     /// executor which were previously created by the `Database`.
-    pub fn new(opts: Arc<DbOptions>, exec: &Executor) -> Self {
+    pub(crate) fn new(opts: Arc<DbOptions>, exec: &Executor) -> Self {
         SegmentSet {
             options: opts,
             exec: exec.clone(),
@@ -176,8 +176,16 @@ impl SegmentSet {
         }
     }
 
+    /// Reset the segment set to the empty state.
+    pub(crate) fn clear(&mut self) {
+        *Arc::make_mut(&mut self.order) = SegmentOrder::new();
+        self.segments = new_map();
+        self.parse_cache = new_map();
+        self.file_cache = new_map();
+    }
+
     /// Iterates over all loaded segments in logical order.
-    pub fn segments(&self) -> Vec<SegmentRef<'_>> {
+    pub(crate) fn segments(&self) -> Vec<SegmentRef<'_>> {
         // this might be an actual iterator in the future if needs be
         let mut out: Vec<SegmentRef<'_>> = self
             .segments
@@ -192,7 +200,7 @@ impl SegmentSet {
     }
 
     /// Fetch a handle to a loaded segment given its ID.
-    pub fn segment(&self, seg_id: SegmentId) -> SegmentRef<'_> {
+    pub(crate) fn segment(&self, seg_id: SegmentId) -> SegmentRef<'_> {
         SegmentRef {
             id: seg_id,
             segment: &self.segments[&seg_id].0,
@@ -200,7 +208,7 @@ impl SegmentSet {
     }
 
     /// Fetch a handle to a loaded segment given a possibly stale ID.
-    pub fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef<'_>> {
+    pub(crate) fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef<'_>> {
         self.segments
             .get(&seg_id)
             .map(|&(ref seg, ref _srcinfo)| SegmentRef {
@@ -210,17 +218,17 @@ impl SegmentSet {
     }
 
     /// Fetch source information for a loaded segment given its ID.
-    pub fn source_info(&self, seg_id: SegmentId) -> &Arc<SourceInfo> {
+    pub(crate) fn source_info(&self, seg_id: SegmentId) -> &Arc<SourceInfo> {
         &self.segments[&seg_id].1
     }
 
     /// Fetches a handle to a statement given a global address.
-    pub fn statement(&self, addr: StatementAddress) -> StatementRef<'_> {
+    pub(crate) fn statement(&self, addr: StatementAddress) -> StatementRef<'_> {
         self.segment(addr.segment_id).statement(addr.index)
     }
 
     /// Reports any parse errors associated with loaded segments.
-    pub fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
+    pub(crate) fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
         for sref in self.segments() {
             for &(ix, ref d) in &sref.diagnostics {
@@ -231,7 +239,7 @@ impl SegmentSet {
     }
 
     /// Returns the commands parsed from the $j comments
-    pub fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
+    pub(crate) fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
         let mut out = Vec::new();
         for sref in self.segments() {
             for &(ix, ref command) in &sref.commands {
@@ -247,7 +255,7 @@ impl SegmentSet {
     /// Each element of `data` intercedes a file with the same name for the
     /// purposes of file inclusion statements.  If a match is not made in
     /// `data`, it will be accessed as a file relative to the current directory.
-    pub fn read(&mut self, path: String, data: Vec<(String, Vec<u8>)>) {
+    pub(crate) fn read(&mut self, path: String, data: Vec<(String, Vec<u8>)>) {
         // data which is kept during the recursive load process, which does
         // _not_ have access to the SegmentSet
         struct RecState {

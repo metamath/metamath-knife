@@ -175,7 +175,7 @@ impl Nameset {
     }
 
     /// Called by Database to bring the index up to date with segment changes.
-    pub fn update(&mut self, segs: &SegmentSet) {
+    pub(crate) fn update(&mut self, segs: &SegmentSet) {
         self.order = segs.order.clone();
         self.generation = self.generation.checked_add(1).unwrap();
         self.options = segs.options.clone();

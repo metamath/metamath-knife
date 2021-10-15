@@ -125,12 +125,8 @@ impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
     type Item = NodeId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_id == 0 {
-            None
-        } else {
-            let current_id = self.current_id;
-            self.current_id = self.tree.nodes[current_id - 1].next_sibling;
-            Some(current_id)
-        }
+        let current_id = self.current_id;
+        self.current_id = self.tree.nodes[current_id.checked_sub(1)?].next_sibling;
+        Some(current_id)
     }
 }

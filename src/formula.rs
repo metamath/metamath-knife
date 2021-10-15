@@ -24,7 +24,6 @@ use crate::parser::as_str;
 use crate::parser::SymbolType;
 use crate::parser::TokenIter;
 use crate::scopeck::Hyp;
-use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::tree::NodeId;
 use crate::tree::SiblingIter;
@@ -33,7 +32,10 @@ use crate::util::fast_extend;
 use crate::util::new_map;
 use crate::util::HashMap;
 use crate::verify::ProofBuilder;
+use crate::Database;
 use core::ops::Index;
+use std::fmt::Debug;
+use std::fmt::Display;
 use std::iter::FromIterator;
 use std::ops::Range;
 use std::sync::Arc;
@@ -84,114 +86,15 @@ pub struct Formula {
 }
 
 impl Formula {
-    /// Convert the formula back to a flat list of symbols
-    /// This is slow and shall not normally be called except for showing a result to the user.
+    /// Augment a formula with a database reference, to produce a [`FormulaRef`].
+    /// The resulting object implements [`Display`], [`Debug`], and [`IntoIterator`].
     #[must_use]
-    pub fn iter<'a>(&'a self, sset: &'a Arc<SegmentSet>, nset: &'a Arc<Nameset>) -> Flatten<'a> {
-        let mut f = Flatten {
-            formula: self,
-            stack: vec![],
-            sset,
-            nset,
-        };
-        f.step_into(self.root);
-        f
-    }
-
-    /// Displays the formula as a string
-    #[must_use]
-    pub fn display(&self, sset: &Arc<SegmentSet>, nset: &Arc<Nameset>) -> String {
-        let mut str = String::new();
-        str.push_str(as_str(nset.atom_name(self.typecode)));
-        for symbol in self.iter(sset, nset) {
-            str.push(' ');
-            str.push_str(as_str(nset.atom_name(symbol)));
-        }
-        str
-    }
-
-    /// Appends this formula to the provided stack buffer.
-    ///
-    /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,
-    /// using the high bit to mark the end of each token.
-    /// This function creates such a byte string, stores it in the provided buffer,
-    /// and returns the range the newly added string occupies on the buffer.
-    ///
-    /// See [`crate::verify`] for more about this format.
-    pub fn append_to_stack_buffer(
-        &self,
-        stack_buffer: &mut Vec<u8>,
-        sset: &Arc<SegmentSet>,
-        nset: &Arc<Nameset>,
-    ) -> Range<usize> {
-        let tos = stack_buffer.len();
-        for symbol in self.iter(sset, nset) {
-            fast_extend(stack_buffer, nset.atom_name(symbol));
-            *stack_buffer.last_mut().unwrap() |= 0x80;
-        }
-        let n_tos = stack_buffer.len();
-        tos..n_tos
-    }
-
-    /// Builds the syntax proof for this formula.
-    ///
-    /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
-    /// This methos builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
-    /// stores that proof tree in the provided [`ProofBuilder`] `arr`,
-    /// and returns the index of that `ProofTree` within `arr`.
-    pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
-        &self,
-        stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
-        sset: &Arc<SegmentSet>,
-        nset: &Arc<Nameset>,
-        scope: &Arc<ScopeResult>,
-    ) -> I {
-        self.sub_build_syntax_proof(self.root, stack_buffer, arr, sset, nset, scope)
-    }
-
-    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
-    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
-    // Formulas children nodes are stored in the order of appearance of the variables
-    // in the formula, which is efficient when parsing or rendering the formula from
-    // or into a string of tokens. However, proofs require children nodes
-    // sorted in the order of mandatory floating hypotheses.
-    // This method performs this mapping.
-    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
-        &self,
-        node_id: NodeId,
-        stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
-        sset: &Arc<SegmentSet>,
-        nset: &Arc<Nameset>,
-        scope: &Arc<ScopeResult>,
-    ) -> I {
-        let token = nset.atom_name(self.tree[node_id]);
-        let address = nset.lookup_label(token).unwrap().address;
-        let frame = scope.get(token).unwrap();
-        let children_hyps = self
-            .tree
-            .children_iter(node_id)
-            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr, sset, nset, scope))
-            .collect::<Vec<I>>()
-            .into_boxed_slice();
-        let hyps = frame
-            .hypotheses
-            .iter()
-            .filter_map(|hyp| {
-                if let Hyp::Floating(_sa, index, _) = hyp {
-                    Some(children_hyps[*index])
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let range = self.append_to_stack_buffer(stack_buffer, sset, nset);
-        arr.build(address, hyps, stack_buffer, range)
+    pub const fn as_ref<'a>(&'a self, db: &'a Database) -> FormulaRef<'a> {
+        FormulaRef { db, formula: self }
     }
 
     /// Debug only, dumps the internal structure of the formula.
-    pub fn dump(&self, nset: &Arc<Nameset>) {
+    pub fn dump(&self, nset: &Nameset) {
         println!("  Root: {}", self.root);
         self.tree.dump(|atom| as_str(nset.atom_name(*atom)));
     }
@@ -303,28 +206,25 @@ impl Formula {
         substitutions: &Substitutions,
         formula_builder: &mut FormulaBuilder,
     ) {
-        let mut done = false;
         // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
         if self.is_variable(node_id) {
             if let Some(formula) = substitutions.0.get(&self.tree[node_id]) {
                 // We encounter a variable, perform substitution.
                 formula.copy_sub_formula(formula.root, formula_builder);
-                done = true;
+                return;
             }
         }
-        if !done {
-            let mut children_count = 0;
-            for child_node_id in self.tree.children_iter(node_id) {
-                self.sub_substitute(child_node_id, substitutions, formula_builder);
-                children_count += 1;
-            }
-            formula_builder.reduce(
-                self.tree[node_id],
-                children_count,
-                0,
-                self.is_variable(node_id),
-            );
+        let mut children_count = 0;
+        for child_node_id in self.tree.children_iter(node_id) {
+            self.sub_substitute(child_node_id, substitutions, formula_builder);
+            children_count += 1;
         }
+        formula_builder.reduce(
+            self.tree[node_id],
+            children_count,
+            0,
+            self.is_variable(node_id),
+        );
     }
 
     // Copy a sub-formula of this formula to a formula builder
@@ -349,13 +249,124 @@ impl PartialEq for Formula {
     }
 }
 
+/// A [`Formula`] reference in the context of a [`Database`].
+/// This allows the values in the [`Formula`] to be resolved,
+#[derive(Copy, Clone, Debug)] // TODO(Mario): manual Debug impl
+pub struct FormulaRef<'a> {
+    db: &'a Database,
+    formula: &'a Formula,
+}
+
+impl<'a> std::ops::Deref for FormulaRef<'a> {
+    type Target = Formula;
+
+    fn deref(&self) -> &Self::Target {
+        self.formula
+    }
+}
+
+impl<'a> FormulaRef<'a> {
+    /// Convert the formula back to a flat list of symbols
+    /// This is slow and shall not normally be called except for showing a result to the user.
+    #[must_use]
+    pub(crate) fn iter(self) -> Flatten<'a> {
+        let mut f = Flatten {
+            formula: self.formula,
+            stack: vec![],
+            sset: self.db.parse_result(),
+            nset: self.db.name_result(),
+        };
+        f.step_into(self.root);
+        f
+    }
+
+    /// Appends this formula to the provided stack buffer.
+    ///
+    /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,
+    /// using the high bit to mark the end of each token.
+    /// This function creates such a byte string, stores it in the provided buffer,
+    /// and returns the range the newly added string occupies on the buffer.
+    ///
+    /// See [`crate::verify`] for more about this format.
+    fn append_to_stack_buffer(self, stack_buffer: &mut Vec<u8>) -> Range<usize> {
+        let tos = stack_buffer.len();
+        let nset = &**self.db.name_result();
+        for symbol in self {
+            fast_extend(stack_buffer, nset.atom_name(symbol));
+            *stack_buffer.last_mut().unwrap() |= 0x80;
+        }
+        let n_tos = stack_buffer.len();
+        tos..n_tos
+    }
+
+    /// Builds the syntax proof for this formula.
+    ///
+    /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
+    /// This methos builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
+    /// stores that proof tree in the provided [`ProofBuilder`] `arr`,
+    /// and returns the index of that `ProofTree` within `arr`.
+    pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
+        self,
+        stack_buffer: &mut Vec<u8>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+    ) -> I {
+        self.sub_build_syntax_proof(self.root, stack_buffer, arr)
+    }
+
+    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
+    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
+    // Formulas children nodes are stored in the order of appearance of the variables
+    // in the formula, which is efficient when parsing or rendering the formula from
+    // or into a string of tokens. However, proofs require children nodes
+    // sorted in the order of mandatory floating hypotheses.
+    // This method performs this mapping.
+    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
+        self,
+        node_id: NodeId,
+        stack_buffer: &mut Vec<u8>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+    ) -> I {
+        let nset = self.db.name_result();
+
+        let token = nset.atom_name(self.tree[node_id]);
+        let address = nset.lookup_label(token).unwrap().address;
+        let frame = self.db.scope_result().get(token).unwrap();
+        let children_hyps = self
+            .tree
+            .children_iter(node_id)
+            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr))
+            .collect::<Box<[I]>>();
+        let hyps = frame
+            .hypotheses
+            .iter()
+            .filter_map(|hyp| {
+                if let Hyp::Floating(_sa, index, _) = hyp {
+                    Some(children_hyps[*index])
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let range = self.append_to_stack_buffer(stack_buffer);
+        arr.build(address, hyps, stack_buffer, range)
+    }
+}
+
+impl<'a> IntoIterator for FormulaRef<'a> {
+    type Item = Symbol;
+    type IntoIter = Flatten<'a>;
+    fn into_iter(self) -> Flatten<'a> {
+        self.iter()
+    }
+}
+
 /// An iterator going through each symbol in a formula
 #[derive(Debug)]
 pub struct Flatten<'a> {
     formula: &'a Formula,
     stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Label>>)>,
-    sset: &'a Arc<SegmentSet>,
-    nset: &'a Arc<Nameset>,
+    sset: &'a SegmentSet,
+    nset: &'a Nameset,
 }
 
 impl<'a> Flatten<'a> {
@@ -410,6 +421,17 @@ impl<'a> Iterator for Flatten<'a> {
     }
 
     // TODO(tirix): provide an implementation for size_hint?
+}
+
+impl<'a> Display for FormulaRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let nset = &**self.db.name_result();
+        write!(f, "{}", as_str(nset.atom_name(self.typecode)))?;
+        for symbol in *self {
+            write!(f, " {}", as_str(nset.atom_name(symbol)))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]

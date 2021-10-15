@@ -32,7 +32,7 @@ pub(super) fn mkdb(text: &[u8]) -> Database {
 #[test]
 fn test_lookup() {
     let mut db = mkdb(GRAMMAR_DB);
-    let names = db.name_result();
+    let names = db.name_pass();
     assert!(as_str(names.atom_name(names.lookup_symbol(b"A").unwrap().atom)) == "A");
     assert!(as_str(names.atom_name(names.lookup_symbol(b"B").unwrap().atom)) == "B");
     assert!(as_str(names.atom_name(names.lookup_label(b"weq").unwrap().atom)) == "weq");
@@ -43,8 +43,8 @@ fn test_lookup() {
 fn test_db_stmt_parse() {
     let mut db = mkdb(GRAMMAR_DB);
     let sset = db.parse_result().clone();
-    let grammar = db.grammar_result().clone();
-    let stmt_parse = db.stmt_parse_result().clone();
+    let grammar = db.grammar_pass().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
     assert!(sset.parse_diagnostics().is_empty());
     assert!(grammar.diagnostics().is_empty());
     assert!(stmt_parse.diagnostics().is_empty());
@@ -53,8 +53,8 @@ fn test_db_stmt_parse() {
 #[test]
 fn test_db_formula() {
     let mut db = mkdb(GRAMMAR_DB);
-    let stmt_parse = db.stmt_parse_result().clone();
-    let names = db.name_result().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let names = db.name_pass().clone();
     {
         let sref = db.statement("ax-com").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
@@ -71,9 +71,8 @@ fn test_db_formula() {
 #[test]
 fn test_parse_formula() {
     let mut db = mkdb(GRAMMAR_DB);
-    let sset = db.parse_result().clone();
-    let names = db.name_result().clone();
-    let grammar = db.grammar_result().clone();
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
     let wff = names.lookup_symbol(b"wff").unwrap().atom;
     let class = names.lookup_symbol(b"class").unwrap().atom;
     let a = names.lookup_symbol(b"A").unwrap().atom;
@@ -91,7 +90,7 @@ fn test_parse_formula() {
     assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cadd");
     assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cB");
     assert!(as_str(names.atom_name(formula.get_by_path(&[2, 2]).unwrap())) == "cA");
-    assert!(formula.iter(&sset, &names).eq(fmla_vec.into_iter()));
+    assert!(formula.as_ref(&db).iter().eq(fmla_vec.into_iter()));
 }
 
 // This grammar exposes issue #32 in the statement parser
@@ -113,8 +112,8 @@ const GRAMMAR_DB_32: &[u8] = b"
 #[test]
 fn test_db_32_formula() {
     let mut db = mkdb(GRAMMAR_DB_32);
-    let stmt_parse = db.stmt_parse_result().clone();
-    let names = db.name_result().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let names = db.name_pass().clone();
     {
         let sref = db.statement("check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
@@ -156,8 +155,8 @@ const GARDEN_PATH_DB: &[u8] = b"
 fn test_garden_path_1() {
     let mut db = mkdb(GARDEN_PATH_DB);
     let sset = db.parse_result().clone();
-    let stmt_parse = db.stmt_parse_result().clone();
-    let names = db.name_result().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let names = db.name_pass().clone();
     assert!(sset.parse_diagnostics().is_empty());
     let sref = db.statement("formula1").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
@@ -172,8 +171,8 @@ fn test_garden_path_1() {
 #[test]
 fn test_garden_path_2() {
     let mut db = mkdb(GARDEN_PATH_DB);
-    let stmt_parse = db.stmt_parse_result().clone();
-    let names = db.name_result().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let names = db.name_pass().clone();
     let sref = db.statement("formula2").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
@@ -189,8 +188,8 @@ fn test_garden_path_2() {
 #[test]
 fn test_garden_path_3() {
     let mut db = mkdb(GARDEN_PATH_DB);
-    let stmt_parse = db.stmt_parse_result().clone();
-    let names = db.name_result().clone();
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let names = db.name_pass().clone();
     let sref = db.statement("formula3").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
@@ -219,7 +218,7 @@ macro_rules! grammar_test {
         fn $name() {
             let mut db = mkdb($text);
             let sset = db.parse_result().clone();
-            let grammar = db.grammar_result();
+            let grammar = db.grammar_pass();
             assert!(sset.parse_diagnostics().is_empty());
             assert_eq!(grammar.diagnostics(), &[(sa!($id, $index), $diag)]);
         }

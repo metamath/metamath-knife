@@ -55,6 +55,7 @@ use crate::util::fast_extend;
 use crate::util::new_map;
 use crate::util::ptr_eq;
 use crate::util::HashMap;
+use crate::Database;
 use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
@@ -870,7 +871,7 @@ fn verify_segment(
 }
 
 /// Calculates or updates the verification result for a database.
-pub fn verify(
+pub(crate) fn verify(
     result: &mut VerifyResult,
     segments: &Arc<SegmentSet>,
     nset: &Arc<Nameset>,
@@ -909,20 +910,18 @@ pub fn verify(
 
 /// Parse a single $p statement, returning the result of the given
 /// proof builder, or an error if the proof is faulty
-pub fn verify_one<P: ProofBuilder>(
-    sset: &SegmentSet,
-    nset: &Nameset,
-    scopes: &ScopeResult,
+pub(crate) fn verify_one<P: ProofBuilder>(
+    db: &Database,
     builder: &mut P,
     stmt: StatementRef<'_>,
 ) -> result::Result<P::Item, Diagnostic> {
     let dummy_frame = Frame::default();
     let mut state = VerifyState {
         this_seg: stmt.segment(),
-        scoper: ScopeReader::new(scopes),
-        nameset: nset,
+        scoper: ScopeReader::new(db.scope_result()),
+        nameset: db.name_result(),
         builder,
-        order: &sset.order,
+        order: &db.parse_result().order,
         cur_frame: &dummy_frame,
         stack: Vec::new(),
         stack_buffer: Vec::new(),

@@ -47,7 +47,7 @@ fn mkdb(text: &[u8]) -> Database {
 
 #[test]
 fn test_segref() {
-    let mut db = mkdb(b"${ $}");
+    let db = mkdb(b"${ $}");
     let seg = db.parse_result().segments()[0];
     assert_eq!(seg.bytes(), 5);
     let mut stmt_iter = seg.into_iter();
@@ -68,7 +68,7 @@ fn test_segref() {
 
 #[test]
 fn test_stref_v() {
-    let mut db = mkdb(b"$v X $. ${ $v Y Z $. $}");
+    let db = mkdb(b"$v X $. ${ $v Y Z $. $}");
     let seg = db.parse_result().segments()[0];
     let vx = seg.statement(0);
     let vyz = seg.statement(2);
@@ -95,7 +95,7 @@ macro_rules! parse_test {
     ($name:ident, $text:expr, $diags:expr) => {
         #[test]
         fn $name() {
-            let mut db = mkdb($text);
+            let db = mkdb($text);
             let seg = db.parse_result().segments()[0];
             assert_eq!(seg.diagnostics, &$diags);
         }
