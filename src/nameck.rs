@@ -18,7 +18,6 @@
 //! The nameset is also responsible for maintaining the `Atom` table.
 
 use crate::database::DbOptions;
-use crate::parser::copy_token;
 use crate::parser::Comparer;
 use crate::parser::Segment;
 use crate::parser::SegmentId;
@@ -31,8 +30,6 @@ use crate::parser::Token;
 use crate::parser::TokenAddress;
 use crate::parser::TokenPtr;
 use crate::segment_set::SegmentSet;
-use crate::util;
-use crate::util::new_set;
 use crate::util::HashMap;
 use crate::util::HashSet;
 use std::borrow::Borrow;
@@ -140,11 +137,11 @@ fn intern(table: &mut AtomTable, tok: TokenPtr<'_>) -> Atom {
     if let Some(&atom) = table.table.get(tok) {
         return atom;
     }
-    table.table.insert(copy_token(tok), next);
+    table.table.insert(tok.into(), next);
     if table.reverse.is_empty() {
         table.reverse.push(Token::default());
     }
-    table.reverse.push(copy_token(tok));
+    table.reverse.push(tok.into());
     next
 }
 
@@ -189,7 +186,7 @@ impl Nameset {
         for (&seg_id, seg) in &self.segments {
             if segs
                 .segment_opt(seg_id)
-                .map_or(true, |sref| !util::ptr_eq::<Segment>(sref.segment, seg))
+                .map_or(true, |sref| !Arc::ptr_eq(sref.segment, seg))
             {
                 keys_to_remove.push(seg_id);
             }
@@ -235,7 +232,7 @@ impl Nameset {
 
         for labdef in &segment.labels {
             let labelr = sref.statement(labdef.index).label();
-            let label = copy_token(labelr);
+            let label = labelr.into();
             let slot = autoviv(&mut self.labels, label);
             slot.generation = self.generation;
             if self.options.incremental && slot.atom == Atom::default() {
@@ -460,10 +457,10 @@ impl<'a> NameReader<'a> {
         NameReader {
             nameset,
             incremental: nameset.options.incremental,
-            found_symbol: new_set(),
-            not_found_symbol: new_set(),
-            found_label: new_set(),
-            not_found_label: new_set(),
+            found_symbol: HashSet::default(),
+            not_found_symbol: HashSet::default(),
+            found_label: HashSet::default(),
+            not_found_label: HashSet::default(),
         }
     }
 
@@ -491,7 +488,7 @@ impl<'a> NameReader<'a> {
             if let Some(ref lookup) = out {
                 self.found_label.insert(lookup.atom);
             } else {
-                self.not_found_label.insert(copy_token(label));
+                self.not_found_label.insert(label.into());
             }
         }
         out
@@ -504,7 +501,7 @@ impl<'a> NameReader<'a> {
             if let Some(ref lookup) = out {
                 self.found_symbol.insert(lookup.atom);
             } else {
-                self.not_found_symbol.insert(copy_token(symbol));
+                self.not_found_symbol.insert(symbol.into());
             }
         }
         out
@@ -528,7 +525,7 @@ impl<'a> NameReader<'a> {
                 })
         } else {
             if self.incremental {
-                self.not_found_symbol.insert(copy_token(symbol));
+                self.not_found_symbol.insert(symbol.into());
             }
             None
         }

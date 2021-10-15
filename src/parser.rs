@@ -325,12 +325,6 @@ pub type Token = Box<[u8]>;
 /// Semantic type for tokens which have not been copied.
 pub type TokenPtr<'a> = &'a [u8];
 
-/// Copies a non-owned token onto the heap.
-#[must_use]
-pub fn copy_token(ptr: TokenPtr<'_>) -> Token {
-    ptr.to_owned().into_boxed_slice()
-}
-
 /// Transmutes this token into a Rust string.
 #[must_use]
 pub fn as_str(ptr: TokenPtr<'_>) -> &str {
@@ -1422,23 +1416,16 @@ impl<'a> Scanner<'a> {
             // matching opener, for `CloseGroup`).
             match seg.statements[index as usize].stype {
                 OpenGroup => top_group = index,
-                CloseGroup => {
-                    if top_group == NO_STATEMENT {
-                        self.diag(Diagnostic::UnmatchedCloseGroup);
-                    } else {
-                        seg.statements[top_group as usize].group_end = index;
-                        top_group = seg.statements[top_group as usize].group;
-                    }
+                CloseGroup if top_group != NO_STATEMENT => {
+                    seg.statements[top_group as usize].group_end = index;
+                    top_group = seg.statements[top_group as usize].group;
                 }
-                Constant => {
-                    if top_group != NO_STATEMENT {
-                        self.diag(Diagnostic::ConstantNotTopLevel);
-                    }
+                CloseGroup => self.diag(Diagnostic::UnmatchedCloseGroup),
+                Constant if top_group != NO_STATEMENT => {
+                    self.diag(Diagnostic::ConstantNotTopLevel);
                 }
-                Essential => {
-                    if top_group == NO_STATEMENT {
-                        self.diag(Diagnostic::EssentialAtTopLevel);
-                    }
+                Essential if top_group == NO_STATEMENT => {
+                    self.diag(Diagnostic::EssentialAtTopLevel)
                 }
                 FileInclude => {
                     // snag this _now_
@@ -1515,7 +1502,7 @@ fn collect_definitions(seg: &mut Segment) {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Constant,
                         start: index,
-                        name: copy_token(span.as_ref(buf)),
+                        name: span.as_ref(buf).into(),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -1525,7 +1512,7 @@ fn collect_definitions(seg: &mut Segment) {
                     seg.symbols.push(SymbolDef {
                         stype: SymbolType::Variable,
                         start: index,
-                        name: copy_token(span.as_ref(buf)),
+                        name: span.as_ref(buf).into(),
                         ordinal: sindex as TokenIndex,
                     });
                 }
@@ -1533,20 +1520,20 @@ fn collect_definitions(seg: &mut Segment) {
             Disjoint => {
                 seg.global_dvs.push(GlobalDv {
                     start: index,
-                    vars: math.iter().map(|sp| copy_token(sp.as_ref(buf))).collect(),
+                    vars: math.iter().map(|sp| sp.as_ref(buf).into()).collect(),
                 });
             }
             Floating => {
                 seg.floats.push(FloatDef {
                     start: index,
-                    typecode: copy_token(math[0].as_ref(buf)),
-                    label: copy_token(stmt.label.as_ref(buf)),
-                    name: copy_token(math[1].as_ref(buf)),
+                    typecode: math[0].as_ref(buf).into(),
+                    label: stmt.label.as_ref(buf).into(),
+                    name: math[1].as_ref(buf).into(),
                 });
             }
             HeadingComment(level) => {
                 seg.outline.push(HeadingDef {
-                    name: copy_token(get_heading_name(buf, stmt.span.start)),
+                    name: get_heading_name(buf, stmt.span.start).into(),
                     index,
                     level,
                 });
@@ -1557,9 +1544,7 @@ fn collect_definitions(seg: &mut Segment) {
                         seg.commands.push((index, command));
                     }
                 }
-                Err(diag) => {
-                    seg.diagnostics.push((index, diag));
-                }
+                Err(diag) => seg.diagnostics.push((index, diag)),
             },
             _ => {}
         }
@@ -1714,7 +1699,7 @@ impl Iterator for CommandIter<'_> {
             } else {
                 &self.buffer[token_start..self.index]
             };
-            command.push(copy_token(token));
+            command.push(token.into());
 
             while self.has_more() {
                 match self.next_char() {

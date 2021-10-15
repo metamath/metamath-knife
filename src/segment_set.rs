@@ -48,34 +48,18 @@
 //! would make changing the beginning and end at the same time faster, and is
 //! attractive future work.
 
-use crate::database::DbOptions;
-use crate::database::Executor;
-use crate::database::Promise;
+use crate::database::{DbOptions, Executor, Promise};
 use crate::diag::Diagnostic;
-use crate::parser;
-use crate::parser::Command;
-use crate::parser::Comparer;
-use crate::parser::Segment;
-use crate::parser::SegmentId;
-use crate::parser::SegmentOrder;
-use crate::parser::SegmentRef;
-use crate::parser::Span;
-use crate::parser::StatementAddress;
-use crate::parser::StatementRef;
-use crate::util::find_chapter_header;
-use crate::util::new_map;
-use crate::util::new_set;
-use crate::util::ptr_eq;
-use crate::util::HashMap;
-use crate::util::HashSet;
+use crate::parser::{
+    self, Command, Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, Span, StatementAddress,
+    StatementRef,
+};
+use crate::util::{find_chapter_header, HashMap, HashSet};
 use filetime::FileTime;
 use std::collections::VecDeque;
-use std::fs;
-use std::fs::File;
-use std::hash::Hash;
-use std::hash::Hasher;
-use std::io;
-use std::io::Read;
+use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
+use std::io::{self, Read};
 use std::mem;
 use std::str;
 use std::sync::Arc;
@@ -170,18 +154,18 @@ impl SegmentSet {
             options: opts,
             exec: exec.clone(),
             order: Arc::new(SegmentOrder::new()),
-            segments: new_map(),
-            parse_cache: new_map(),
-            file_cache: new_map(),
+            segments: HashMap::default(),
+            parse_cache: HashMap::default(),
+            file_cache: HashMap::default(),
         }
     }
 
     /// Reset the segment set to the empty state.
     pub(crate) fn clear(&mut self) {
         *Arc::make_mut(&mut self.order) = SegmentOrder::new();
-        self.segments = new_map();
-        self.parse_cache = new_map();
-        self.file_cache = new_map();
+        self.segments = HashMap::default();
+        self.parse_cache = HashMap::default();
+        self.file_cache = HashMap::default();
     }
 
     /// Iterates over all loaded segments in logical order.
@@ -459,12 +443,12 @@ impl SegmentSet {
 
         let mut state = RecState {
             options: self.options.clone(),
-            old_by_content: mem::replace(&mut self.parse_cache, new_map()),
-            new_by_content: new_map(),
-            old_by_time: mem::replace(&mut self.file_cache, new_map()),
-            new_by_time: new_map(),
+            old_by_content: mem::take(&mut self.parse_cache),
+            new_by_content: HashMap::default(),
+            old_by_time: mem::take(&mut self.file_cache),
+            new_by_time: HashMap::default(),
             segments: Vec::new(),
-            included: new_set(),
+            included: HashSet::default(),
             preload: data.into_iter().collect(),
             exec: self.exec.clone(),
         };
@@ -489,7 +473,7 @@ impl SegmentSet {
         // LCS lite
         while old_r.start < old_r.end
             && new_r.start < new_r.end
-            && ptr_eq::<Segment>(&(old_segs[old_r.start].1).0, &new_segs[new_r.start].0)
+            && Arc::ptr_eq(&(old_segs[old_r.start].1).0, &new_segs[new_r.start].0)
         {
             old_r.start += 1;
             new_r.start += 1;
@@ -497,7 +481,7 @@ impl SegmentSet {
 
         while old_r.start < old_r.end
             && new_r.start < new_r.end
-            && ptr_eq::<Segment>(&(old_segs[old_r.end - 1].1).0, &new_segs[new_r.end - 1].0)
+            && Arc::ptr_eq(&(old_segs[old_r.end - 1].1).0, &new_segs[new_r.end - 1].0)
         {
             old_r.end -= 1;
             new_r.end -= 1;

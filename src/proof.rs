@@ -4,26 +4,16 @@ use crate::diag::Diagnostic;
 use crate::nameck::Nameset;
 use crate::parser::as_str;
 use crate::parser::{StatementAddress, StatementRef, StatementType, TokenPtr};
-use crate::scopeck::Hyp;
-use crate::scopeck::ScopeResult;
+use crate::scopeck::{Hyp, ScopeResult};
 use crate::segment_set::SegmentSet;
-use crate::util::new_map;
 use crate::util::HashMap;
-use crate::verify::verify_one;
-use crate::verify::ProofBuilder;
+use crate::verify::{verify_one, ProofBuilder};
 use crate::Database;
-use std::cmp::max;
-use std::cmp::Ord;
-use std::cmp::Ordering;
-use std::cmp::PartialOrd;
-use std::collections::hash_map::DefaultHasher;
-use std::collections::hash_map::Entry;
-use std::collections::BinaryHeap;
-use std::collections::VecDeque;
-use std::fmt;
-use std::fmt::Write;
-use std::hash::Hash;
-use std::hash::Hasher;
+use std::cmp::{max, Ord, Ordering, PartialOrd};
+use std::collections::hash_map::{DefaultHasher, Entry};
+use std::collections::{BinaryHeap, VecDeque};
+use std::fmt::{self, Write};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::u16;
 
@@ -745,7 +735,7 @@ impl<'a> fmt::Display for ProofTreePrinter<'a> {
             f,
             indent,
             chr: self.indent - 1,
-            stmt_lookup: new_map(),
+            stmt_lookup: HashMap::default(),
             backref_alloc: vec![],
             backref_max: 0,
         }

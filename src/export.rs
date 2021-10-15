@@ -16,7 +16,7 @@ use std::io;
 use std::io::Write;
 use std::str;
 
-/// The error type for [`export_mmp`].
+/// The error type for [`Database::export_mmp`].
 #[derive(Debug)]
 pub enum ExportError {
     /// IO Error during write

@@ -3,55 +3,16 @@
 use fnv::FnvHasher;
 use std::collections;
 use std::hash::BuildHasherDefault;
-use std::hash::Hash;
 use std::ptr;
 use std::slice;
 
 /// Type alias for hashmaps to allow swapping out the implementation.
-pub type HashMap<K, V> = collections::HashMap<K, V, BuildHasherDefault<FnvHasher>>;
+pub(crate) type HashMap<K, V> = collections::HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 /// Type alias for hashsets to allow swapping out the implementation.
-pub type HashSet<K> = collections::HashSet<K, BuildHasherDefault<FnvHasher>>;
-
-/// Create a new empty map.
-#[must_use]
-pub fn new_map<K, V>() -> HashMap<K, V>
-where
-    K: Eq + Hash,
-{
-    HashMap::default()
-}
-
-/// Create a new empty set.
-#[must_use]
-pub fn new_set<K>() -> HashSet<K>
-where
-    K: Eq + Hash,
-{
-    HashSet::default()
-}
-
-/// Quickly determine if two references are pointing at the same object.
-///
-/// You almost always want to pass a type argument when calling this function in
-/// order to force `Deref` coercions to run.
-///
-///   ```
-///   # use metamath_knife::util;
-///   # use std::sync::Arc;
-///   let a1 = Arc::new("Hello, world".to_string());
-///   let a2 = a1.clone();
-///   // BAD: resolves as Arc<String>, we've learned we have two Arcs
-///   assert!(!util::ptr_eq(&a1, &a2));
-///   // GOOD: forcing deref to String, we have only one of those
-///   assert!(util::ptr_eq::<String>(&a1, &a2));
-///   ```
-#[allow(clippy::ptr_eq)]
-pub fn ptr_eq<T>(x: &T, y: &T) -> bool {
-    x as *const _ == y as *const _
-}
+pub(crate) type HashSet<K> = collections::HashSet<K, BuildHasherDefault<FnvHasher>>;
 
 /// Empty a vector of a POD type without checking each element for droppability.
-pub fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
+pub(crate) fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
     unsafe {
         vec.set_len(0);
     }
@@ -68,7 +29,7 @@ unsafe fn short_copy<T>(src: *const T, dst: *mut T, count: usize) {
 }
 
 /// Appends a POD slice to a vector with a simple `memcpy`.
-pub fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
+pub(crate) fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
     vec.reserve(other.len());
     unsafe {
         let len = vec.len();
@@ -114,7 +75,7 @@ fn aligned_part(buffer: &[u8]) -> (usize, &[u32]) {
 /// running at full memory bandwidth.
 #[inline(never)]
 #[must_use]
-pub fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
+pub(crate) fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
     // returns something pointing at four consequtive puncts, guaranteed to find
     // if there is a run of 79
     fn hunt(buffer: &[u8]) -> Option<usize> {

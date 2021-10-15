@@ -26,43 +26,21 @@
 
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
-use crate::nameck::Atom;
-use crate::nameck::Nameset;
-use crate::parser;
-use crate::parser::copy_token;
-use crate::parser::Comparer;
-use crate::parser::Segment;
-use crate::parser::SegmentId;
-use crate::parser::SegmentOrder;
-use crate::parser::SegmentRef;
-use crate::parser::Span;
-use crate::parser::StatementAddress;
-use crate::parser::StatementRef;
-use crate::parser::StatementType;
-use crate::parser::TokenPtr;
-use crate::parser::NO_STATEMENT;
-use crate::scopeck;
-use crate::scopeck::ExprFragment;
-use crate::scopeck::Frame;
-use crate::scopeck::Hyp::*;
-use crate::scopeck::ScopeReader;
-use crate::scopeck::ScopeResult;
-use crate::scopeck::ScopeUsage;
-use crate::scopeck::VerifyExpr;
+use crate::nameck::{Atom, Nameset};
+use crate::parser::{
+    self, Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, Span, StatementAddress,
+    StatementRef, StatementType, TokenPtr, NO_STATEMENT,
+};
+use crate::scopeck::{
+    self, ExprFragment, Frame, Hyp::*, ScopeReader, ScopeResult, ScopeUsage, VerifyExpr,
+};
 use crate::segment_set::SegmentSet;
-use crate::util::fast_clear;
-use crate::util::fast_extend;
-use crate::util::new_map;
-use crate::util::ptr_eq;
-use crate::util::HashMap;
+use crate::util::{fast_clear, fast_extend, HashMap};
 use crate::Database;
 use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
-use std::result;
 use std::sync::Arc;
-use std::u32;
-use std::usize;
 
 // Proofs are very fragile and there are very few situations where errors are
 // recoverable, so we bail out using Result on any error.
@@ -164,7 +142,7 @@ struct VerifyState<'a, P: ProofBuilder> {
     dv_map: &'a [Bitset],
 }
 
-type Result<T> = result::Result<T, Diagnostic>;
+type Result<T> = std::result::Result<T, Diagnostic>;
 
 /// Variables are added lazily to the extended frame.  All variables which are
 /// associated with hypotheses or $d constraints are numbered by scopeck, but if
@@ -288,7 +266,7 @@ fn prepare_step<'a, P: ProofBuilder>(
             None => {
                 try_assert!(
                     prepare_named_hyp(state, label),
-                    Diagnostic::StepMissing(copy_token(label))
+                    Diagnostic::StepMissing(label.into())
                 );
                 return Ok(out);
             }
@@ -335,13 +313,13 @@ fn prepare_step<'a, P: ProofBuilder>(
     let pos = state.cur_frame.valid.start;
     try_assert!(
         state.order.cmp(&pos, &valid.start) == Ordering::Greater,
-        Diagnostic::StepUsedBeforeDefinition(copy_token(label))
+        Diagnostic::StepUsedBeforeDefinition(label.into())
     );
 
     try_assert!(
         valid.end == NO_STATEMENT
             || pos.segment_id == valid.start.segment_id && pos.index < valid.end,
-        Diagnostic::StepUsedAfterScope(copy_token(label))
+        Diagnostic::StepUsedAfterScope(label.into())
     );
 
     if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
@@ -538,7 +516,7 @@ fn execute_step<P: ProofBuilder>(
                 if state
                     .nameset
                     .lookup_label(tok)
-                    .ok_or_else(|| Diagnostic::BadExplicitLabel(copy_token(tok)))?
+                    .ok_or_else(|| Diagnostic::BadExplicitLabel(tok.into()))?
                     .address
                     != hyp.address()
                 {
@@ -563,10 +541,10 @@ fn execute_step<P: ProofBuilder>(
                         .hypotheses
                         .iter()
                         .position(|hyp| hyp.address() == addr)
-                        .ok_or_else(|| Diagnostic::BadExplicitLabel(copy_token(tok))))?;
+                        .ok_or_else(|| Diagnostic::BadExplicitLabel(tok.into())))?;
                     try_assert!(
                         assn_hyps[hyp_ix].is_none(),
-                        Diagnostic::DuplicateExplicitLabel(copy_token(tok))
+                        Diagnostic::DuplicateExplicitLabel(tok.into())
                     );
                     assn_hyps[hyp_ix] = Some(ix);
                 }
@@ -755,7 +733,7 @@ fn verify_proof<'a, P: ProofBuilder>(
         try_assert!(k == 0, Diagnostic::ProofMalformedVarint);
     } else {
         let mut count = 0;
-        let mut backrefs: HashMap<TokenPtr<'_>, usize> = new_map();
+        let mut backrefs: HashMap<TokenPtr<'_>, usize> = HashMap::default();
         let mut explicit_stack: Option<Vec<Option<TokenPtr<'a>>>> = None;
 
         // NORMAL mode proofs are just a list of steps, with no saving provision
@@ -768,7 +746,7 @@ fn verify_proof<'a, P: ProofBuilder>(
                 try_assert!(step.fwdref.is_none(), Diagnostic::ChainBackref(span));
                 let &ix = backrefs
                     .get(label)
-                    .ok_or_else(|| Diagnostic::StepMissing(copy_token(label)))?;
+                    .ok_or_else(|| Diagnostic::StepMissing(label.into()))?;
                 execute_step(state, ix, explicit_stack.as_mut())?;
             } else {
                 execute_step(state, count, explicit_stack.as_mut())?;
@@ -831,7 +809,7 @@ fn verify_segment(
     scopes: &ScopeResult,
     sid: SegmentId,
 ) -> VerifySegment {
-    let mut diagnostics = new_map();
+    let mut diagnostics = HashMap::default();
     let dummy_frame = Frame::default();
     let sref = sset.segment(sid);
     let mut state = VerifyState {
@@ -846,7 +824,7 @@ fn verify_segment(
         prepared: Vec::new(),
         temp_buffer: Vec::new(),
         subst_info: Vec::new(),
-        var2bit: new_map(),
+        var2bit: HashMap::default(),
         dv_map: &dummy_frame.optional_dv,
     };
     // use the _same_ VerifyState so that memory can be reused
@@ -877,7 +855,7 @@ pub(crate) fn verify(
     nset: &Arc<Nameset>,
     scope: &Arc<ScopeResult>,
 ) {
-    let old = mem::replace(&mut result.segments, new_map());
+    let old = mem::take(&mut result.segments);
     let mut ssrq = Vec::new();
     for sref in segments.segments() {
         let segments2 = segments.clone();
@@ -888,9 +866,7 @@ pub(crate) fn verify(
         ssrq.push(segments.exec.exec(sref.bytes(), move || {
             let sref = segments2.segment(id);
             if let Some(old_res) = old_res_o {
-                if old_res.scope_usage.valid(&nset, &scope)
-                    && ptr_eq::<Segment>(&old_res.source, &sref)
-                {
+                if old_res.scope_usage.valid(&nset, &scope) && Arc::ptr_eq(&old_res.source, &sref) {
                     return (id, old_res);
                 }
             }
@@ -914,7 +890,7 @@ pub(crate) fn verify_one<P: ProofBuilder>(
     db: &Database,
     builder: &mut P,
     stmt: StatementRef<'_>,
-) -> result::Result<P::Item, Diagnostic> {
+) -> Result<P::Item> {
     let dummy_frame = Frame::default();
     let mut state = VerifyState {
         this_seg: stmt.segment(),
@@ -928,7 +904,7 @@ pub(crate) fn verify_one<P: ProofBuilder>(
         prepared: Vec::new(),
         temp_buffer: Vec::new(),
         subst_info: Vec::new(),
-        var2bit: new_map(),
+        var2bit: HashMap::default(),
         dv_map: &dummy_frame.optional_dv,
     };
 

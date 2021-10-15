@@ -32,12 +32,12 @@ use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::nameck::{Atom, NameReader, NameUsage, Nameset};
 use crate::parser::{
-    self, copy_token, Comparer, GlobalRange, Segment, SegmentId, SegmentOrder, SegmentRef,
-    StatementAddress, StatementIndex, StatementRef, StatementType, SymbolType, Token, TokenAddress,
-    TokenPtr, TokenRef, NO_STATEMENT,
+    self, Comparer, GlobalRange, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress,
+    StatementIndex, StatementRef, StatementType, SymbolType, Token, TokenAddress, TokenPtr,
+    TokenRef, NO_STATEMENT,
 };
 use crate::segment_set::SegmentSet;
-use crate::util::{fast_extend, new_map, new_set, ptr_eq, HashMap, HashSet};
+use crate::util::{fast_extend, HashMap, HashSet};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -577,7 +577,7 @@ fn construct_full_frame<'a>(
 
     // collect mandatory variables
     let mut iframe = InchoateFrame {
-        variables: new_map(),
+        variables: HashMap::default(),
         var_list: Vec::new(),
         optional_dv: Vec::new(),
         mandatory_dv: Vec::new(),
@@ -667,7 +667,7 @@ fn scope_check_constant(state: &mut ScopeState<'_>, sref: StatementRef<'_>) {
 }
 
 fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
-    let mut used = new_map();
+    let mut used = HashMap::default();
     let mut bad = false;
     let mut vars = Vec::new();
 
@@ -777,7 +777,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     if sref.in_group() {
         state
             .local_floats
-            .entry(copy_token(&var_tok))
+            .entry((*var_tok).into())
             .or_insert_with(Vec::new)
             .push(LocalFloatInfo {
                 typecode: const_at,
@@ -804,7 +804,7 @@ fn maybe_add_local_var(
 ) -> Option<TokenAddress> {
     let lv_slot = state
         .local_vars
-        .entry(copy_token(&t_ref))
+        .entry((*t_ref).into())
         .or_insert_with(Vec::new);
 
     if let Some(lv_most_recent) = lv_slot.last() {
@@ -893,12 +893,12 @@ fn scope_check_single(
     seg: SegmentRef<'_>,
 ) -> SegmentScopeResult {
     let mut state = ScopeState {
-        diagnostics: new_map(),
+        diagnostics: HashMap::default(),
         order: &sset.order,
         nameset: names,
         gnames: NameReader::new(names),
-        local_vars: new_map(),
-        local_floats: new_map(),
+        local_vars: HashMap::default(),
+        local_floats: HashMap::default(),
         local_dv: Vec::new(),
         local_essen: Vec::new(),
         frames_out: Vec::new(),
@@ -977,7 +977,7 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
     // process all segments in parallel to get new scope results or identify
     // reusable ones
     {
-        let mut prev = new_map();
+        let mut prev = HashMap::default();
         for (sid, ssr) in result.segments.iter().enumerate() {
             prev.insert(SegmentId(sid as u32), ssr.clone());
         }
@@ -989,8 +989,7 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
             ssrq.push_back(segments.exec.exec(sref.bytes(), move || {
                 let sref = segments2.segment(id);
                 if let Some(old_res) = osr {
-                    if old_res.name_usage.valid(&names) && ptr_eq::<Segment>(&old_res.source, &sref)
-                    {
+                    if old_res.name_usage.valid(&names) && Arc::ptr_eq(&old_res.source, &sref) {
                         return None;
                     }
                 }
@@ -1003,7 +1002,7 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
     }
 
     // now update the hashtable
-    let mut stale_ids = new_set();
+    let mut stale_ids = HashSet::default();
     let mut to_add = Vec::new();
 
     for (sid, res) in result.segments.iter().enumerate() {
@@ -1046,7 +1045,7 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
 
         let sref = segments.segment(res_new.id);
         for (index, frame) in res_new.frames_out.iter().enumerate() {
-            let label = copy_token(sref.statement(frame.valid.start.index).label());
+            let label = sref.statement(frame.valid.start.index).label().into();
             let old = result.frame_index.insert(label, (gen, seg_index, index));
             assert!(old.is_none(), "check_label_dup should prevent this");
         }
@@ -1071,8 +1070,8 @@ impl<'a> ScopeReader<'a> {
         ScopeReader {
             result: res,
             incremental: res.incremental,
-            found: new_set(),
-            not_found: new_set(),
+            found: HashSet::default(),
+            not_found: HashSet::default(),
         }
     }
 
@@ -1095,7 +1094,7 @@ impl<'a> ScopeReader<'a> {
             if let Some(frame) = out {
                 self.found.insert(frame.label_atom);
             } else {
-                self.not_found.insert(copy_token(name));
+                self.not_found.insert(name.into());
             }
         }
         out

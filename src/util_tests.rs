@@ -5,8 +5,8 @@ use std::sync::Arc;
 fn test_ptr_eq() {
     let a1 = Arc::new("Hello, world".to_string());
     let a2 = a1.clone();
-    assert!(!util::ptr_eq::<Arc<String>>(&a1, &a2));
-    assert!(util::ptr_eq::<String>(&a1, &a2));
+    assert!(!std::ptr::eq(&a1, &a2));
+    assert!(Arc::ptr_eq(&a1, &a2));
 }
 
 #[test]

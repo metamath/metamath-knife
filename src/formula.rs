@@ -29,7 +29,6 @@ use crate::tree::NodeId;
 use crate::tree::SiblingIter;
 use crate::tree::Tree;
 use crate::util::fast_extend;
-use crate::util::new_map;
 use crate::util::HashMap;
 use crate::verify::ProofBuilder;
 use crate::Database;
@@ -144,7 +143,7 @@ impl Formula {
     /// `other` in order to match this formula.
     #[must_use]
     pub fn unify(&self, other: &Formula) -> Option<Box<Substitutions>> {
-        let mut substitutions = Substitutions(new_map());
+        let mut substitutions = Substitutions(HashMap::default());
         self.sub_unify(self.root, other, other.root, &mut substitutions)?;
         Some(Box::new(substitutions))
     }
