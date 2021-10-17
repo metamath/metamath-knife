@@ -101,10 +101,10 @@ use crate::diag;
 use crate::diag::DiagnosticClass;
 use crate::diag::Notation;
 use crate::export;
+use crate::formula::Label;
 use crate::grammar;
 use crate::grammar::Grammar;
 use crate::grammar::StmtParse;
-use crate::formula::Label;
 use crate::nameck::Nameset;
 use crate::outline::OutlineNode;
 use crate::parser::StatementRef;
@@ -666,9 +666,11 @@ impl Database {
     }
 
     /// Iterates over all the statements
-    #[must_use]
     pub fn statements(&self) -> impl Iterator<Item = StatementRef<'_>> + '_ {
-        self.segments.segments().into_iter().flat_map(|s| { s.into_iter() })
+        self.segments
+            .segments()
+            .into_iter()
+            .flat_map(|s| s.into_iter())
     }
 
     /// Export an mmp file for a given statement.

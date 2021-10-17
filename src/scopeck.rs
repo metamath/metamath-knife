@@ -28,9 +28,6 @@
 //! The scope check procedure runs a single pass over the statements in a
 //! segment, tracking the active `$e` and `$f` statements at each point.
 
-use crate::Database;
-use crate::Formula;
-use crate::Label;
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::nameck::{Atom, NameReader, NameUsage, Nameset};
@@ -41,6 +38,9 @@ use crate::parser::{
 };
 use crate::segment_set::SegmentSet;
 use crate::util::{fast_extend, new_map, new_set, ptr_eq, HashMap, HashSet};
+use crate::Database;
+use crate::Formula;
+use crate::Label;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -1082,15 +1082,17 @@ impl std::ops::Deref for FrameRef<'_> {
 
 impl FrameRef<'_> {
     /// Iterates over the essential hypotheses for this frame.
-    #[must_use]
     pub fn essentials(&self) -> impl Iterator<Item = (Label, Formula)> + '_ {
         self.frame.hypotheses.iter().filter_map(move |hyp| {
             if let Hyp::Essential(sa, _) = hyp {
                 let sref = self.db.parse_result().statement(*sa);
-                let label = self.db.name_result()
+                let label = self
+                    .db
+                    .name_result()
                     .lookup_label(sref.label())
                     .map_or(Label::default(), |l| l.atom);
-                let formula = self.db
+                let formula = self
+                    .db
                     .stmt_parse_result()
                     .get_formula(&sref)
                     .map(Formula::clone)?;
@@ -1101,18 +1103,18 @@ impl FrameRef<'_> {
         })
     }
 
-    ///
-    #[must_use]
+    /// Iterates over the floating hypotheses for this frame.
     pub fn floating(&self) -> impl Iterator<Item = Label> + '_ {
         self.frame.hypotheses.iter().filter_map(move |hyp| {
             if let Hyp::Floating(sa, _, _) = hyp {
                 let sref = self.db.parse_result().statement(*sa);
-                let label = self.db.name_result()
+                let label = self
+                    .db
+                    .name_result()
                     .lookup_label(sref.label())
                     .map_or(Label::default(), |l| l.atom);
                 Some(label)
-            }
-            else {
+            } else {
                 None
             }
         })
@@ -1121,6 +1123,7 @@ impl FrameRef<'_> {
 
 impl Database {
     /// Returns the frame for the given statement label
+    #[must_use]
     pub fn get_frame(&self, label: Label) -> Option<FrameRef<'_>> {
         let token = self.name_result().atom_name(label);
         let frame = self.scope_result().get(token)?;
