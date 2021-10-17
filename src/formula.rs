@@ -288,7 +288,7 @@ impl<'a> FormulaRef<'a> {
     /// and returns the range the newly added string occupies on the buffer.
     ///
     /// See [`crate::verify`] for more about this format.
-    fn append_to_stack_buffer(self, stack_buffer: &mut Vec<u8>) -> Range<usize> {
+    pub fn append_to_stack_buffer(self, stack_buffer: &mut Vec<u8>) -> Range<usize> {
         let tos = stack_buffer.len();
         let nset = &**self.db.name_result();
         for symbol in self {

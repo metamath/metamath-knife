@@ -28,6 +28,9 @@
 //! The scope check procedure runs a single pass over the statements in a
 //! segment, tracking the active `$e` and `$f` statements at each point.
 
+use crate::Database;
+use crate::Formula;
+use crate::Label;
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::nameck::{Atom, NameReader, NameUsage, Nameset};
@@ -235,6 +238,12 @@ pub struct Frame {
 }
 
 impl Frame {
+    /// Augment a frame with a database reference, to produce a [`FrameRef`].
+    #[must_use]
+    pub const fn as_ref<'a>(&'a self, db: &'a Database) -> FrameRef<'a> {
+        FrameRef { db, frame: self }
+    }
+
     /// The list of mandatory variables in the frame.
     #[must_use]
     pub fn mandatory_vars(&self) -> &[Atom] {
@@ -1052,6 +1061,70 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
         }
 
         result.segments[seg_index] = Some(res_new);
+    }
+}
+
+/// A [`Frame`] reference in the context of a [`Database`].
+/// This allows the values in the [`Frame`] to be resolved,
+#[derive(Copy, Clone, Debug)]
+pub struct FrameRef<'a> {
+    db: &'a Database,
+    frame: &'a Frame,
+}
+
+impl std::ops::Deref for FrameRef<'_> {
+    type Target = Frame;
+
+    fn deref(&self) -> &Self::Target {
+        self.frame
+    }
+}
+
+impl FrameRef<'_> {
+    /// Iterates over the essential hypotheses for this frame.
+    #[must_use]
+    pub fn essentials(&self) -> impl Iterator<Item = (Label, Formula)> + '_ {
+        self.frame.hypotheses.iter().filter_map(move |hyp| {
+            if let Hyp::Essential(sa, _) = hyp {
+                let sref = self.db.parse_result().statement(*sa);
+                let label = self.db.name_result()
+                    .lookup_label(sref.label())
+                    .map_or(Label::default(), |l| l.atom);
+                let formula = self.db
+                    .stmt_parse_result()
+                    .get_formula(&sref)
+                    .map(Formula::clone)?;
+                Some((label, formula))
+            } else {
+                None
+            }
+        })
+    }
+
+    ///
+    #[must_use]
+    pub fn floating(&self) -> impl Iterator<Item = Label> + '_ {
+        self.frame.hypotheses.iter().filter_map(move |hyp| {
+            if let Hyp::Floating(sa, _, _) = hyp {
+                let sref = self.db.parse_result().statement(*sa);
+                let label = self.db.name_result()
+                    .lookup_label(sref.label())
+                    .map_or(Label::default(), |l| l.atom);
+                Some(label)
+            }
+            else {
+                None
+            }
+        })
+    }
+}
+
+impl Database {
+    /// Returns the frame for the given statement label
+    pub fn get_frame(&self, label: Label) -> Option<FrameRef<'_>> {
+        let token = self.name_result().atom_name(label);
+        let frame = self.scope_result().get(token)?;
+        Some(frame.as_ref(self))
     }
 }
 
