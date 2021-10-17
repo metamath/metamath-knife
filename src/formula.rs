@@ -251,7 +251,7 @@ impl PartialEq for Formula {
 
 /// A [`Formula`] reference in the context of a [`Database`].
 /// This allows the values in the [`Formula`] to be resolved,
-#[derive(Copy, Clone, Debug)] // TODO(Mario): manual Debug impl
+#[derive(Copy, Clone)] // TODO(Mario): manual Debug impl
 pub struct FormulaRef<'a> {
     db: &'a Database,
     formula: &'a Formula,
@@ -360,6 +360,33 @@ impl<'a> IntoIterator for FormulaRef<'a> {
     }
 }
 
+struct SubFormulaRef<'a> {
+    node_id: NodeId,
+    f_ref: FormulaRef<'a>,
+}
+
+impl<'a> Debug for SubFormulaRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label_name = as_str(
+            self.f_ref
+                .db
+                .name_result()
+                .atom_name(self.f_ref.formula.tree[self.node_id]),
+        );
+        let mut dt = f.debug_tuple(label_name);
+        for s_id in self.f_ref.formula.tree.children_iter(self.node_id) {
+            dt.field(&SubFormulaRef {
+                node_id: s_id,
+                f_ref: FormulaRef {
+                    db: self.f_ref.db,
+                    formula: self.f_ref.formula,
+                },
+            });
+        }
+        dt.finish()
+    }
+}
+
 /// An iterator going through each symbol in a formula
 #[derive(Debug)]
 pub struct Flatten<'a> {
@@ -431,6 +458,16 @@ impl<'a> Display for FormulaRef<'a> {
             write!(f, " {}", as_str(nset.atom_name(symbol)))?;
         }
         Ok(())
+    }
+}
+
+impl<'a> Debug for FormulaRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        SubFormulaRef {
+            node_id: self.formula.root,
+            f_ref: *self,
+        }
+        .fmt(f)
     }
 }
 

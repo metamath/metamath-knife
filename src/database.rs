@@ -670,7 +670,7 @@ impl Database {
         self.segments
             .segments()
             .into_iter()
-            .flat_map(|s| s.into_iter())
+            .flat_map(std::iter::IntoIterator::into_iter)
     }
 
     /// Export an mmp file for a given statement.
