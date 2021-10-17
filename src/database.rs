@@ -667,10 +667,7 @@ impl Database {
 
     /// Iterates over all the statements
     pub fn statements(&self) -> impl Iterator<Item = StatementRef<'_>> + '_ {
-        self.segments
-            .segments()
-            .into_iter()
-            .flat_map(std::iter::IntoIterator::into_iter)
+        self.segments.segments().into_iter().flatten()
     }
 
     /// Export an mmp file for a given statement.

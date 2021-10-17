@@ -251,7 +251,7 @@ impl PartialEq for Formula {
 
 /// A [`Formula`] reference in the context of a [`Database`].
 /// This allows the values in the [`Formula`] to be resolved,
-#[derive(Copy, Clone)] // TODO(Mario): manual Debug impl
+#[derive(Copy, Clone)]
 pub struct FormulaRef<'a> {
     db: &'a Database,
     formula: &'a Formula,
