@@ -7,11 +7,10 @@ use crate::diag::Diagnostic;
 use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
 use crate::nameck::{Atom, NameReader, Nameset};
 use crate::parser::{
-    as_str, copy_token, Segment, SegmentId, StatementAddress, StatementRef, StatementType,
-    SymbolType, Token,
+    as_str, Segment, SegmentId, StatementAddress, StatementRef, StatementType, SymbolType, Token,
 };
 use crate::segment_set::SegmentSet;
-use crate::util::{new_map, HashMap};
+use crate::util::HashMap;
 use crate::Database;
 use log::{debug, warn};
 use std::collections::hash_map::Entry;
@@ -52,7 +51,9 @@ struct GrammarTree(Vec<GrammarNode>);
 impl GrammarTree {
     /// Create a new, empty branch node
     fn create_branch(&mut self) -> NodeId {
-        self.0.push(GrammarNode::Branch { map: new_map() });
+        self.0.push(GrammarNode::Branch {
+            map: HashMap::default(),
+        });
         self.0.len() - 1
     }
 
@@ -378,7 +379,7 @@ impl Default for Grammar {
             typecodes: Vec::new(),
             nodes: GrammarTree(Vec::new()),
             root: 0,
-            diagnostics: new_map(),
+            diagnostics: HashMap::default(),
             debug: false,
         }
     }
@@ -389,17 +390,16 @@ impl Grammar {
     fn initialize(&mut self, sset: &SegmentSet, nset: &Nameset) {
         for (_, command) in sset.parser_commands() {
             assert!(!command.is_empty(), "Empty parser command!");
-            if &command[0].as_ref() == b"syntax" {
-                if command.len() == 4 && &command[2].as_ref() == b"as" {
-                    // syntax '|-' as 'wff';
-                    self.provable_type = nset.lookup_symbol(&command[1]).unwrap().atom;
-                    self.logic_type = nset.lookup_symbol(&command[3]).unwrap().atom;
+            match &*command {
+                [cmd, sort, as_, logic] if **cmd == *b"syntax" && **as_ == *b"as" => {
+                    self.provable_type = nset.lookup_symbol(sort).unwrap().atom;
+                    self.logic_type = nset.lookup_symbol(logic).unwrap().atom;
                     self.typecodes.push(self.logic_type);
-                } else if command.len() == 2 {
-                    // syntax 'setvar';
-                    self.typecodes
-                        .push(nset.lookup_symbol(&command[1]).unwrap().atom);
                 }
+                [cmd, sort] if **cmd == *b"syntax" => {
+                    self.typecodes.push(nset.lookup_symbol(sort).unwrap().atom)
+                }
+                _ => {}
             }
         }
     }
@@ -439,7 +439,7 @@ impl Grammar {
 
     fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Nameset) -> Diagnostic {
         let expected_symbol = map.keys().find(|k| k.0 == SymbolType::Constant).unwrap().1;
-        let expected_token = copy_token(nset.atom_name(expected_symbol));
+        let expected_token = nset.atom_name(expected_symbol).into();
         Diagnostic::ParsedStatementTooShort(expected_token)
     }
 
@@ -1405,7 +1405,7 @@ pub struct StmtParse {
 impl Default for StmtParse {
     fn default() -> Self {
         StmtParse {
-            segments: new_map(),
+            segments: HashMap::default(),
         }
     }
 }
@@ -1485,8 +1485,8 @@ fn parse_statements_single<'a>(
     sid: SegmentId,
 ) -> StmtParseSegment {
     let segment = sset.segment(sid);
-    let mut diagnostics = new_map();
-    let mut formulas = new_map();
+    let mut diagnostics = HashMap::default();
+    let mut formulas = HashMap::default();
 
     for sref in segment {
         match match sref.statement_type() {

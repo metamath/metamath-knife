@@ -636,21 +636,21 @@ impl Database {
     }
 
     /// Returns the statements parsed using the grammar.
-    /// Panics if [`Database::stmt_parse`] was not previously called.
+    /// Panics if [`Database::stmt_parse_pass`] was not previously called.
     #[inline]
     #[must_use]
     pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
         self.stmt_parse.as_ref().unwrap()
     }
 
-    /// A getter method which does not build the outline
+    /// A getter method which does not build the outline.
     #[inline]
     #[must_use]
     pub const fn get_outline(&self) -> Option<&Arc<OutlineNode>> {
         self.outline.as_ref()
     }
 
-    /// Get a statement by label.
+    /// Get a statement by label. Requires: [`Database::name_pass`]
     #[must_use]
     pub fn statement(&self, name: &str) -> Option<StatementRef<'_>> {
         let lookup = self.name_result().lookup_label(name.as_bytes())?;
@@ -671,6 +671,7 @@ impl Database {
     }
 
     /// Export an mmp file for a given statement.
+    /// Requires: [`Database::name_pass`], [`Database::scope_pass`]
     pub fn export(&self, stmt: &str) {
         time(&self.options, "export", || {
             let sref = self.statement(stmt).unwrap_or_else(|| {
@@ -685,6 +686,7 @@ impl Database {
     }
 
     /// Export the grammar of this database in DOT format.
+    /// Requires: [`Database::name_pass`], [`Database::grammar_pass`]
     #[cfg(feature = "dot")]
     pub fn export_grammar_dot(&self) {
         time(&self.options, "export_grammar_dot", || {
@@ -699,6 +701,7 @@ impl Database {
     }
 
     /// Dump the grammar of this database.
+    /// Requires: [`Database::name_pass`], [`Database::grammar_pass`]
     pub fn print_grammar(&self) {
         time(&self.options, "print_grammar", || {
             self.grammar_result().dump(self);
@@ -706,13 +709,15 @@ impl Database {
     }
 
     /// Dump the formulas of this database.
+    /// Requires: [`Database::name_pass`], [`Database::stmt_parse_pass`]
     pub fn print_formula(&self) {
         time(&self.options, "print_formulas", || {
             self.stmt_parse_result().dump(self);
         })
     }
 
-    /// Verify that printing the formulas of this database gives back the original formulas
+    /// Verify that printing the formulas of this database gives back the original formulas.
+    /// Requires: [`Database::name_pass`], [`Database::stmt_parse_pass`]
     pub fn verify_parse_stmt(&self) {
         time(&self.options, "verify_parse_stmt", || {
             if let Err(diag) = self.stmt_parse_result().verify(self) {
@@ -722,6 +727,7 @@ impl Database {
     }
 
     /// Dump the outline of this database.
+    /// Requires: [`Database::outline_pass`]
     pub fn print_outline(&self) {
         time(&self.options, "print_outline", || {
             let root_node = self.outline_result();

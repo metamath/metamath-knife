@@ -5,7 +5,6 @@
 //! although a stable wrapper may be added in `Database`.
 
 use crate::parser::as_str;
-use crate::parser::copy_token;
 use crate::parser::HeadingDef;
 use crate::parser::HeadingLevel;
 use crate::parser::SegmentId;
@@ -32,7 +31,7 @@ impl OutlineNode {
     /// Build the root node for a database
     fn root_node(segments: &[SegmentRef<'_>]) -> Self {
         OutlineNode {
-            name: copy_token(b"Database"),
+            name: (*b"Database").into(),
             level: HeadingLevel::Database,
             stmt_address: StatementAddress::new(segments[0].id, 0),
             children: vec![],

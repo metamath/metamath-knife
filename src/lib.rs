@@ -48,13 +48,10 @@
     clippy::use_self
 )]
 
-pub use filetime;
-pub use fnv;
-pub use regex;
-
 mod bit_set;
 mod segment_set;
 mod tree;
+mod util;
 
 pub mod database;
 pub mod diag;
@@ -67,7 +64,6 @@ pub mod outline;
 pub mod parser;
 pub mod proof;
 pub mod scopeck;
-pub mod util;
 pub mod verify;
 
 #[cfg(test)]
