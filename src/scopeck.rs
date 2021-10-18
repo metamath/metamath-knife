@@ -1080,6 +1080,19 @@ impl std::ops::Deref for FrameRef<'_> {
     }
 }
 
+impl Frame {
+    /// Iterates over the floating hypotheses for this frame.
+    pub fn floating(&self) -> impl Iterator<Item = StatementAddress> + '_ {
+        self.hypotheses.iter().filter_map(move |hyp| {
+            if let Hyp::Floating(sa, _, _) = hyp {
+                Some(*sa)
+            } else {
+                None
+            }
+        })
+    }
+}
+
 impl<'a> FrameRef<'a> {
     /// Iterates over the essential hypotheses for this frame.
     pub fn essentials(self) -> impl Iterator<Item = (Label, &'a Formula)> {
@@ -1100,19 +1113,14 @@ impl<'a> FrameRef<'a> {
     }
 
     /// Iterates over the floating hypotheses for this frame.
-    pub fn floating(&self) -> impl Iterator<Item = Label> + '_ {
-        self.frame.hypotheses.iter().filter_map(move |hyp| {
-            if let Hyp::Floating(sa, _, _) = hyp {
-                let sref = self.db.parse_result().statement(*sa);
-                let label = self
-                    .db
-                    .name_result()
-                    .lookup_label(sref.label())
-                    .map_or(Label::default(), |l| l.atom);
-                Some(label)
-            } else {
-                None
-            }
+    pub fn floating(self) -> impl Iterator<Item = Label> + 'a {
+        self.frame.floating().map(move |sa| {
+            let sref = self.db.parse_result().statement(sa);
+            self
+                .db
+                .name_result()
+                .lookup_label(sref.label())
+                .map_or(Label::default(), |l| l.atom)
         })
     }
 }
