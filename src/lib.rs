@@ -77,5 +77,6 @@ mod util_tests;
 
 pub use database::Database;
 pub use formula::Formula;
+pub use formula::FormulaRef;
 pub use formula::Label;
 pub use formula::Symbol;

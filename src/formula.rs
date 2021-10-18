@@ -250,7 +250,7 @@ impl PartialEq for Formula {
 
 /// A [`Formula`] reference in the context of a [`Database`].
 /// This allows the values in the [`Formula`] to be resolved,
-#[derive(Copy, Clone, Debug)] // TODO(Mario): manual Debug impl
+#[derive(Copy, Clone)]
 pub struct FormulaRef<'a> {
     db: &'a Database,
     formula: &'a Formula,
@@ -287,7 +287,7 @@ impl<'a> FormulaRef<'a> {
     /// and returns the range the newly added string occupies on the buffer.
     ///
     /// See [`crate::verify`] for more about this format.
-    fn append_to_stack_buffer(self, stack_buffer: &mut Vec<u8>) -> Range<usize> {
+    pub fn append_to_stack_buffer(self, stack_buffer: &mut Vec<u8>) -> Range<usize> {
         let tos = stack_buffer.len();
         let nset = &**self.db.name_result();
         for symbol in self {
@@ -356,6 +356,33 @@ impl<'a> IntoIterator for FormulaRef<'a> {
     type IntoIter = Flatten<'a>;
     fn into_iter(self) -> Flatten<'a> {
         self.iter()
+    }
+}
+
+struct SubFormulaRef<'a> {
+    node_id: NodeId,
+    f_ref: FormulaRef<'a>,
+}
+
+impl<'a> Debug for SubFormulaRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label_name = as_str(
+            self.f_ref
+                .db
+                .name_result()
+                .atom_name(self.f_ref.formula.tree[self.node_id]),
+        );
+        let mut dt = f.debug_tuple(label_name);
+        for s_id in self.f_ref.formula.tree.children_iter(self.node_id) {
+            dt.field(&SubFormulaRef {
+                node_id: s_id,
+                f_ref: FormulaRef {
+                    db: self.f_ref.db,
+                    formula: self.f_ref.formula,
+                },
+            });
+        }
+        dt.finish()
     }
 }
 
@@ -430,6 +457,16 @@ impl<'a> Display for FormulaRef<'a> {
             write!(f, " {}", as_str(nset.atom_name(symbol)))?;
         }
         Ok(())
+    }
+}
+
+impl<'a> Debug for FormulaRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        SubFormulaRef {
+            node_id: self.formula.root,
+            f_ref: *self,
+        }
+        .fmt(f)
     }
 }
 
