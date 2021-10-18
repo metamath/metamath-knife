@@ -1116,8 +1116,7 @@ impl<'a> FrameRef<'a> {
     pub fn floating(self) -> impl Iterator<Item = Label> + 'a {
         self.frame.floating().map(move |sa| {
             let sref = self.db.parse_result().statement(sa);
-            self
-                .db
+            self.db
                 .name_result()
                 .lookup_label(sref.label())
                 .map_or(Label::default(), |l| l.atom)
