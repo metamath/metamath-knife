@@ -1,4 +1,3 @@
-use simple_logger::SimpleLogger;
 use crate::database::Database;
 use crate::database::DbOptions;
 use crate::diag::Diagnostic;
@@ -150,14 +149,12 @@ const GRAMMAR_DB_43: &[u8] = b"
 
 #[test]
 fn test_db_43_formula() {
-    SimpleLogger::new().init().unwrap();
     let mut db = mkdb(GRAMMAR_DB_43);
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     {
         let sref = db.statement("check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
-        println!("{:?}", formula.as_ref(&db));
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cab");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "vx");

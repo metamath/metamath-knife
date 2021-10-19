@@ -202,17 +202,32 @@ impl Reduce {
 /// This limit is hard-coded here.
 type ReduceVec = ArrayVec<[Reduce; 5]>;
 
-/// Builds a list of `reduce`s with a single entry.
-fn single_reduce(r: Reduce) -> ReduceVec {
-    let mut reduce_vec = ReduceVec::new();
-    reduce_vec.push(r);
-    reduce_vec
-}
-
 /// Increments the offets of the `reduce`s in the given list.
 fn increment_offsets(rv: &mut ReduceVec) {
     for ref mut reduce in rv {
         reduce.offset += 1;
+    }
+}
+
+/// Extends the `extend` list with the reduces in `rv1`, if not in `rv2`
+fn diff_extend(rv1: ReduceVec, rv2: ReduceVec, extend: &mut ReduceVec) -> Result<(), Diagnostic> {
+    let mut i2 = rv2.iter();
+    let mut or2 = i2.next();
+    for r1 in rv1 {
+        if let Some(r2) = or2 {
+            if r1.label == r2.label {
+                or2 = i2.next();
+            } else {
+                extend.push(r1);
+            }
+        } else {
+            extend.push(r1);
+        }
+    }
+    if or2.is_some() {
+        Err(Diagnostic::GrammarCantBuild)
+    } else {
+        Ok(())
     }
 }
 
@@ -918,6 +933,7 @@ impl Grammar {
         let mut add_from_node_id = self.root;
         let mut shadowing_atom: Atom;
         let mut shadowing_stype;
+        let mut missing_reduce = ReduceVec::new();
         for token in &prefix[index..] {
             let lookup_symbol = names.lookup_symbol(token).unwrap();
             debug!(
@@ -929,25 +945,36 @@ impl Grammar {
             shadowing_stype = lookup_symbol.stype;
             shadowing_atom = match shadowing_stype {
                 SymbolType::Constant => lookup_symbol.atom,
-                SymbolType::Variable => names.lookup_float(token).unwrap().typecode_atom,
+                SymbolType::Variable => {
+                    increment_offsets(&mut missing_reduce);
+                    names.lookup_float(token).unwrap().typecode_atom
+                }
             };
-            node_id = self
+            let add_to_next_node = self
                 .nodes
                 .get(node_id)
                 .next_node(shadowing_atom, shadowing_stype)
-                .expect("Prefix cannot be parsed!")
-                .next_node_id;
+                .expect("Prefix cannot be parsed!");
+            node_id = add_to_next_node.next_node_id;
             add_from_node_id = match self
                 .nodes
                 .get(add_from_node_id)
                 .next_node(shadowing_atom, shadowing_stype)
             {
-                Some(next_node) => next_node.next_node_id,
+                Some(next_node) => {
+                    diff_extend(
+                        next_node.leaf_label,
+                        add_to_next_node.leaf_label,
+                        &mut missing_reduce,
+                    )?;
+                    next_node.next_node_id
+                }
                 None => self.expand_tree(add_from_node_id, shadowing_atom, shadowing_stype, db),
             }
         }
 
         debug!("Shadowed token: {}", as_str(&shadows[index]));
+        debug!("Missing reduces: {}", missing_reduce.len());
         debug!(
             "Handle shadowed next node {}, typecode {:?}",
             shadowed_next_node, shadowed_typecode
@@ -966,11 +993,11 @@ impl Grammar {
         };
         match self.nodes.get(add_from_node_id) {
             GrammarNode::Branch { .. } => {
-                self.clone_branches(add_from_node_id, node_id, db, ReduceVec::new(), make_final);
+                self.clone_branches(add_from_node_id, node_id, db, missing_reduce, make_final);
             }
             GrammarNode::Leaf { reduce, .. } => {
-                let rv = single_reduce(*reduce);
-                self.clone_with_reduce_vec(shadowed_next_node, node_id, &rv);
+                missing_reduce.push(*reduce);
+                self.clone_with_reduce_vec(shadowed_next_node, node_id, &missing_reduce);
             }
         }
 
