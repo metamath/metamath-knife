@@ -72,6 +72,7 @@ pub enum Diagnostic {
     FloatRedeclared(StatementAddress),
     FormulaVerificationFailed,
     GrammarAmbiguous(StatementAddress),
+    GrammarCantBuild,
     GrammarProvableFloat,
     IoError(String),
     LocalLabelAmbiguous(Span),
@@ -346,6 +347,10 @@ fn annotate_diagnostic(
             info.s = "Collision with this statement:";
             info.level = Note;
             ann(&mut info, Span::NULL);
+        }
+        GrammarCantBuild => {
+            info.s = "Can't build the grammar";
+            ann(&mut info, stmt.span());
         }
         GrammarProvableFloat => {
             info.s = "Floating declaration of provable type";

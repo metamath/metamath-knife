@@ -127,6 +127,47 @@ fn test_db_32_formula() {
     }
 }
 
+// This grammar exposes issue #43 in the statement parser
+const GRAMMAR_DB_43: &[u8] = b"
+    $c |- wff class setvar ( ) { } = e. | |-> /\\ $.
+    $( $j syntax 'class'; syntax 'setvar'; syntax 'wff'; syntax '|-' as 'wff';
+          type_conversions; garden_path ( x e. A   =>   ( ph ; $)
+    $v ph ps A B x $.
+    wph $f wff ph $.
+    wps $f wff ps $.
+    cA $f class A $.
+    cB $f class B $.
+    vx $f setvar x $.
+    cv $a class x $.
+    weq $a wff A = B $.
+    wcel $a wff A e. B $.
+    wa $a wff ( ph /\\ ps ) $.
+    cab $a class { x | ph } $.
+    cmpt $a class ( x e. A |-> B ) $.
+    check $a |- { x | ( x e. A /\\ ph ) } = B $.
+";
+
+#[test]
+fn test_db_43_formula() {
+    let mut db = mkdb(GRAMMAR_DB_43);
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let names = db.name_pass().clone();
+    {
+        let sref = db.statement("check").unwrap();
+        let formula = stmt_parse.get_formula(&sref).unwrap();
+        assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cab");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "wa");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1]).unwrap())) == "wcel");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1, 1]).unwrap())) == "cv");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1, 1, 1]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1, 2]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 2]).unwrap())) == "wph");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cB");
+    }
+}
+
 // A minimal set.mm-like database with "Garden Paths"
 const GARDEN_PATH_DB: &[u8] = b"
     $c |- wff class setvar { } <. >. , | e. = $.
