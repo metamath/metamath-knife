@@ -465,13 +465,11 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
                             &self.backref_alloc[fwdref - 1]
                         } else {
                             let mut s;
-                            loop {
+                            while {
                                 self.backref_max += 1;
                                 s = self.backref_max.to_string();
-                                if !self.p.nset.lookup_label(s.as_bytes()).is_some() {
-                                    break;
-                                }
-                            }
+                                self.p.nset.lookup_label(s.as_bytes()).is_some()
+                            } {}
                             self.backref_alloc.push(s);
                             self.backref_alloc.last().unwrap()
                         },
