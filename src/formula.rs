@@ -64,6 +64,16 @@ impl Index<Label> for Substitutions {
 }
 
 impl Substitutions {
+    /// Augment a substitution with a database reference, to produce a [`SubstitutionsRef`].
+    /// The resulting object implements [`Debug`].
+    #[must_use]
+    pub const fn as_ref<'a>(&'a self, db: &'a Database) -> SubstitutionsRef<'a> {
+        SubstitutionsRef {
+            db,
+            substitutions: self,
+        }
+    }
+
     /// Inserts a substitution into the substitution set.
     pub fn insert(&mut self, label: Label, formula: Formula) -> Option<Formula> {
         self.0.insert(label, formula)
@@ -72,6 +82,42 @@ impl Substitutions {
     /// Add all the provided substitutions to this one
     pub fn extend(&mut self, substitutions: &Substitutions) {
         self.0.extend(substitutions.0.clone());
+    }
+
+    /// Gets the formula the given label is to be substituted with.
+    #[inline]
+    #[must_use]
+    pub fn get(&self, label: Label) -> Option<&Formula> {
+        self.0.get(&label)
+    }
+}
+
+/// A [`Substitutions`] reference in the context of a [`Database`].
+/// This allows the values in the [`Substitutions`] to be resolved,
+#[derive(Copy, Clone)]
+pub struct SubstitutionsRef<'a> {
+    db: &'a Database,
+    substitutions: &'a Substitutions,
+}
+
+impl<'a> std::ops::Deref for SubstitutionsRef<'a> {
+    type Target = Substitutions;
+
+    fn deref(&self) -> &Self::Target {
+        self.substitutions
+    }
+}
+
+impl<'a> Debug for SubstitutionsRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dm = f.debug_map();
+        for (label, formula) in &self.substitutions.0 {
+            dm.entry(
+                &as_str(self.db.name_result().atom_name(*label)),
+                &formula.as_ref(self.db),
+            );
+        }
+        dm.finish()
     }
 }
 
