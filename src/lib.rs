@@ -29,6 +29,7 @@
 )]
 // // all the clippy lints we don't want
 #![allow(
+    clippy::blocks_in_if_conditions,
     clippy::cast_sign_loss,
     clippy::cast_possible_wrap,
     clippy::enum_glob_use,
