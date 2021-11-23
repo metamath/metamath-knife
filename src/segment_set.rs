@@ -80,7 +80,7 @@ impl Hash for LongBuf {
 
 impl PartialEq for LongBuf {
     fn eq(&self, other: &Self) -> bool {
-        self == other
+        self.0 == other.0
     }
 }
 
