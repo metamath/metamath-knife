@@ -107,6 +107,7 @@ use crate::grammar::Grammar;
 use crate::grammar::StmtParse;
 use crate::nameck::Nameset;
 use crate::outline::OutlineNode;
+use crate::parser::Comparer;
 use crate::parser::StatementRef;
 use crate::scopeck;
 use crate::scopeck::ScopeResult;
@@ -668,6 +669,39 @@ impl Database {
     /// Iterates over all the statements
     pub fn statements(&self) -> impl Iterator<Item = StatementRef<'_>> + '_ {
         self.segments.segments().into_iter().flatten()
+    }
+
+    /// Iterates over all the statements until, but not including, the given label
+    #[must_use]
+    pub fn statements_until(
+        &self,
+        label: Label,
+    ) -> Option<impl Iterator<Item = StatementRef<'_>> + '_> {
+        let token = self.name_result().atom_name(label);
+        let lookup = self.name_result().lookup_label(token)?;
+        Some(
+            self.segments
+                .segments()
+                .into_iter()
+                .flatten()
+                .take_while(move |sref| {
+                    self.segments.order.cmp(&sref.address(), &lookup.address) == Ordering::Less
+                }),
+        )
+    }
+
+    /// Compare the database position of two labels. Proofs can only reference earlier theorems.
+    #[must_use]
+    pub fn cmp(&self, left: &Label, right: &Label) -> Option<std::cmp::Ordering> {
+        let token_left = self.name_result().atom_name(*left);
+        let token_right = self.name_result().atom_name(*right);
+        let lookup_left = self.name_result().lookup_label(token_left)?;
+        let lookup_right = self.name_result().lookup_label(token_right)?;
+        Some(
+            self.parse_result()
+                .order
+                .cmp(&lookup_left.address, &lookup_right.address),
+        )
     }
 
     /// Export an mmp file for a given statement.
