@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::io;
 use std::sync::Arc;
-//use strfmt::strfmt;
+use strfmt::strfmt;
 
 /// List of passes that generate diagnostics, for use with the
 /// `Database::diag_notations` filter.
@@ -183,7 +183,6 @@ pub fn make_snippet<'a>(
 /// * `args` - Values to substitute for the `{placeholders}` in the message.  `String`
 /// could be replaced with a richer enum.
 /// * `lc` - A helper struct for keeping track of line numbers in the source file
-/// * `buffer` - A buffer with the required lifetime to copy the textual info into.
 fn make_slice<'a>(
     source: Arc<SourceInfo>,
     message: &'static str,
