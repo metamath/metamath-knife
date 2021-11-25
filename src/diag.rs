@@ -4,6 +4,9 @@
 //! interpretation and testing, as well as a mostly-text representation which
 //! can be used for various human-readable outputs.
 
+use annotate_snippets::display_list::FormatOptions;
+use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
+use crate::line_cache::LineCache;
 use crate::parser::as_str;
 use crate::parser::Comparer;
 use crate::parser::Span;
@@ -15,10 +18,11 @@ use crate::parser::TokenAddress;
 use crate::parser::TokenIndex;
 use crate::segment_set::SegmentSet;
 use crate::segment_set::SourceInfo;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::io;
-use std::mem;
 use std::sync::Arc;
+//use strfmt::strfmt;
 
 /// List of passes that generate diagnostics, for use with the
 /// `Database::diag_notations` filter.
@@ -129,84 +133,94 @@ impl From<io::Error> for Diagnostic {
     }
 }
 
-/// An indication of the severity of a notation.
-#[derive(Copy, Clone, Debug)]
-pub enum Level {
-    /// Notes indicate other statements relevant to an error which is primarily
-    /// elsewhere.
-    Note,
-    /// Warnings indicate constructs which are defined by the spec but also
-    /// forbidden by the spec, as well as issues with non-spec extensions.
-    Warning,
-    /// Errors are forbidden by the spec and invalidate the logical content of
-    /// the database.
-    Error,
-}
-use self::Level::*;
-
-/// A notation is a human-readable description of a diagnostic, with a single
-/// structure, named fields, and identifying a single source location.
-#[derive(Debug)]
-pub struct Notation {
-    /// Reference to source data, including the filename and text which could be
-    /// used to calculate line numbers or print an invalid excerpt.
-    pub source: Arc<SourceInfo>,
-    /// A message for the diagnostic, which may contain `{placeholders}`.  The
-    /// message will be in English but, being not dynamically generated, it is
-    /// suitable for remapping with a resource file.
-    pub message: &'static str,
-    /// The location of the error (byte offset within the SourceInfo; _this is
-    /// not the same as the byte offset in the file_).
-    pub span: Span,
-    /// Severity level of the message
-    pub level: Level,
-    /// Values to substitute for the `{placeholders}` in the message.  `String`
-    /// could be replaced with a richer enum.
-    pub args: Vec<(&'static str, String)>,
-}
-
 /// Converts a collection of raw diagnostics to a notation list before output.
 #[must_use]
-pub(crate) fn to_annotations(
-    sset: &SegmentSet,
+pub(crate) fn to_annotations<'a>(
+    sset: &'a SegmentSet,
+    lc: &mut LineCache,
     mut diags: Vec<(StatementAddress, Diagnostic)>,
-) -> Vec<Notation> {
+) -> Vec<Snippet<'a>> {
     diags.sort_by(|x, y| sset.order.cmp(&x.0, &y.0));
     let mut out = Vec::new();
     for (saddr, diag) in diags {
-        annotate_diagnostic(&mut out, sset, sset.statement(saddr), &diag);
+        out.push(annotate_diagnostic(sset, sset.statement(saddr), lc, &diag));
     }
     out
 }
 
-fn annotate_diagnostic(
-    notes: &mut Vec<Notation>,
-    sset: &SegmentSet,
-    stmt: StatementRef<'_>,
+/// Converts a raw diagnostics to a snippet
+#[must_use]
+pub fn make_snippet<'a>(
+    slices: Vec<Slice<'a>>,
+) -> Snippet<'a> {
+    Snippet {
+        title: Some(Annotation {
+            label: None,
+            id: None,
+            annotation_type: slices[0].annotations[0].annotation_type,
+        }),
+        footer: vec![],
+        slices,
+        opt: FormatOptions {
+            color: true,
+            ..FormatOptions::default()
+        },
+    }
+}
+
+/// Creates a `Slice` containing a diagnostic annotation.
+/// 
+/// # Arguments
+///
+/// * `source` - Reference to source data, including the filename and text which could be
+/// used to calculate line numbers or print an invalid excerpt.
+/// * `message` - A message for the diagnostic, which may contain `{placeholders}`.  The
+/// message will be in English but, being not dynamically generated, it is
+/// suitable for remapping with a resource file.
+/// * `span` - The location of the error (byte offset within the SourceInfo; _this is
+/// not the same as the byte offset in the file_).
+/// * `annotation_type` -  Severity level of the message
+/// * `args` - Values to substitute for the `{placeholders}` in the message.  `String`
+/// could be replaced with a richer enum.
+/// * `lc` - A helper struct for keeping track of line numbers in the source file
+/// * `buffer` - A buffer with the required lifetime to copy the textual info into.
+fn make_slice<'a>(
+    source: Arc<SourceInfo>,
+    message: &'static str,
+    span: Span,
+    annotation_type: AnnotationType,
+    args: Vec<(&'static str, String)>,
+    lc: &mut LineCache,
+) -> Slice<'a> {
+    let mut vars = HashMap::new();
+    for (name, value) in args { vars.insert(name.to_string(), value); }
+    let label = strfmt(&message, &vars).unwrap().as_str();
+    let offs = (span.start + source.span.start) as usize;
+    let (_, col) = lc.from_offset(&source.text, offs);
+    let line_end = LineCache::line_end(&source.text, offs);
+    let end_offs = (span.end + source.span.start) as usize;
+    let line_start = offs - (col - 1) as usize;
+    Slice {
+        source: as_str(&source.text[line_start..line_end]),
+        line_start: 0,
+        origin: Some(source.name.as_str()),
+        annotations: vec![
+            SourceAnnotation {
+                label,
+                annotation_type,
+                range: (offs - line_start, end_offs - line_start),
+            },
+        ],
+        fold: false,
+    }
+}
+
+fn annotate_diagnostic<'a>(
+    sset: &'a SegmentSet,
+    stmt: StatementRef<'a>,
+    lc: &mut LineCache,
     diag: &Diagnostic,
-) {
-    struct AnnInfo<'a> {
-        notes: &'a mut Vec<Notation>,
-        sset: &'a SegmentSet,
-        stmt: StatementRef<'a>,
-        level: Level,
-        s: &'static str,
-        args: Vec<(&'static str, String)>,
-    }
-
-    fn ann(info: &mut AnnInfo<'_>, mut span: Span) {
-        if span.is_null() {
-            span = info.stmt.span();
-        }
-        info.notes.push(Notation {
-            source: info.sset.source_info(info.stmt.segment().id).clone(),
-            message: info.s,
-            span,
-            level: info.level,
-            args: mem::take(&mut info.args),
-        })
-    }
-
+) -> Snippet<'a> {
     fn d<V: Display>(v: V) -> String {
         format!("{}", v)
     }
@@ -215,13 +229,36 @@ fn annotate_diagnostic(
         as_str(v).to_owned()
     }
 
+    #[derive(Clone)]
+    struct AnnInfo<'a> {
+        sset: &'a SegmentSet,
+        stmt: StatementRef<'a>,
+        annotation_type: AnnotationType,
+        s: &'static str,
+        args: Vec<(&'static str, String)>,
+    }
+
+    let mut slices = vec![];
     let mut info = AnnInfo {
-        notes,
         sset,
         stmt,
-        level: Error,
+        annotation_type: AnnotationType::Error,
         s: "",
         args: Vec::new(),
+    };
+
+    let mut ann = |info: AnnInfo<'a>, mut span: Span| {
+        if span.is_null() {
+            span = info.stmt.span();
+        }
+        slices.push(make_slice(
+            sset.source_info(info.stmt.segment().id).clone(),
+            info.s,
+            span,
+            info.annotation_type,
+            info.args,
+            lc,
+        ));
     };
 
     match *diag {
@@ -229,353 +266,366 @@ fn annotate_diagnostic(
             info.s = "Invalid character (byte value {byte}); Metamath source files are limited to \
                       US-ASCII with controls TAB, CR, LF, FF)";
             info.args.push(("byte", d(byte)));
-            ann(&mut info, Span::new(span, span + 1));
+            ann(info, Span::new(span, span + 1));
         }
         BadCommentEnd(tok, opener) => {
+            let mut info2 = info.clone();
             info.s = "$) sequence must be surrounded by whitespace to end a comment";
-            info.level = Warning;
-            ann(&mut info, tok);
-            info.s = "Comment started here";
-            info.level = Note;
-            ann(&mut info, opener);
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, tok);
+            info2.s = "Comment started here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, opener);
         }
         BadExplicitLabel(ref tok) => {
             info.s = "Explicit label {label} does not refer to a hypothesis of the parent step";
             info.args.push(("label", t(tok)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         BadFloating => {
             info.s = "A $f statement must have exactly two math tokens";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         BadLabel(lbl) => {
             info.s = "Statement labels may contain only alphanumeric characters and - _ .";
-            ann(&mut info, lbl);
+            ann(info, lbl);
         }
         ChainBackref(span) => {
             info.s = "Backreference steps are not permitted to have local labels";
-            ann(&mut info, span);
+            ann(info, span);
         }
         CommentMarkerNotStart(marker) => {
             info.s = "This comment marker must be the first token in the comment to be effective";
-            info.level = Warning;
-            ann(&mut info, marker);
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, marker);
         }
         ConstantNotTopLevel => {
             info.s = "$c statements are not allowed in nested groups";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         DisjointSingle => {
             info.s = "A $d statement which lists only one variable is meaningless";
-            info.level = Warning;
-            ann(&mut info, stmt.span());
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, stmt.span());
         }
         DjNotVariable(index) => {
             info.s = "$d constraints are not applicable to constants";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         DjRepeatedVariable(index1, index2) => {
+            let mut info2 = info.clone();
             info.s = "A variable may not be used twice in the same $d constraint";
-            ann(&mut info, stmt.math_span(index1));
-            info.s = "Previous appearance was here";
-            info.level = Note;
-            ann(&mut info, stmt.math_span(index2));
+            ann(info, stmt.math_span(index1));
+            info2.s = "Previous appearance was here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, stmt.math_span(index2));
         }
         DuplicateExplicitLabel(ref tok) => {
             info.s = "Explicit label {label} is used twice in the same step";
             info.args.push(("label", t(tok)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         DuplicateLabel(prevstmt) => {
+            let mut info2 = info.clone();
             info.s = "Statement labels must be unique";
-            ann(&mut info, stmt.span());
-            info.stmt = sset.statement(prevstmt);
-            info.s = "Label was previously used here";
-            info.level = Note;
-            ann(&mut info, Span::NULL);
+            ann(info, stmt.span());
+            info2.stmt = sset.statement(prevstmt);
+            info2.s = "Label was previously used here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, Span::NULL);
         }
         EmptyFilename => {
             info.s = "Filename included by a $[ directive must not be empty";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         EmptyMathString => {
             info.s = "A math string must have at least one token";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         EssentialAtTopLevel => {
             info.s = "$e statements must be inside scope brackets, not at the top level";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ExprNotConstantPrefix(index) => {
             info.s = "The math string of an $a, $e, or $p assertion must start with a constant, \
                      not a variable";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         FilenameDollar => {
             info.s = "Filenames included by $[ are not allowed to contain the $ character";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         FilenameSpaces => {
             info.s = "Filenames included by $[ are not allowed to contain whitespace";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         FloatNotConstant(index) => {
             info.s = "The first token of a $f statement must be a declared constant (typecode)";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         FloatNotVariable(index) => {
             info.s = "The second token of a $f statement must be a declared variable (to \
                      associate the type)";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         FloatRedeclared(saddr) => {
+            let mut info2 = info.clone();
             info.s = "There is already an active $f for this variable";
-            ann(&mut info, stmt.span());
-            info.stmt = sset.statement(saddr);
-            info.s = "Previous $f was here";
-            info.level = Note;
-            ann(&mut info, Span::NULL);
+            ann(info, stmt.span());
+            info2.stmt = sset.statement(saddr);
+            info2.s = "Previous $f was here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, Span::NULL);
         }
         FormulaVerificationFailed => {
             info.s = "Formula verification failed at this symbol";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         GrammarAmbiguous(prevstmt) => {
+            let mut info2 = info.clone();
             info.s = "Grammar is ambiguous; ";
-            ann(&mut info, stmt.span());
-            info.stmt = sset.statement(prevstmt);
-            info.s = "Collision with this statement:";
-            info.level = Note;
-            ann(&mut info, Span::NULL);
+            ann(info, stmt.span());
+            info2.stmt = sset.statement(prevstmt);
+            info2.s = "Collision with this statement:";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, Span::NULL);
         }
         GrammarCantBuild => {
             info.s = "Can't build the grammar";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         GrammarProvableFloat => {
             info.s = "Floating declaration of provable type";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         IoError(ref err) => {
             info.s = "Source file could not be read (error: {error})";
             info.args.push(("error", err.clone()));
-            ann(&mut info, Span::NULL);
+            ann(info, Span::NULL);
         }
         LocalLabelAmbiguous(span) => {
             info.s = "Local label conflicts with the name of an existing statement";
-            ann(&mut info, span);
+            ann(info, span);
         }
         LocalLabelDuplicate(span) => {
             info.s = "Local label duplicates another label in the same proof";
-            ann(&mut info, span);
+            ann(info, span);
         }
         MalformedAdditionalInfo(span) => {
             info.s = "Malformed additional information";
-            ann(&mut info, span);
+            ann(info, span);
         }
         MidStatementCommentMarker(marker) => {
             info.s = "Marked comments are only effective between statements, not inside them";
-            info.level = Warning;
-            ann(&mut info, marker);
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, marker);
         }
         MissingLabel => {
             info.s = "This statement type requires a label";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         MissingProof(math_end) => {
             info.s = "Provable assertion requires a proof introduced with $= here; use $= ? $. \
                      if you do not have a proof yet";
-            ann(&mut info, math_end);
+            ann(info, math_end);
         }
         NestedComment(tok, opener) => {
+            let mut info2 = info.clone();
             info.s = "Nested comments are not supported - comment will end at the first $)";
-            info.level = Warning;
-            ann(&mut info, tok);
-            info.s = "Comment started here";
-            info.level = Note;
-            ann(&mut info, opener);
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, tok);
+            info2.s = "Comment started here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, opener);
         }
         NotActiveSymbol(index) => {
             info.s = "Token used here must be active in the current scope";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         NotAProvableStatement => {
             info.s = "Statement does not start with the provable constant type";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ParsedStatementNoTypeCode => {
             info.s = "Empty statement";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ParsedStatementTooShort(ref tok) => {
             info.s = "Statement is too short, expecting for example {expected}";
             info.args.push(("expected", t(tok)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ParsedStatementWrongTypeCode(ref found) => {
             info.s = "Type code {found} is not among the expected type codes";
             info.args.push(("found", t(found)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofDvViolation => {
             info.s = "Disjoint variable constraint violated";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofExcessEnd => {
             info.s = "Must be exactly one statement on stack at end of proof";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofIncomplete => {
             info.s = "Proof is incomplete";
-            info.level = Warning;
-            ann(&mut info, stmt.span());
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, stmt.span());
         }
         ProofInvalidSave => {
             info.s = "Z must appear immediately after a complete step integer";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofMalformedVarint => {
             info.s = "Proof step number too long or missing terminator";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofNoSteps => {
             info.s = "Proof must have at least one step (use ? if deliberately incomplete)";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofUnderflow => {
             info.s = "Too few statements on stack to satisfy step's mandatory hypotheses";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofUnterminatedRoster => {
             info.s = "List of referenced assertions in a compressed proof must be terminated by )";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofWrongExprEnd => {
             info.s = "Final step statement does not match assertion";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         ProofWrongTypeEnd => {
             info.s = "Final step typecode does not match assertion";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         RepeatedLabel(l_span, f_span) => {
+            let mut info2 = info.clone();
             info.s = "A statement may have only one label";
-            ann(&mut info, l_span);
-            info.s = "First label was here";
-            info.level = Note;
-            ann(&mut info, f_span);
+            ann(info, l_span);
+            info2.s = "First label was here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, f_span);
         }
         SpuriousLabel(lspan) => {
             info.s = "Labels are only permitted for statements of type $a, $e, $f, or $p";
-            ann(&mut info, lspan);
+            ann(info, lspan);
         }
         SpuriousProof(math_end) => {
             info.s = "Proofs are only allowed on $p assertions";
-            ann(&mut info, math_end);
+            ann(info, math_end);
         }
         StepEssenWrong => {
             info.s = "Step used for $e hypothesis does not match statement";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         StepEssenWrongType => {
             info.s = "Step used for $e hypothesis does not match typecode";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         StepFloatWrongType => {
             info.s = "Step used for $f hypothesis does not match typecode";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         StepMissing(ref tok) => {
             info.s = "Step {step} referenced by proof does not correspond to a $p statement (or \
                       is malformed)";
             info.args.push(("step", t(tok)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         StepOutOfRange => {
             info.s = "Step in compressed proof is out of range of defined steps";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         StepUsedAfterScope(ref tok) => {
             info.s = "Step {step} referenced by proof is a hypothesis not active in this scope";
             info.args.push(("step", t(tok)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         StepUsedBeforeDefinition(ref tok) => {
             info.s = "Step {step} referenced by proof has not yet been proved";
             info.args.push(("step", t(tok)));
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         SymbolDuplicatesLabel(index, saddr) => {
+            let mut info2 = info.clone();
             info.s = "Metamath spec forbids symbols which are the same as labels in the same \
                      database";
-            info.level = Warning;
-            ann(&mut info, stmt.math_span(index));
-            info.stmt = sset.statement(saddr);
-            info.s = "Symbol was used as a label here";
-            info.level = Note;
-            ann(&mut info, Span::NULL);
+            info.annotation_type = AnnotationType::Warning;
+            ann(info, stmt.math_span(index));
+            info2.stmt = sset.statement(saddr);
+            info2.s = "Symbol was used as a label here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, Span::NULL);
         }
         SymbolRedeclared(index, taddr) => {
+            let mut info2 = info.clone();
             info.s = "This symbol is already active in this scope";
-            ann(&mut info, stmt.math_span(index));
-            info.stmt = sset.statement(taddr.statement);
-            info.s = "Symbol was previously declared here";
-            info.level = Note;
-            let sp = info.stmt.math_span(taddr.token_index);
-            ann(&mut info, sp);
+            ann(info, stmt.math_span(index));
+            info2.stmt = sset.statement(taddr.statement);
+            info2.s = "Symbol was previously declared here";
+            info2.annotation_type = AnnotationType::Note;
+            let sp = info2.stmt.math_span(taddr.token_index);
+            ann(info2, sp);
         }
         UnclosedBeforeEof => {
             info.s = "${ group must be closed with a $} before end of file";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         UnclosedBeforeInclude(index) => {
+            let mut info2 = info.clone();
             info.s = "${ group must be closed with a $} before another file can be included";
-            ann(&mut info, stmt.span());
-            info.stmt = stmt.segment().statement(index);
-            info.s = "Include statement is here";
-            info.level = Note;
-            ann(&mut info, Span::NULL);
+            ann(info, stmt.span());
+            info2.stmt = stmt.segment().statement(index);
+            info2.s = "Include statement is here";
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, Span::NULL);
         }
         UnclosedComment(comment) => {
             info.s = "Comment requires closing $) before end of file";
-            ann(&mut info, comment);
+            ann(info, comment);
         }
         UnclosedInclude => {
             info.s = "$[ requires a matching $]";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         UnclosedMath => {
             info.s = "A math string must be closed with $= or $.";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         UnclosedProof => {
             info.s = "A proof must be closed with $.";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         UnknownKeyword(kwspan) => {
             info.s = "Statement-starting keyword must be one of $a $c $d $e $f $p $v";
-            ann(&mut info, kwspan);
+            ann(info, kwspan);
         }
         UnmatchedCloseGroup => {
             info.s = "This $} does not match any open ${";
-            ann(&mut info, stmt.span());
+            ann(info, stmt.span());
         }
         UnparseableStatement(index) => {
             info.s = "Could not parse this statement";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         VariableMissingFloat(index) => {
             info.s = "Variable token used in statement must have an active $f";
-            ann(&mut info, stmt.math_span(index));
+            ann(info, stmt.math_span(index));
         }
         VariableRedeclaredAsConstant(index, taddr) => {
+            let mut info2 = info.clone();
             info.s = "Symbol cannot be used as a variable here and as a constant later";
-            ann(&mut info, stmt.math_span(index));
-            info.stmt = sset.statement(taddr.statement);
-            info.s = "Symbol will be used as a constant here";
-            let sp = info.stmt.math_span(taddr.token_index);
-            info.level = Note;
-            ann(&mut info, sp);
+            ann(info, stmt.math_span(index));
+            info2.stmt = sset.statement(taddr.statement);
+            info2.s = "Symbol will be used as a constant here";
+            let sp = info2.stmt.math_span(taddr.token_index);
+            info2.annotation_type = AnnotationType::Note;
+            ann(info2, sp);
         }
-    }
+    };
+
+    make_snippet(slices)
 }

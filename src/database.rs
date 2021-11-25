@@ -97,14 +97,15 @@
 //! To improve packing efficiency, jobs are dispatched in descending order of
 //! estimated runtime.  This requires an additional argument when queueing.
 
+use annotate_snippets::snippet::Snippet;
 use crate::diag;
 use crate::diag::DiagnosticClass;
-use crate::diag::Notation;
 use crate::export;
 use crate::formula::Label;
 use crate::grammar;
 use crate::grammar::Grammar;
 use crate::grammar::StmtParse;
+use crate::line_cache::LineCache;
 use crate::nameck::Nameset;
 use crate::outline::OutlineNode;
 use crate::parser::Comparer;
@@ -754,9 +755,7 @@ impl Database {
     /// Requires: [`Database::name_pass`], [`Database::stmt_parse_pass`]
     pub fn verify_parse_stmt(&self) {
         time(&self.options, "verify_parse_stmt", || {
-            if let Err(diag) = self.stmt_parse_result().verify(self) {
-                drop(diag::to_annotations(self.parse_result(), vec![diag]));
-            }
+            drop(self.stmt_parse_result().verify(self));
         })
     }
 
@@ -792,8 +791,9 @@ impl Database {
     ///
     /// Currently there is no way to incrementally fetch diagnostics, so this
     /// will be a bit slow if there are thousands of errors.
-    pub fn diag_notations(&mut self, types: &[DiagnosticClass]) -> Vec<Notation> {
+    pub fn diag_notations(&mut self, types: &[DiagnosticClass]) -> Vec<Snippet<'_>> {
         let mut diags = Vec::new();
+        let mut lc = LineCache::default();
         if types.contains(&DiagnosticClass::Parse) {
             diags.extend(self.parse_result().parse_diagnostics());
         }
@@ -809,8 +809,8 @@ impl Database {
         if types.contains(&DiagnosticClass::StmtParse) {
             diags.extend(self.stmt_parse_pass().diagnostics());
         }
-        time(&self.options.clone(), "diag", || {
-            diag::to_annotations(self.parse_result(), diags)
+        time(&self.options.clone(), "diag", move || {
+            diag::to_annotations(self.parse_result(), &mut lc, diags)
         })
     }
 }
