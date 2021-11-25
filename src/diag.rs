@@ -18,10 +18,10 @@ use crate::parser::TokenAddress;
 use crate::parser::TokenIndex;
 use crate::segment_set::SegmentSet;
 use crate::segment_set::SourceInfo;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io;
-use std::sync::Arc;
 use strfmt::strfmt;
 
 /// List of passes that generate diagnostics, for use with the
@@ -150,9 +150,9 @@ pub(crate) fn to_annotations<'a>(
 
 /// Converts a raw diagnostics to a snippet
 #[must_use]
-pub fn make_snippet<'a>(
-    slices: Vec<Slice<'a>>,
-) -> Snippet<'a> {
+pub fn make_snippet(
+    slices: Vec<Slice<'_>>,
+) -> Snippet<'_> {
     Snippet {
         title: Some(Annotation {
             label: None,
@@ -184,7 +184,7 @@ pub fn make_snippet<'a>(
 /// could be replaced with a richer enum.
 /// * `lc` - A helper struct for keeping track of line numbers in the source file
 fn make_slice<'a>(
-    source: Arc<SourceInfo>,
+    source: &'a SourceInfo,
     message: &'static str,
     span: Span,
     annotation_type: AnnotationType,
@@ -251,7 +251,7 @@ fn annotate_diagnostic<'a>(
             span = info.stmt.span();
         }
         slices.push(make_slice(
-            sset.source_info(info.stmt.segment().id).clone(),
+            sset.source_info(info.stmt.segment().id).borrow(),
             info.s,
             span,
             info.annotation_type,
