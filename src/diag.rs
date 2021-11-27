@@ -184,20 +184,20 @@ fn make_snippet<T>(
         let (annotation_type, label, stmt, span) = info;
         let source: &SourceInfo = sset.source_info(stmt.segment().id).borrow();
         let offs = (span.start + source.span.start) as usize;
-        let (_, col) = lc.from_offset(&source.text, offs);
-        let line_end = LineCache::line_end(&source.text, offs);
+        let (line_start, col) = lc.from_offset(&source.text, offs);
         let end_offs = (span.end + source.span.start) as usize;
-        let line_start = offs - col as usize;
+        let source_start = offs - col as usize + 1;
+        let source_end = LineCache::line_end(&source.text, end_offs);
         slices.push(Slice {
-            source: as_str(&source.text[line_start..line_end]),
-            line_start: 0,
+            source: as_str(&source.text[source_start..source_end]),
+            line_start: line_start as usize,
             origin: Some(source.name.as_str()),
             annotations: vec![SourceAnnotation {
                 label: arena.alloc(label.to_string()),
                 annotation_type,
-                range: (offs - line_start, end_offs - line_start),
+                range: (offs - source_start, end_offs - source_start),
             }],
-            fold: false,
+            fold: true,
         });
     }
     f(Snippet {
