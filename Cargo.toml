@@ -17,7 +17,7 @@ regex = "1.5"
 tinyvec = "1.5"
 log = "0.4.14"
 annotate-snippets = "0.9.1"
-strfmt= "0.1.6"
+typed-arena = "2.0.1"
 
 # Dependencies for standalone executable, not needed for a library
 clap = "2.33"

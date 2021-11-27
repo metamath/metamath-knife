@@ -2,8 +2,8 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 
-use clap::{clap_app, crate_version};
 use annotate_snippets::display_list::DisplayList;
+use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::DiagnosticClass;
 use simple_logger::SimpleLogger;
@@ -107,11 +107,11 @@ fn main() {
             db.verify_parse_stmt();
         }
 
-        let mut count = 0;
-        for snippet in db.diag_notations(&types) {
-            println!("{}", DisplayList::from(snippet));
-            count += 1;
-        }
+        let count = db
+            .diag_notations(&types, |snippet| {
+                println!("{}", DisplayList::from(snippet));
+            })
+            .len();
         println!("{} diagnostics issued.", count);
 
         if matches.is_present("print_grammar") {

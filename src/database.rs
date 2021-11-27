@@ -97,7 +97,6 @@
 //! To improve packing efficiency, jobs are dispatched in descending order of
 //! estimated runtime.  This requires an additional argument when queueing.
 
-use annotate_snippets::snippet::Snippet;
 use crate::diag;
 use crate::diag::DiagnosticClass;
 use crate::export;
@@ -115,6 +114,7 @@ use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::verify;
 use crate::verify::VerifyResult;
+use annotate_snippets::snippet::Snippet;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt;
@@ -791,7 +791,11 @@ impl Database {
     ///
     /// Currently there is no way to incrementally fetch diagnostics, so this
     /// will be a bit slow if there are thousands of errors.
-    pub fn diag_notations(&mut self, types: &[DiagnosticClass]) -> Vec<Snippet<'_>> {
+    pub fn diag_notations<T>(
+        &mut self,
+        types: &[DiagnosticClass],
+        f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+    ) -> Vec<T> {
         let mut diags = Vec::new();
         let mut lc = LineCache::default();
         if types.contains(&DiagnosticClass::Parse) {
@@ -810,7 +814,7 @@ impl Database {
             diags.extend(self.stmt_parse_pass().diagnostics());
         }
         time(&self.options.clone(), "diag", move || {
-            diag::to_annotations(self.parse_result(), &mut lc, diags)
+            diag::to_annotations(self.parse_result(), &mut lc, diags, f)
         })
     }
 }

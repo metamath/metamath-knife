@@ -93,14 +93,14 @@ impl PartialEq for LongBuf {
 ///
 /// _This is likely to change when line number calculation is added._
 #[derive(Debug)]
-pub struct SourceInfo {
+pub(crate) struct SourceInfo {
     /// Name of the source file as loaded.
-    pub name: String,
+    pub(crate) name: String,
     /// Reference to the full unsliced source buffer.
-    pub text: Arc<Vec<u8>>,
+    pub(crate) text: Arc<Vec<u8>>,
     /// Span of the parser input within the file; all spans reported by the
     /// parser are relative to this.
-    pub span: Span,
+    pub(crate) span: Span,
 }
 
 /// The result of parsing one or more segments from a single slice of a source

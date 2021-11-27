@@ -4,8 +4,6 @@
 //! interpretation and testing, as well as a mostly-text representation which
 //! can be used for various human-readable outputs.
 
-use annotate_snippets::display_list::FormatOptions;
-use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
 use crate::line_cache::LineCache;
 use crate::parser::as_str;
 use crate::parser::Comparer;
@@ -18,11 +16,12 @@ use crate::parser::TokenAddress;
 use crate::parser::TokenIndex;
 use crate::segment_set::SegmentSet;
 use crate::segment_set::SourceInfo;
+use annotate_snippets::display_list::FormatOptions;
+use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
 use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::fmt::Display;
+use std::borrow::Cow;
 use std::io;
-use strfmt::strfmt;
+use typed_arena::Arena;
 
 /// List of passes that generate diagnostics, for use with the
 /// `Database::diag_notations` filter.
@@ -135,27 +134,75 @@ impl From<io::Error> for Diagnostic {
 
 /// Converts a collection of raw diagnostics to a notation list before output.
 #[must_use]
-pub(crate) fn to_annotations<'a>(
-    sset: &'a SegmentSet,
+pub(crate) fn to_annotations<T>(
+    sset: &SegmentSet,
     lc: &mut LineCache,
     mut diags: Vec<(StatementAddress, Diagnostic)>,
-) -> Vec<Snippet<'a>> {
+    f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+) -> Vec<T> {
     diags.sort_by(|x, y| sset.order.cmp(&x.0, &y.0));
-    let mut out = Vec::new();
-    for (saddr, diag) in diags {
-        out.push(annotate_diagnostic(sset, sset.statement(saddr), lc, &diag));
-    }
-    out
+    diags
+        .iter()
+        .map(move |(saddr, diag)| {
+            let stmt = sset.statement(*saddr);
+            diag.to_snippet(sset, stmt, lc, f)
+        })
+        .collect::<Vec<_>>()
 }
 
-/// Converts a raw diagnostics to a snippet
+/// Annotation info
+///
+/// * `label` - A global error message for the diagnostic
+/// For each annotation:
+/// * `label` - The diagnostic message
+/// * `annotation_type` -  Severity level of the message
+/// * `span` - The location of the error (byte offset within the segment; _this is
+/// not the same as the byte offset in the file_).
+type AnnInfo<'a> = (
+    Cow<'a, str>,
+    Vec<(AnnotationType, Cow<'a, str>, StatementRef<'a>, Span)>,
+);
+
+/// Creates a `Snippet` containing a diagnostic annotation.
+///
+/// # Arguments
+///
+/// * `sset` - Reference to the segment set.
+/// * `infos` - Diagnostic information to display.
+/// * `lc` - A helper struct for keeping track of line numbers in the source file
+/// * `f` - A function for continuation passing style (CPS)
 #[must_use]
-pub fn make_snippet(
-    slices: Vec<Slice<'_>>,
-) -> Snippet<'_> {
-    Snippet {
+fn make_snippet<T>(
+    sset: &SegmentSet,
+    infos: AnnInfo<'_>,
+    lc: &mut LineCache,
+    f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+) -> T {
+    let mut slices = vec![];
+    let arena: Arena<String> = Arena::new();
+    for info in infos.1 {
+        let (annotation_type, label, stmt, span) = info;
+        let source: &SourceInfo = sset.source_info(stmt.segment().id).borrow();
+        let offs = (span.start + source.span.start) as usize;
+        let (_, col) = lc.from_offset(&source.text, offs);
+        let line_end = LineCache::line_end(&source.text, offs);
+        let end_offs = (span.end + source.span.start) as usize;
+        let line_start = offs - col as usize;
+        slices.push(Slice {
+            source: as_str(&source.text[line_start..line_end]),
+            line_start: 0,
+            origin: Some(source.name.as_str()),
+            annotations: vec![SourceAnnotation {
+                label: arena.alloc(label.to_string()),
+                annotation_type,
+                range: (offs - line_start, end_offs - line_start),
+            }],
+            fold: false,
+        });
+    }
+    f(Snippet {
         title: Some(Annotation {
-            label: None,
+            label: Some(&infos.0),
             id: None,
             annotation_type: slices[0].annotations[0].annotation_type,
         }),
@@ -165,466 +212,516 @@ pub fn make_snippet(
             color: true,
             ..FormatOptions::default()
         },
-    }
+    })
 }
 
-/// Creates a `Slice` containing a diagnostic annotation.
-/// 
-/// # Arguments
-///
-/// * `source` - Reference to source data, including the filename and text which could be
-/// used to calculate line numbers or print an invalid excerpt.
-/// * `message` - A message for the diagnostic, which may contain `{placeholders}`.  The
-/// message will be in English but, being not dynamically generated, it is
-/// suitable for remapping with a resource file.
-/// * `span` - The location of the error (byte offset within the SourceInfo; _this is
-/// not the same as the byte offset in the file_).
-/// * `annotation_type` -  Severity level of the message
-/// * `args` - Values to substitute for the `{placeholders}` in the message.  `String`
-/// could be replaced with a richer enum.
-/// * `lc` - A helper struct for keeping track of line numbers in the source file
-fn make_slice<'a>(
-    source: &'a SourceInfo,
-    message: &'static str,
-    span: Span,
-    annotation_type: AnnotationType,
-    args: Vec<(&'static str, String)>,
-    lc: &mut LineCache,
-) -> Slice<'a> {
-    let mut vars = HashMap::new();
-    for (name, value) in args { vars.insert(name.to_string(), value); }
-    let label = strfmt(&message, &vars).unwrap().as_str();
-    let offs = (span.start + source.span.start) as usize;
-    let (_, col) = lc.from_offset(&source.text, offs);
-    let line_end = LineCache::line_end(&source.text, offs);
-    let end_offs = (span.end + source.span.start) as usize;
-    let line_start = offs - (col - 1) as usize;
-    Slice {
-        source: as_str(&source.text[line_start..line_end]),
-        line_start: 0,
-        origin: Some(source.name.as_str()),
-        annotations: vec![
-            SourceAnnotation {
-                label,
-                annotation_type,
-                range: (offs - line_start, end_offs - line_start),
-            },
-        ],
-        fold: false,
+impl Diagnostic {
+    fn to_snippet<T>(
+        &self,
+        sset: &SegmentSet,
+        stmt: StatementRef<'_>,
+        lc: &mut LineCache,
+        f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+    ) -> T {
+        fn t(v: &Token) -> String {
+            as_str(v).to_owned()
+        }
+        let infos = match self {
+            BadCharacter(pos, byte) => ("Invalid character".into(), vec![(
+                AnnotationType::Error,
+                format!("Invalid character (byte value {byte}); Metamath source files are limited to \
+                        US-ASCII with controls TAB, CR, LF, FF)", byte = byte).into(),
+                stmt,
+                Span::new(*pos, *pos + 1),
+            )]),
+            BadCommentEnd(tok, opener) => ("Bad comment end".into(), vec![(
+                AnnotationType::Warning,
+                "$) sequence must be surrounded by whitespace to end a comment".into(),
+                stmt,
+                *tok,
+            ), (
+                AnnotationType::Note,
+                "Comment started here".into(),
+                stmt,
+                *opener,
+            )]),
+            BadExplicitLabel(ref tok) => ("Bad explicit label".into(), vec![(
+                AnnotationType::Error,
+                format!("Explicit label {label} does not refer to a hypothesis of the parent step", label = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            BadFloating => ("Bad floating".into(), vec![(
+                AnnotationType::Error,
+                "A $f statement must have exactly two math tokens".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            BadLabel(lbl) => ("Bad label".into(), vec![(
+                AnnotationType::Error,
+                "Statement labels may contain only alphanumeric characters and - _ .".into(),
+                stmt,
+                *lbl,
+            )]),
+            ChainBackref(span) => ("Chain backref".into(), vec![(
+                AnnotationType::Error,
+                "Backreference steps are not permitted to have local labels".into(),
+                stmt,
+                *span,
+            )]),
+            CommentMarkerNotStart(marker) => ("Wrong comment marker".into(), vec![(
+                AnnotationType::Warning,
+                "This comment marker must be the first token in the comment to be effective".into(),
+                stmt,
+                *marker,
+            )]),
+            ConstantNotTopLevel => ("Constant is not at top level".into(), vec![(
+                AnnotationType::Error,
+                "$c statements are not allowed in nested groups".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DisjointSingle => ("Disjoint statement with single variable".into(), vec![(
+                AnnotationType::Warning,
+                "A $d statement which lists only one variable is meaningless".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DjNotVariable(index) => ("Disjoint constraints are not applicable to constants".into(), vec![(
+                AnnotationType::Error,
+                "$d constraints are not applicable to constants".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            DjRepeatedVariable(index1, index2) => ("Variable repeated in disjoint statement".into(), vec![(
+                AnnotationType::Error,
+                "A variable may not be used twice in the same $d constraint".into(),
+                stmt,
+                stmt.math_span(*index1),
+            ), (
+                AnnotationType::Note,
+                "Previous appearance was here".into(),
+                stmt,
+                stmt.math_span(*index2),
+            )]),
+            DuplicateExplicitLabel(ref tok) => ("Duplicate explicit label".into(), vec![(
+                AnnotationType::Error,
+                format!("Explicit label {label} is used twice in the same step", label = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DuplicateLabel(prevstmt) => ("Duplicate label".into(), vec![(
+                AnnotationType::Error,
+                "Statement labels must be unique".into(),
+                stmt,
+                stmt.span(),
+            ), (
+                AnnotationType::Note,
+                "Label was previously used here".into(),
+                sset.statement(*prevstmt),
+                sset.statement(*prevstmt).span(),
+            )]),
+            EmptyFilename => ("Empty filename".into(), vec![(
+                AnnotationType::Error,
+                "Filename included by a $[ directive must not be empty".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            EmptyMathString => ("Empty math string".into(), vec![(
+                AnnotationType::Error,
+                "A math string must have at least one token".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            EssentialAtTopLevel => ("Essential at top level".into(), vec![(
+                AnnotationType::Error,
+                "$e statements must be inside scope brackets, not at the top level".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ExprNotConstantPrefix(index) => ("Expression does not have a constant prefix".into(), vec![(
+                AnnotationType::Error,
+                "The math string of an $a, $e, or $p assertion must start with a constant, \
+                        not a variable".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            FilenameDollar => ("Dollar in filename".into(), vec![(
+                AnnotationType::Error,
+                "Filenames included by $[ are not allowed to contain the $ character".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            FilenameSpaces => ("Spaces in filename".into(), vec![(
+                AnnotationType::Error,
+                "Filenames included by $[ are not allowed to contain whitespace".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            FloatNotConstant(index) => ("Typecode was not declared".into(), vec![(
+                AnnotationType::Error,
+                "The first token of a $f statement must be a declared constant (typecode)".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            FloatNotVariable(index) => ("Variable not declared".into(), vec![(
+                AnnotationType::Error,
+                "The second token of a $f statement must be a declared variable (to \
+                        associate the type)".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            FloatRedeclared(saddr) => ("Float redeclared".into(), vec![(
+                AnnotationType::Error,
+                "There is already an active $f for this variable".into(),
+                stmt,
+                stmt.span(),
+            ), (
+                AnnotationType::Note,
+                "Previous $f was here".into(),
+                sset.statement(*saddr),
+                sset.statement(*saddr).span(),
+            )]),
+            FormulaVerificationFailed => ("Formula verification failed".into(), vec![(
+                AnnotationType::Error,
+                "Formula verification failed at this symbol".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            GrammarAmbiguous(prevstmt) => ("Grammar ambiguous".into(), vec![(
+                AnnotationType::Error,
+                "Grammar is ambiguous; ".into(),
+                stmt,
+                stmt.span(),
+            ), (
+                AnnotationType::Note,
+                "Collision with this statement:".into(),
+                sset.statement(*prevstmt),
+                sset.statement(*prevstmt).span(),
+            )]),
+            GrammarCantBuild => ("Can't build the grammar".into(), vec![(
+                AnnotationType::Error,
+                "Can't build the grammar".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            GrammarProvableFloat => ("Floating declaration of provable type".into(), vec![(
+                AnnotationType::Error,
+                "Floating declaration of provable type".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            IoError(ref err) => ("I/O error".into(), vec![(
+                AnnotationType::Error,
+                format!("Source file could not be read (error: {error})", error = err.clone()).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            LocalLabelAmbiguous(span) => ("Local label is ambiguous".into(), vec![(
+                AnnotationType::Error,
+                "Local label conflicts with the name of an existing statement".into(),
+                stmt,
+                *span,
+            )]),
+            LocalLabelDuplicate(span) => ("Duplicate local Label".into(), vec![(
+                AnnotationType::Error,
+                "Local label duplicates another label in the same proof".into(),
+                stmt,
+                *span,
+            )]),
+            MalformedAdditionalInfo(span) => ("Malformed additional info".into(), vec![(
+                AnnotationType::Error,
+                "Malformed additional information".into(),
+                stmt,
+                *span,
+            )]),
+            MidStatementCommentMarker(marker) => ("Mid-statement comment".into(), vec![(
+                AnnotationType::Warning,
+                "Marked comments are only effective between statements, not inside them".into(),
+                stmt,
+                *marker,
+            )]),
+            MissingLabel => ("Missing label".into(), vec![(
+                AnnotationType::Error,
+                "This statement type requires a label".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            MissingProof(math_end) => ("Missing proof".into(), vec![(
+                AnnotationType::Error,
+                "Provable assertion requires a proof introduced with $= here; use $= ? $. \
+                        if you do not have a proof yet".into(),
+                stmt,
+                *math_end,
+            )]),
+            NestedComment(tok, opener) => ("Nested comment".into(), vec![(
+                AnnotationType::Warning,
+                "Nested comments are not supported - comment will end at the first $)".into(),
+                stmt,
+                *tok,
+            ), (
+                AnnotationType::Note,
+                "Comment started here".into(),
+                stmt,
+                *opener,
+            )]),
+            NotActiveSymbol(index) => ("Inactive symbol".into(), vec![(
+                AnnotationType::Error,
+                "Token used here must be active in the current scope".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            NotAProvableStatement => ("Not a provable statement".into(), vec![(
+                AnnotationType::Error,
+                "Statement does not start with the provable constant type".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ParsedStatementNoTypeCode => ("Empty statement".into(), vec![(
+                AnnotationType::Error,
+                "Empty statement".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ParsedStatementTooShort(ref tok) => ("Parsed statement too short".into(), vec![(
+                AnnotationType::Error,
+                format!("Statement is too short, expecting for example {expected}", expected = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ParsedStatementWrongTypeCode(ref found) => ("Parsed statement has wrong typecode".into(), vec![(
+                AnnotationType::Error,
+                format!("Type code {found} is not among the expected type codes", found = t(found)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofDvViolation => ("Distinct variable violation".into(), vec![(
+                AnnotationType::Error,
+                "Disjoint variable constraint violated".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofExcessEnd => ("Proof does not end with a single statement".into(), vec![(
+                AnnotationType::Error,
+                "Must be exactly one statement on stack at end of proof".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofIncomplete => ("Proof incomplete".into(), vec![(
+                AnnotationType::Warning,
+                "Proof is incomplete".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofInvalidSave => ("Invalid save".into(), vec![(
+                AnnotationType::Error,
+                "Z must appear immediately after a complete step integer".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofMalformedVarint => ("Proof too long".into(), vec![(
+                AnnotationType::Error,
+                "Proof step number too long or missing terminator".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofNoSteps => ("Empty proof".into(), vec![(
+                AnnotationType::Error,
+                "Proof must have at least one step (use ? if deliberately incomplete)".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofUnderflow => ("Proof underflow".into(), vec![(
+                AnnotationType::Error,
+                "Too few statements on stack to satisfy step's mandatory hypotheses".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofUnterminatedRoster => ("Unterminated roster".into(), vec![(
+                AnnotationType::Error,
+                "List of referenced assertions in a compressed proof must be terminated by )".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofWrongExprEnd => ("Proven statement does not match assertion".into(), vec![(
+                AnnotationType::Error,
+                "Final step statement does not match assertion".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            ProofWrongTypeEnd => ("Proven statement has wrong typecode".into(), vec![(
+                AnnotationType::Error,
+                "Final step typecode does not match assertion".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            RepeatedLabel(l_span, f_span) => ("Repeated label".into(), vec![(
+                AnnotationType::Error,
+                "A statement may have only one label".into(),
+                stmt,
+                *l_span,
+            ), (
+                AnnotationType::Note,
+                "First label was here".into(),
+                stmt,
+                *f_span,
+            )]),
+            SpuriousLabel(lspan) => ("Spurious label".into(), vec![(
+                AnnotationType::Error,
+                "Labels are only permitted for statements of type $a, $e, $f, or $p".into(),
+                stmt,
+                *lspan,
+            )]),
+            SpuriousProof(math_end) => ("Spurious proof".into(), vec![(
+                AnnotationType::Error,
+                "Proofs are only allowed on $p assertions".into(),
+                stmt,
+                *math_end,
+            )]),
+            StepEssenWrong => ("Wrong essential statement".into(), vec![(
+                AnnotationType::Error,
+                "Step used for $e hypothesis does not match statement".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            StepEssenWrongType => ("Wrong essential typecode".into(), vec![(
+                AnnotationType::Error,
+                "Step used for $e hypothesis does not match typecode".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            StepFloatWrongType => ("Wrong floating typecode".into(), vec![(
+                AnnotationType::Error,
+                "Step used for $f hypothesis does not match typecode".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            StepMissing(ref tok) => ("Missing step".into(), vec![(
+                AnnotationType::Error,
+                format!("Step {step} referenced by proof does not correspond to a $p statement (or \
+                        is malformed)", step = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            StepOutOfRange => ("Step out of range".into(), vec![(
+                AnnotationType::Error,
+                "Step in compressed proof is out of range of defined steps".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            StepUsedAfterScope(ref tok) => ("Step used after scope".into(), vec![(
+                AnnotationType::Error,
+                format!("Step {step} referenced by proof is a hypothesis not active in this scope", step = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            StepUsedBeforeDefinition(ref tok) => ("Step used before definition".into(), vec![(
+                AnnotationType::Error,
+                format!("Step {step} referenced by proof has not yet been proved", step = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            SymbolDuplicatesLabel(index, saddr) => ("Symbol duplicates label".into(), vec![(
+                AnnotationType::Warning,
+                "Metamath spec forbids symbols which are the same as labels in the same \
+                        database".into(),
+                stmt,
+                stmt.math_span(*index),
+            ), (
+                AnnotationType::Note,
+                "Symbol was used as a label here".into(),
+                sset.statement(*saddr),
+                sset.statement(*saddr).span(),
+            )]),
+            SymbolRedeclared(index, taddr) => ("Symbol redeclared".into(), vec![(
+                AnnotationType::Error,
+                "This symbol is already active in this scope".into(),
+                stmt,
+                stmt.math_span(*index),
+            ), (
+                AnnotationType::Note,
+                "Symbol was previously declared here".into(),
+                stmt,
+                sset.statement(taddr.statement).math_span(taddr.token_index),
+            )]),
+            UnclosedBeforeEof => ("Unclosed before eof".into(), vec![(
+                AnnotationType::Error,
+                "${ group must be closed with a $} before end of file".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            UnclosedBeforeInclude(index) => ("Include not at top level".into(), vec![(
+                AnnotationType::Error,
+                "${ group must be closed with a $} before another file can be included".into(),
+                stmt,
+                stmt.span(),
+            ), (
+                AnnotationType::Note,
+                "Include statement is here".into(),
+                stmt.segment().statement(*index),
+                stmt.segment().statement(*index).span(),
+            )]),
+            UnclosedComment(comment) => ("Unclosed comment".into(), vec![(
+                AnnotationType::Error,
+                "Comment requires closing $) before end of file".into(),
+                stmt,
+                *comment,
+            )]),
+            UnclosedInclude => ("Unclosed include".into(), vec![(
+                AnnotationType::Error,
+                "$[ requires a matching $]".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            UnclosedMath => ("Unclosed math".into(), vec![(
+                AnnotationType::Error,
+                "A math string must be closed with $= or $.".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            UnclosedProof => ("Unclosed proof".into(), vec![(
+                AnnotationType::Error,
+                "A proof must be closed with $.".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            UnknownKeyword(kwspan) => ("Unknown keyword".into(), vec![(
+                AnnotationType::Error,
+                "Statement-starting keyword must be one of $a $c $d $e $f $p $v".into(),
+                stmt,
+                *kwspan,
+            )]),
+            UnmatchedCloseGroup => ("Unmatched close group".into(), vec![(
+                AnnotationType::Error,
+                "This $} does not match any open ${".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            UnparseableStatement(index) => ("Unparseable statement".into(), vec![(
+                AnnotationType::Error,
+                "Could not parse this statement".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            VariableMissingFloat(index) => ("Variable missing float".into(), vec![(
+                AnnotationType::Error,
+                "Variable token used in statement must have an active $f".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
+            VariableRedeclaredAsConstant(index, taddr) => ("Variable redeclared as a constant".into(), vec![(
+                AnnotationType::Error,
+                "Symbol cannot be used as a variable here and as a constant later".into(),
+                stmt,
+                stmt.math_span(*index),
+            ), (
+                AnnotationType::Note,
+                "Symbol will be used as a constant here".into(),
+                sset.statement(taddr.statement),
+                sset.statement(taddr.statement).math_span(taddr.token_index),
+            )]),
+        };
+
+        make_snippet(sset, infos, lc, f)
     }
-}
-
-fn annotate_diagnostic<'a>(
-    sset: &'a SegmentSet,
-    stmt: StatementRef<'a>,
-    lc: &mut LineCache,
-    diag: &Diagnostic,
-) -> Snippet<'a> {
-    fn d<V: Display>(v: V) -> String {
-        format!("{}", v)
-    }
-
-    fn t(v: &Token) -> String {
-        as_str(v).to_owned()
-    }
-
-    #[derive(Clone)]
-    struct AnnInfo<'a> {
-        sset: &'a SegmentSet,
-        stmt: StatementRef<'a>,
-        annotation_type: AnnotationType,
-        s: &'static str,
-        args: Vec<(&'static str, String)>,
-    }
-
-    let mut slices = vec![];
-    let mut info = AnnInfo {
-        sset,
-        stmt,
-        annotation_type: AnnotationType::Error,
-        s: "",
-        args: Vec::new(),
-    };
-
-    let mut ann = |info: AnnInfo<'a>, mut span: Span| {
-        if span.is_null() {
-            span = info.stmt.span();
-        }
-        slices.push(make_slice(
-            sset.source_info(info.stmt.segment().id).borrow(),
-            info.s,
-            span,
-            info.annotation_type,
-            info.args,
-            lc,
-        ));
-    };
-
-    match *diag {
-        BadCharacter(span, byte) => {
-            info.s = "Invalid character (byte value {byte}); Metamath source files are limited to \
-                      US-ASCII with controls TAB, CR, LF, FF)";
-            info.args.push(("byte", d(byte)));
-            ann(info, Span::new(span, span + 1));
-        }
-        BadCommentEnd(tok, opener) => {
-            let mut info2 = info.clone();
-            info.s = "$) sequence must be surrounded by whitespace to end a comment";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, tok);
-            info2.s = "Comment started here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, opener);
-        }
-        BadExplicitLabel(ref tok) => {
-            info.s = "Explicit label {label} does not refer to a hypothesis of the parent step";
-            info.args.push(("label", t(tok)));
-            ann(info, stmt.span());
-        }
-        BadFloating => {
-            info.s = "A $f statement must have exactly two math tokens";
-            ann(info, stmt.span());
-        }
-        BadLabel(lbl) => {
-            info.s = "Statement labels may contain only alphanumeric characters and - _ .";
-            ann(info, lbl);
-        }
-        ChainBackref(span) => {
-            info.s = "Backreference steps are not permitted to have local labels";
-            ann(info, span);
-        }
-        CommentMarkerNotStart(marker) => {
-            info.s = "This comment marker must be the first token in the comment to be effective";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, marker);
-        }
-        ConstantNotTopLevel => {
-            info.s = "$c statements are not allowed in nested groups";
-            ann(info, stmt.span());
-        }
-        DisjointSingle => {
-            info.s = "A $d statement which lists only one variable is meaningless";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, stmt.span());
-        }
-        DjNotVariable(index) => {
-            info.s = "$d constraints are not applicable to constants";
-            ann(info, stmt.math_span(index));
-        }
-        DjRepeatedVariable(index1, index2) => {
-            let mut info2 = info.clone();
-            info.s = "A variable may not be used twice in the same $d constraint";
-            ann(info, stmt.math_span(index1));
-            info2.s = "Previous appearance was here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, stmt.math_span(index2));
-        }
-        DuplicateExplicitLabel(ref tok) => {
-            info.s = "Explicit label {label} is used twice in the same step";
-            info.args.push(("label", t(tok)));
-            ann(info, stmt.span());
-        }
-        DuplicateLabel(prevstmt) => {
-            let mut info2 = info.clone();
-            info.s = "Statement labels must be unique";
-            ann(info, stmt.span());
-            info2.stmt = sset.statement(prevstmt);
-            info2.s = "Label was previously used here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, Span::NULL);
-        }
-        EmptyFilename => {
-            info.s = "Filename included by a $[ directive must not be empty";
-            ann(info, stmt.span());
-        }
-        EmptyMathString => {
-            info.s = "A math string must have at least one token";
-            ann(info, stmt.span());
-        }
-        EssentialAtTopLevel => {
-            info.s = "$e statements must be inside scope brackets, not at the top level";
-            ann(info, stmt.span());
-        }
-        ExprNotConstantPrefix(index) => {
-            info.s = "The math string of an $a, $e, or $p assertion must start with a constant, \
-                     not a variable";
-            ann(info, stmt.math_span(index));
-        }
-        FilenameDollar => {
-            info.s = "Filenames included by $[ are not allowed to contain the $ character";
-            ann(info, stmt.span());
-        }
-        FilenameSpaces => {
-            info.s = "Filenames included by $[ are not allowed to contain whitespace";
-            ann(info, stmt.span());
-        }
-        FloatNotConstant(index) => {
-            info.s = "The first token of a $f statement must be a declared constant (typecode)";
-            ann(info, stmt.math_span(index));
-        }
-        FloatNotVariable(index) => {
-            info.s = "The second token of a $f statement must be a declared variable (to \
-                     associate the type)";
-            ann(info, stmt.math_span(index));
-        }
-        FloatRedeclared(saddr) => {
-            let mut info2 = info.clone();
-            info.s = "There is already an active $f for this variable";
-            ann(info, stmt.span());
-            info2.stmt = sset.statement(saddr);
-            info2.s = "Previous $f was here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, Span::NULL);
-        }
-        FormulaVerificationFailed => {
-            info.s = "Formula verification failed at this symbol";
-            ann(info, stmt.span());
-        }
-        GrammarAmbiguous(prevstmt) => {
-            let mut info2 = info.clone();
-            info.s = "Grammar is ambiguous; ";
-            ann(info, stmt.span());
-            info2.stmt = sset.statement(prevstmt);
-            info2.s = "Collision with this statement:";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, Span::NULL);
-        }
-        GrammarCantBuild => {
-            info.s = "Can't build the grammar";
-            ann(info, stmt.span());
-        }
-        GrammarProvableFloat => {
-            info.s = "Floating declaration of provable type";
-            ann(info, stmt.span());
-        }
-        IoError(ref err) => {
-            info.s = "Source file could not be read (error: {error})";
-            info.args.push(("error", err.clone()));
-            ann(info, Span::NULL);
-        }
-        LocalLabelAmbiguous(span) => {
-            info.s = "Local label conflicts with the name of an existing statement";
-            ann(info, span);
-        }
-        LocalLabelDuplicate(span) => {
-            info.s = "Local label duplicates another label in the same proof";
-            ann(info, span);
-        }
-        MalformedAdditionalInfo(span) => {
-            info.s = "Malformed additional information";
-            ann(info, span);
-        }
-        MidStatementCommentMarker(marker) => {
-            info.s = "Marked comments are only effective between statements, not inside them";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, marker);
-        }
-        MissingLabel => {
-            info.s = "This statement type requires a label";
-            ann(info, stmt.span());
-        }
-        MissingProof(math_end) => {
-            info.s = "Provable assertion requires a proof introduced with $= here; use $= ? $. \
-                     if you do not have a proof yet";
-            ann(info, math_end);
-        }
-        NestedComment(tok, opener) => {
-            let mut info2 = info.clone();
-            info.s = "Nested comments are not supported - comment will end at the first $)";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, tok);
-            info2.s = "Comment started here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, opener);
-        }
-        NotActiveSymbol(index) => {
-            info.s = "Token used here must be active in the current scope";
-            ann(info, stmt.math_span(index));
-        }
-        NotAProvableStatement => {
-            info.s = "Statement does not start with the provable constant type";
-            ann(info, stmt.span());
-        }
-        ParsedStatementNoTypeCode => {
-            info.s = "Empty statement";
-            ann(info, stmt.span());
-        }
-        ParsedStatementTooShort(ref tok) => {
-            info.s = "Statement is too short, expecting for example {expected}";
-            info.args.push(("expected", t(tok)));
-            ann(info, stmt.span());
-        }
-        ParsedStatementWrongTypeCode(ref found) => {
-            info.s = "Type code {found} is not among the expected type codes";
-            info.args.push(("found", t(found)));
-            ann(info, stmt.span());
-        }
-        ProofDvViolation => {
-            info.s = "Disjoint variable constraint violated";
-            ann(info, stmt.span());
-        }
-        ProofExcessEnd => {
-            info.s = "Must be exactly one statement on stack at end of proof";
-            ann(info, stmt.span());
-        }
-        ProofIncomplete => {
-            info.s = "Proof is incomplete";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, stmt.span());
-        }
-        ProofInvalidSave => {
-            info.s = "Z must appear immediately after a complete step integer";
-            ann(info, stmt.span());
-        }
-        ProofMalformedVarint => {
-            info.s = "Proof step number too long or missing terminator";
-            ann(info, stmt.span());
-        }
-        ProofNoSteps => {
-            info.s = "Proof must have at least one step (use ? if deliberately incomplete)";
-            ann(info, stmt.span());
-        }
-        ProofUnderflow => {
-            info.s = "Too few statements on stack to satisfy step's mandatory hypotheses";
-            ann(info, stmt.span());
-        }
-        ProofUnterminatedRoster => {
-            info.s = "List of referenced assertions in a compressed proof must be terminated by )";
-            ann(info, stmt.span());
-        }
-        ProofWrongExprEnd => {
-            info.s = "Final step statement does not match assertion";
-            ann(info, stmt.span());
-        }
-        ProofWrongTypeEnd => {
-            info.s = "Final step typecode does not match assertion";
-            ann(info, stmt.span());
-        }
-        RepeatedLabel(l_span, f_span) => {
-            let mut info2 = info.clone();
-            info.s = "A statement may have only one label";
-            ann(info, l_span);
-            info2.s = "First label was here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, f_span);
-        }
-        SpuriousLabel(lspan) => {
-            info.s = "Labels are only permitted for statements of type $a, $e, $f, or $p";
-            ann(info, lspan);
-        }
-        SpuriousProof(math_end) => {
-            info.s = "Proofs are only allowed on $p assertions";
-            ann(info, math_end);
-        }
-        StepEssenWrong => {
-            info.s = "Step used for $e hypothesis does not match statement";
-            ann(info, stmt.span());
-        }
-        StepEssenWrongType => {
-            info.s = "Step used for $e hypothesis does not match typecode";
-            ann(info, stmt.span());
-        }
-        StepFloatWrongType => {
-            info.s = "Step used for $f hypothesis does not match typecode";
-            ann(info, stmt.span());
-        }
-        StepMissing(ref tok) => {
-            info.s = "Step {step} referenced by proof does not correspond to a $p statement (or \
-                      is malformed)";
-            info.args.push(("step", t(tok)));
-            ann(info, stmt.span());
-        }
-        StepOutOfRange => {
-            info.s = "Step in compressed proof is out of range of defined steps";
-            ann(info, stmt.span());
-        }
-        StepUsedAfterScope(ref tok) => {
-            info.s = "Step {step} referenced by proof is a hypothesis not active in this scope";
-            info.args.push(("step", t(tok)));
-            ann(info, stmt.span());
-        }
-        StepUsedBeforeDefinition(ref tok) => {
-            info.s = "Step {step} referenced by proof has not yet been proved";
-            info.args.push(("step", t(tok)));
-            ann(info, stmt.span());
-        }
-        SymbolDuplicatesLabel(index, saddr) => {
-            let mut info2 = info.clone();
-            info.s = "Metamath spec forbids symbols which are the same as labels in the same \
-                     database";
-            info.annotation_type = AnnotationType::Warning;
-            ann(info, stmt.math_span(index));
-            info2.stmt = sset.statement(saddr);
-            info2.s = "Symbol was used as a label here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, Span::NULL);
-        }
-        SymbolRedeclared(index, taddr) => {
-            let mut info2 = info.clone();
-            info.s = "This symbol is already active in this scope";
-            ann(info, stmt.math_span(index));
-            info2.stmt = sset.statement(taddr.statement);
-            info2.s = "Symbol was previously declared here";
-            info2.annotation_type = AnnotationType::Note;
-            let sp = info2.stmt.math_span(taddr.token_index);
-            ann(info2, sp);
-        }
-        UnclosedBeforeEof => {
-            info.s = "${ group must be closed with a $} before end of file";
-            ann(info, stmt.span());
-        }
-        UnclosedBeforeInclude(index) => {
-            let mut info2 = info.clone();
-            info.s = "${ group must be closed with a $} before another file can be included";
-            ann(info, stmt.span());
-            info2.stmt = stmt.segment().statement(index);
-            info2.s = "Include statement is here";
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, Span::NULL);
-        }
-        UnclosedComment(comment) => {
-            info.s = "Comment requires closing $) before end of file";
-            ann(info, comment);
-        }
-        UnclosedInclude => {
-            info.s = "$[ requires a matching $]";
-            ann(info, stmt.span());
-        }
-        UnclosedMath => {
-            info.s = "A math string must be closed with $= or $.";
-            ann(info, stmt.span());
-        }
-        UnclosedProof => {
-            info.s = "A proof must be closed with $.";
-            ann(info, stmt.span());
-        }
-        UnknownKeyword(kwspan) => {
-            info.s = "Statement-starting keyword must be one of $a $c $d $e $f $p $v";
-            ann(info, kwspan);
-        }
-        UnmatchedCloseGroup => {
-            info.s = "This $} does not match any open ${";
-            ann(info, stmt.span());
-        }
-        UnparseableStatement(index) => {
-            info.s = "Could not parse this statement";
-            ann(info, stmt.math_span(index));
-        }
-        VariableMissingFloat(index) => {
-            info.s = "Variable token used in statement must have an active $f";
-            ann(info, stmt.math_span(index));
-        }
-        VariableRedeclaredAsConstant(index, taddr) => {
-            let mut info2 = info.clone();
-            info.s = "Symbol cannot be used as a variable here and as a constant later";
-            ann(info, stmt.math_span(index));
-            info2.stmt = sset.statement(taddr.statement);
-            info2.s = "Symbol will be used as a constant here";
-            let sp = info2.stmt.math_span(taddr.token_index);
-            info2.annotation_type = AnnotationType::Note;
-            ann(info2, sp);
-        }
-    };
-
-    make_snippet(slices)
 }
