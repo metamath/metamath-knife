@@ -186,7 +186,7 @@ fn make_snippet<T>(
         let offs = (span.start + source.span.start) as usize;
         let (line_start, col) = lc.from_offset(&source.text, offs);
         let end_offs = (span.end + source.span.start) as usize;
-        let source_start = offs - col as usize + 1;
+        let source_start = offs + 1 - col as usize;
         let source_end = LineCache::line_end(&source.text, end_offs);
         slices.push(Slice {
             source: as_str(&source.text[source_start..source_end]),
@@ -411,9 +411,9 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
-            IoError(ref err) => ("I/O error".into(), vec![(
+            IoError(ref err) => (format!("I/O error: {error}", error = err.clone()).into(), vec![(
                 AnnotationType::Error,
-                format!("Source file could not be read (error: {error})", error = err.clone()).into(),
+                "Source file could not be read".into(),
                 stmt,
                 stmt.span(),
             )]),
