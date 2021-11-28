@@ -2,10 +2,10 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 
+use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
-use metamath_knife::diag::{DiagnosticClass, Notation};
-use metamath_knife::line_cache::LineCache;
+use metamath_knife::diag::DiagnosticClass;
 use simple_logger::SimpleLogger;
 use std::io;
 use std::mem;
@@ -107,12 +107,11 @@ fn main() {
             db.verify_parse_stmt();
         }
 
-        let mut lc = LineCache::default();
-        let mut count = 0;
-        for notation in db.diag_notations(&types) {
-            print_annotation(&mut lc, notation);
-            count += 1;
-        }
+        let count = db
+            .diag_notations(&types, |snippet| {
+                println!("{}", DisplayList::from(snippet));
+            })
+            .len();
         println!("{} diagnostics issued.", count);
 
         if matches.is_present("print_grammar") {
@@ -152,36 +151,5 @@ fn main() {
             let code = if count > 0 { 1 } else { 0 };
             std::process::exit(code);
         }
-    }
-}
-
-fn print_annotation(lc: &mut LineCache, ann: Notation) {
-    let mut args = String::new();
-    for (id, val) in ann.args {
-        args.push_str(&format!(" {}={}", id, val));
-    }
-    let offs = (ann.span.start + ann.source.span.start) as usize;
-    let (row, col) = lc.from_offset(&ann.source.text, offs);
-    println!(
-        "{}:{}:{}:{:?}:{}{}",
-        ann.source.name, row, col, ann.level, ann.message, args
-    );
-
-    let line_end = LineCache::line_end(&ann.source.text, offs);
-    let eoffs = (ann.span.end + ann.source.span.start) as usize;
-    let line_start = offs - (col - 1) as usize;
-    if eoffs <= line_end {
-        println!(
-            "|{}»{}«{}",
-            String::from_utf8_lossy(&ann.source.text[line_start..offs]),
-            String::from_utf8_lossy(&ann.source.text[offs..eoffs]),
-            String::from_utf8_lossy(&ann.source.text[eoffs..line_end])
-        );
-    } else {
-        println!(
-            "|{}»{}",
-            String::from_utf8_lossy(&ann.source.text[line_start..offs]),
-            String::from_utf8_lossy(&ann.source.text[offs..line_end])
-        );
     }
 }

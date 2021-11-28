@@ -16,6 +16,8 @@ fnv = "1.0"
 regex = "1.5"
 tinyvec = "1.5"
 log = "0.4.14"
+annotate-snippets = "0.9.1"
+typed-arena = "2.0.1"
 
 # Dependencies for standalone executable, not needed for a library
 clap = "2.33"
@@ -25,6 +27,7 @@ simple_logger = "1.13"
 dot-writer = { version = "0.1.2", optional = true }
 
 [features]
+default = ["annotate-snippets/color"]
 dot = ["dot-writer"]
 
 [profile]
