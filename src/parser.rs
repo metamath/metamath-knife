@@ -248,9 +248,9 @@ impl<'a, T, C: Comparer<T>> Comparer<T> for &'a C {
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct StatementAddress {
     /// Segment which contains the statement.
-    pub segment_id: SegmentId,
+    pub(crate) segment_id: SegmentId,
     /// Zero-based index of the statement.
-    pub index: StatementIndex,
+    pub(crate) index: StatementIndex,
 }
 
 impl StatementAddress {

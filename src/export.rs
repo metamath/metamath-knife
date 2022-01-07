@@ -4,7 +4,6 @@ use crate::diag::Diagnostic;
 use crate::parser::as_str;
 use crate::parser::StatementRef;
 use crate::parser::StatementType;
-use crate::parser::TokenRef;
 use crate::proof::ProofStyle;
 use crate::proof::ProofTreeArray;
 use crate::proof::ProofTreePrinter;
@@ -90,16 +89,23 @@ impl Database {
         let arr = ProofTreeArray::new(self, stmt)?;
         self.export_mmp_proof_tree(thm_label, &arr, out)
     }
+}
 
-    /// Export an mmp file for a given proof tree.
-    pub fn export_mmp_proof_tree<W: Write>(
+impl ProofTreeArray {
+    /// Applies the provided function to each of the logical steps.
+    /// It takes 4 parameters:
+    /// * `cur` - the index of the step among all proof steps (incuding non-logical ones).
+    ///           This can be used as an index in `ProofTreeArray`'s expressions `exprs` and `indents`.
+    /// * `ix` - the index of the step, when only logical steps are counted,
+    /// * `stmt` - the statement applied at this step,
+    /// * `hyps` - the indices of the hypotheses for this step (only counting logical hypotheses)
+    pub fn with_logical_steps<T>(
         &self,
-        thm_label: &[u8],
-        arr: &ProofTreeArray,
-        out: &mut W,
-    ) -> Result<(), ExportError> {
-        let sset = self.parse_result();
-        let nset = self.name_result();
+        db: &Database,
+        f: impl Fn(usize, usize, StatementRef<'_>, Vec<usize>) -> T,
+    ) -> Vec<T> {
+        let sset = db.parse_result();
+        let nset = db.name_result();
 
         // TODO(Mario): remove hardcoded logical step symbol
         let provable_tc = b"|-";
@@ -111,65 +117,86 @@ impl Database {
         let mut ix = 0usize;
         // This is indexed based on the numbering in logical_steps, so
         // if logical_steps[i] = j+1 then arr.trees[i] corresponds to (i, typecode[i], lines[j])
-        let mut lines: Vec<(usize, TokenRef<'_>, String)> = vec![];
-        for tree in &arr.trees {
+        let mut out = vec![];
+        for (cur, tree) in self.trees.iter().enumerate() {
             let stmt = sset.statement(tree.address);
-            let label = stmt.label();
             let tc = stmt.math_at(0);
             let logical = provable_tc.map_or(true, |tref| *tref == *tc);
-
-            let cur = logical_steps.len();
             logical_steps.push(if logical {
                 ix += 1;
+                let hyps = tree
+                    .children
+                    .iter()
+                    .filter_map(|ix| {
+                        let hix = logical_steps[*ix];
+                        if hix != 0 {
+                            Some(hix)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                out.push(f(cur, ix, stmt, hyps));
                 ix
             } else {
                 0
             });
-
-            // Because a step only references previous steps in the array,
-            // we are clear to start output before finishing the loop
-            if logical {
-                let mut line = match stmt.statement_type() {
-                    // Floating will not happen unless we don't recognize the grammar
-                    StatementType::Essential | StatementType::Floating => format!("h{}", ix),
-                    _ => {
-                        if cur == arr.qed {
-                            "qed".to_string()
-                        } else {
-                            ix.to_string()
-                        }
-                    }
-                };
-                let mut delim = ':';
-                for &hyp in &tree.children {
-                    let hix = logical_steps[hyp];
-                    if hix != 0 {
-                        line.push(delim);
-                        delim = ',';
-                        line.push_str(&hix.to_string());
-                    }
-                }
-                if delim == ':' {
-                    line.push(delim);
-                }
-                line.push(':');
-                line.push_str(str::from_utf8(label).unwrap());
-                line.push(' ');
-                lines.push((cur, tc, line));
-            }
         }
+        out
+    }
+}
+
+impl Database {
+    /// Export an mmp file for a given proof tree.
+    pub fn export_mmp_proof_tree<W: Write>(
+        &self,
+        thm_label: &[u8],
+        arr: &ProofTreeArray,
+        out: &mut W,
+    ) -> Result<(), ExportError> {
+        let sset = self.parse_result();
+        let nset = self.name_result();
+
+        // TODO(Mario): remove hardcoded logical step symbol
+        let tc = b"|-";
+        let mut lines = arr.with_logical_steps(self, |cur, ix, stmt, hyps| {
+            let mut line = match stmt.statement_type() {
+                // Floating will not happen unless we don't recognize the grammar
+                StatementType::Essential | StatementType::Floating => format!("h{}", ix),
+                _ => {
+                    if cur == arr.qed {
+                        "qed".to_string()
+                    } else {
+                        ix.to_string()
+                    }
+                }
+            };
+            let mut delim = ':';
+            for &hix in &hyps {
+                line.push(delim);
+                delim = ',';
+                line.push_str(&hix.to_string());
+            }
+            if delim == ':' {
+                line.push(delim);
+            }
+            line.push(':');
+            line.push_str(str::from_utf8(stmt.label()).unwrap());
+            line.push(' ');
+            (cur, line)
+        });
 
         let indent = arr.indent();
         let spaces = lines
             .iter()
-            .map(|&(cur, _, ref line)| line.len() as i16 - indent[cur] as i16)
+            .map(|&(cur, ref line)| line.len() as i16 - indent[cur] as i16)
             .max()
             .unwrap() as u16;
-        for &mut (cur, tc, ref mut line) in &mut lines {
+        for &mut (cur, ref mut line) in &mut lines {
             for _ in 0..(spaces + indent[cur] - line.len() as u16) {
                 line.push(' ')
             }
-            line.push_str(str::from_utf8(&tc).unwrap());
+            line.push_str(str::from_utf8(tc).unwrap());
             line.push_str(&String::from_utf8_lossy(&arr.exprs[cur]));
             writeln!(out, "{}", line)?;
         }

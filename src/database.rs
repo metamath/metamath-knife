@@ -109,6 +109,7 @@ use crate::nameck::Nameset;
 use crate::outline::OutlineNode;
 use crate::parser::Comparer;
 use crate::parser::StatementRef;
+use crate::proof::ProofTreeArray;
 use crate::scopeck;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
@@ -373,7 +374,7 @@ impl<T> Promise<T> {
 /// place, such as the hash table of statement labels constructed by nameck,
 /// that table must be duplicated so that it can be updated for one database
 /// without affecting the other.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Database {
     options: Arc<DbOptions>,
     segments: Arc<SegmentSet>,
@@ -512,7 +513,9 @@ impl Database {
     #[inline]
     #[must_use]
     pub fn name_result(&self) -> &Arc<Nameset> {
-        self.nameset.as_ref().unwrap()
+        self.nameset.as_ref().expect(
+            "The database has not run `name_pass()`. Please ensure it is run before calling depdending methods."
+        )
     }
 
     /// Calculates and returns the frames for this database, i.e. the actual
@@ -543,7 +546,9 @@ impl Database {
     #[inline]
     #[must_use]
     pub fn scope_result(&self) -> &Arc<ScopeResult> {
-        self.scopes.as_ref().unwrap()
+        self.scopes.as_ref().expect(
+            "The database has not run `scope_pass()`. Please ensure it is run before calling depdending methods."
+        )
     }
 
     /// Calculates and returns verification information for the database.
@@ -575,7 +580,9 @@ impl Database {
     #[inline]
     #[must_use]
     pub fn verify_result(&self) -> &Arc<VerifyResult> {
-        self.verify.as_ref().unwrap()
+        self.verify.as_ref().expect(
+            "The database has not run `verify_pass()`. Please ensure it is run before calling depdending methods."
+        )
     }
 
     /// Computes and returns the root node of the outline.
@@ -596,7 +603,9 @@ impl Database {
     #[inline]
     #[must_use]
     pub fn outline_result(&self) -> &Arc<OutlineNode> {
-        self.outline.as_ref().unwrap()
+        self.outline.as_ref().expect(
+            "The database has not run `outline_pass()`. Please ensure it is run before calling depdending methods."
+        )
     }
 
     /// Builds and returns the grammar.
@@ -616,7 +625,9 @@ impl Database {
     #[inline]
     #[must_use]
     pub fn grammar_result(&self) -> &Arc<Grammar> {
-        self.grammar.as_ref().unwrap()
+        self.grammar.as_ref().expect(
+            "The database has not run `grammar_pass()`. Please ensure it is run before calling depdending methods."
+        )
     }
 
     /// Parses the statements using the grammar.
@@ -642,7 +653,9 @@ impl Database {
     #[inline]
     #[must_use]
     pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
-        self.stmt_parse.as_ref().unwrap()
+        self.stmt_parse.as_ref().expect(
+            "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depdending methods."
+        )
     }
 
     /// A getter method which does not build the outline.
@@ -718,6 +731,13 @@ impl Database {
                 .and_then(|mut file| self.export_mmp(sref, &mut file))
                 .unwrap()
         })
+    }
+
+    /// Returns the proof tree for a given database theorem,
+    /// in the form of a `ProofTreeArray`
+    #[must_use]
+    pub fn get_proof_tree(&self, sref: StatementRef<'_>) -> Option<ProofTreeArray> {
+        ProofTreeArray::new(self, sref).ok()
     }
 
     /// Export the grammar of this database in DOT format.
