@@ -347,7 +347,7 @@ impl<'a> FormulaRef<'a> {
     /// Builds the syntax proof for this formula.
     ///
     /// In Metamath, it is possible to write proofs that a given formula is a well-formed formula.
-    /// This methos builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
+    /// This method builds such a syntax proof for the formula into a [`crate::proof::ProofTree`],
     /// stores that proof tree in the provided [`ProofBuilder`] `arr`,
     /// and returns the index of that `ProofTree` within `arr`.
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(

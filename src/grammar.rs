@@ -1424,17 +1424,9 @@ impl Grammar {
 /// ```
 ///
 /// The parse tree for a given statement can then be obtained through [`StmtParse::get_formula`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StmtParse {
     segments: HashMap<SegmentId, Arc<StmtParseSegment>>,
-}
-
-impl Default for StmtParse {
-    fn default() -> Self {
-        StmtParse {
-            segments: HashMap::default(),
-        }
-    }
 }
 
 impl StmtParse {
