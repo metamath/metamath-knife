@@ -158,6 +158,7 @@ pub struct Grammar {
     provable_type: TypeCode,
     logic_type: TypeCode,
     typecodes: Vec<TypeCode>,
+    type_conversions: Vec<(TypeCode, TypeCode, Label)>,
     nodes: GrammarTree,
     root: NodeId, // The root of the Grammar tree
     diagnostics: HashMap<StatementAddress, Diagnostic>,
@@ -392,6 +393,7 @@ impl Default for Grammar {
             provable_type: TypeCode::default(),
             logic_type: TypeCode::default(),
             typecodes: Vec::new(),
+            type_conversions: Vec::new(),
             nodes: GrammarTree(Vec::new()),
             root: 0,
             diagnostics: HashMap::default(),
@@ -531,7 +533,6 @@ impl Grammar {
         sref: &StatementRef<'_>,
         nset: &Nameset,
         names: &mut NameReader<'_>,
-        type_conversions: &mut Vec<(TypeCode, TypeCode, Label)>,
     ) -> Result<(), Diagnostic> {
         let mut tokens = sref.math_iter().peekable();
 
@@ -556,7 +557,8 @@ impl Grammar {
                         return Err(Diagnostic::VariableMissingFloat(1));
                     }
                 };
-                type_conversions.push((from_typecode, this_typecode, this_label));
+                self.type_conversions
+                    .push((from_typecode, this_typecode, this_label));
                 return Ok(()); // we don't need to add the type conversion axiom itself to the grammar (or do we?)
             }
         }
@@ -604,7 +606,7 @@ impl Grammar {
     ) -> Result<(), Diagnostic> {
         let mut tokens = sref.math_iter();
 
-        // Atom for this flaot's label.
+        // Atom for this float's label.
         let this_label = names.lookup_label(sref.label()).unwrap().atom;
         // Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
         let this_typecode = nset.get_atom(tokens.next().unwrap().slice);
@@ -1026,7 +1028,6 @@ impl Grammar {
         &mut self,
         db: &Database,
         names: &mut NameReader<'_>,
-        type_conversions: &[(TypeCode, TypeCode, Label)],
     ) -> Result<(), (StatementAddress, Diagnostic)> {
         let nset = db.name_result();
         for (address, command) in db.parse_result().parser_commands() {
@@ -1058,7 +1059,7 @@ impl Grammar {
             }
             // Handle replacement schemes
             if &command[0].as_ref() == b"type_conversions" {
-                for (from_typecode, to_typecode, label) in type_conversions {
+                for (from_typecode, to_typecode, label) in &self.type_conversions.clone() {
                     if let Err(diag) =
                         self.perform_type_conversion(*from_typecode, *to_typecode, *label, db)
                     {
@@ -1165,6 +1166,18 @@ impl Grammar {
                             e.node_id = next_node_id;
                         }
                     } else {
+                        // We have parsed everything but did not obtain an expected typecode, try a type conversion.
+                        if symbol_enum.peek().is_none() {
+                            for (from_typecode, to_typecode, label) in &self.type_conversions {
+                                if *from_typecode == typecode
+                                    && e.expected_typecodes.contains(to_typecode)
+                                {
+                                    let reduce = Reduce::new(*label, 1);
+                                    Self::do_reduce(&mut formula_builder, reduce, nset);
+                                    return Ok(formula_builder.build(*to_typecode));
+                                }
+                            }
+                        }
                         // We have not found the expected typecode, continue from root
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) =
@@ -1267,6 +1280,12 @@ impl Grammar {
     #[must_use]
     pub fn typecodes(&self) -> Box<[TypeCode]> {
         self.typecodes.clone().into_boxed_slice()
+    }
+
+    /// Returns the provable typecode for this grammar
+    #[must_use]
+    pub const fn provable_typecode(&self) -> TypeCode {
+        self.provable_type
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
@@ -1378,7 +1397,6 @@ impl Grammar {
         grammar.root = grammar.nodes.create_branch();
 
         let mut names = NameReader::new(nset);
-        let mut type_conversions = Vec::new();
 
         // Build the initial grammar tree, just form syntax axioms and floats.
         let segments = sset.segments();
@@ -1386,9 +1404,7 @@ impl Grammar {
         for segment in &segments {
             for sref in *segment {
                 if let Err(diag) = match sref.statement_type() {
-                    StatementType::Axiom => {
-                        grammar.add_axiom(&sref, nset, &mut names, &mut type_conversions)
-                    }
+                    StatementType::Axiom => grammar.add_axiom(&sref, nset, &mut names),
                     StatementType::Floating => grammar.add_floating(&sref, nset, &mut names),
                     _ => Ok(()),
                 } {
@@ -1398,7 +1414,7 @@ impl Grammar {
         }
 
         // Post-treatement (type conversion and garden paths) as instructed by $j parser commands
-        if let Err((address, diag)) = grammar.handle_commands(db, &mut names, &type_conversions) {
+        if let Err((address, diag)) = grammar.handle_commands(db, &mut names) {
             grammar.diagnostics.insert(address, diag);
         }
         grammar

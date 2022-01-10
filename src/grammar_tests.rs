@@ -127,6 +127,22 @@ fn test_db_32_formula() {
     }
 }
 
+#[test]
+fn test_setvar_as_class() {
+    let mut db = mkdb(GRAMMAR_DB_32);
+    let grammar = db.grammar_pass().clone();
+    let names = db.name_pass().clone();
+    let class_symbol = names.lookup_symbol(b"class").unwrap().atom;
+    let x_symbol = names.lookup_symbol(b"x").unwrap().atom;
+    {
+        let formula = grammar
+            .parse_formula(&mut vec![x_symbol].into_iter(), &[class_symbol], &names)
+            .unwrap();
+        assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "cv");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "vx");
+    }
+}
+
 // This grammar exposes issue #43 in the statement parser
 const GRAMMAR_DB_43: &[u8] = b"
     $c |- wff class setvar ( ) { } = e. | |-> /\\ $.
