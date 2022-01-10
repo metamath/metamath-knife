@@ -33,6 +33,7 @@ use crate::util::HashMap;
 use crate::verify::ProofBuilder;
 use crate::Database;
 use core::ops::Index;
+use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::FromIterator;
@@ -90,6 +91,24 @@ impl Substitutions {
     pub fn get(&self, label: Label) -> Option<&Formula> {
         self.0.get(&label)
     }
+
+    /// An iterator visiting all substitutions in arbitrary order.
+    /// The iterator element type is `(&Label, &Formula)`.
+    #[inline]
+    #[must_use]
+    pub fn iter(&self) -> Iter<'_, Label, Formula> {
+        self.0.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Substitutions {
+    type Item = (&'a Label, &'a Formula);
+    type IntoIter = Iter<'a, Label, Formula>;
+
+    #[inline]
+    fn into_iter(self) -> Iter<'a, Label, Formula> {
+        self.iter()
+    }
 }
 
 /// A [`Substitutions`] reference in the context of a [`Database`].
@@ -142,6 +161,12 @@ impl Formula {
     pub fn dump(&self, nset: &Nameset) {
         println!("  Root: {}", self.root);
         self.tree.dump(|atom| as_str(nset.atom_name(*atom)));
+    }
+
+    /// Returns whether this formula consists in a single token.
+    #[must_use]
+    pub fn is_singleton(&self) -> bool {
+        !self.tree.has_children(self.root)
     }
 
     /// Returns the label obtained when following the given path.
