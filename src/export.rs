@@ -144,6 +144,22 @@ impl ProofTreeArray {
         }
         out
     }
+
+    /// Applies the provided function to each of the steps.
+    /// It takes 3 parameters:
+    /// * `cur` - the current index of the step,
+    /// * `stmt` - the statement applied at this step,
+    /// * `hyps` - the indices of the hypotheses for this step,
+    pub fn with_steps<T>(
+        &self,
+        db: &Database,
+        f: impl Fn(usize, StatementRef<'_>, &'_ Vec<usize>) -> T,
+    ) -> Vec<T> {
+        let sset = db.parse_result();
+        self.trees.iter().enumerate().map(|(cur, tree)| {
+            f(cur, sset.statement(tree.address), &tree.children)
+        }).collect()
+    }
 }
 
 impl Database {
