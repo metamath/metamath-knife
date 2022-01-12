@@ -370,7 +370,10 @@ impl<'a> FormulaRef<'a> {
     /// Computes the typecode of the given node
     /// according to the corresponding statement
     fn compute_typecode_at(&self, node_id: NodeId) -> TypeCode {
-        let sref = self.db.statement_by_label(self.formula.tree[node_id]).unwrap();
+        let sref = self
+            .db
+            .statement_by_label(self.formula.tree[node_id])
+            .unwrap();
         self.db.name_result().get_atom(sref.math_at(0).slice)
     }
 
@@ -441,7 +444,10 @@ impl<'a> FormulaRef<'a> {
                 }
             })
             .collect();
-        let range = self.to_rerooted(node_id).as_ref(self.db).append_to_stack_buffer(stack_buffer);
+        let range = self
+            .to_rerooted(node_id)
+            .as_ref(self.db)
+            .append_to_stack_buffer(stack_buffer);
         arr.build(address, hyps, stack_buffer, range)
     }
 }

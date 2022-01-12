@@ -156,9 +156,11 @@ impl ProofTreeArray {
         f: impl Fn(usize, StatementRef<'_>, &'_ Vec<usize>) -> T,
     ) -> Vec<T> {
         let sset = db.parse_result();
-        self.trees.iter().enumerate().map(|(cur, tree)| {
-            f(cur, sset.statement(tree.address), &tree.children)
-        }).collect()
+        self.trees
+            .iter()
+            .enumerate()
+            .map(|(cur, tree)| f(cur, sset.statement(tree.address), &tree.children))
+            .collect()
     }
 }
 

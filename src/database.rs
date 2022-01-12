@@ -100,8 +100,8 @@
 use crate::diag;
 use crate::diag::DiagnosticClass;
 use crate::export;
-use crate::formula::Label;
 use crate::formula::Formula;
+use crate::formula::Label;
 use crate::grammar;
 use crate::grammar::Grammar;
 use crate::grammar::StmtParse;
@@ -747,7 +747,9 @@ impl Database {
     pub fn get_syntax_proof_tree(&self, formula: &Formula) -> ProofTreeArray {
         let mut arr = ProofTreeArray::default();
         let mut stack_buffer = vec![];
-        formula.as_ref(self).build_syntax_proof::<usize, Vec<usize>>(&mut stack_buffer, &mut arr);
+        formula
+            .as_ref(self)
+            .build_syntax_proof::<usize, Vec<usize>>(&mut stack_buffer, &mut arr);
         arr.calc_indent();
         arr
     }
