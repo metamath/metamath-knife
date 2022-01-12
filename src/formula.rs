@@ -163,6 +163,12 @@ impl Formula {
         self.tree.dump(|atom| as_str(nset.atom_name(*atom)));
     }
 
+    /// Returns the typecode of this formula
+    #[must_use]
+    pub const fn get_typecode(&self) -> TypeCode {
+        self.typecode
+    }
+
     /// Returns whether this formula consists in a single token.
     #[must_use]
     pub fn is_singleton(&self) -> bool {
@@ -350,6 +356,24 @@ impl<'a> FormulaRef<'a> {
         f
     }
 
+    /// Returns a copy of this formula with a new root
+    /// (in the same tree)
+    fn to_rerooted(self, new_root: NodeId) -> Formula {
+        Formula {
+            root: new_root,
+            tree: self.formula.tree.clone(),
+            typecode: self.compute_typecode_at(new_root),
+            variables: self.formula.variables.clone(),
+        }
+    }
+
+    /// Computes the typecode of the given node
+    /// according to the corresponding statement
+    fn compute_typecode_at(&self, node_id: NodeId) -> TypeCode {
+        let sref = self.db.statement_by_label(self.formula.tree[node_id]).unwrap();
+        self.db.name_result().get_atom(sref.math_at(0).slice)
+    }
+
     /// Appends this formula to the provided stack buffer.
     ///
     /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,
@@ -417,7 +441,7 @@ impl<'a> FormulaRef<'a> {
                 }
             })
             .collect();
-        let range = self.append_to_stack_buffer(stack_buffer);
+        let range = self.to_rerooted(node_id).as_ref(self.db).append_to_stack_buffer(stack_buffer);
         arr.build(address, hyps, stack_buffer, range)
     }
 }
