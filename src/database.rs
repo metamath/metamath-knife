@@ -100,6 +100,7 @@
 use crate::diag;
 use crate::diag::DiagnosticClass;
 use crate::export;
+use crate::formula::Formula;
 use crate::formula::Label;
 use crate::grammar;
 use crate::grammar::Grammar;
@@ -738,6 +739,18 @@ impl Database {
     #[must_use]
     pub fn get_proof_tree(&self, sref: StatementRef<'_>) -> Option<ProofTreeArray> {
         ProofTreeArray::new(self, sref).ok()
+    }
+
+    /// Returns the syntax proof tree for a given formula,
+    /// in the form of a `ProofTreeArray`
+    #[must_use]
+    pub fn get_syntax_proof_tree(&self, formula: &Formula) -> ProofTreeArray {
+        let mut arr = ProofTreeArray::default();
+        formula
+            .as_ref(self)
+            .build_syntax_proof::<usize, Vec<usize>>(&mut vec![], &mut arr);
+        arr.calc_indent();
+        arr
     }
 
     /// Export the grammar of this database in DOT format.
