@@ -746,10 +746,9 @@ impl Database {
     #[must_use]
     pub fn get_syntax_proof_tree(&self, formula: &Formula) -> ProofTreeArray {
         let mut arr = ProofTreeArray::default();
-        let mut stack_buffer = vec![];
         formula
             .as_ref(self)
-            .build_syntax_proof::<usize, Vec<usize>>(&mut stack_buffer, &mut arr);
+            .build_syntax_proof::<usize, Vec<usize>>(&mut vec![], &mut arr);
         arr.calc_indent();
         arr
     }
