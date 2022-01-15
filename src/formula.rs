@@ -373,7 +373,8 @@ impl<'a> FormulaRef<'a> {
         let sref = self
             .db
             .statement_by_label(self.formula.tree[node_id])
-            .unwrap();
+            .expect("Formulas shall only contain valid labels. \
+                It shall always be the case when they are obtained from Grammar::parse_formula or StmtParse::get_formula.");
         self.db.name_result().get_atom(sref.math_at(0).slice)
     }
 
