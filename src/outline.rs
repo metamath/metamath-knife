@@ -146,6 +146,7 @@ impl Display for OutlineNodeRef<'_> {
 
 struct OutlineAncestorIter<'a> {
     database: &'a Database,
+    tree: &'a Tree<OutlineNode>,
     node_id: NodeId,
     initialized: bool,
 }
@@ -154,6 +155,7 @@ impl<'a> From<&OutlineNodeRef<'a>> for OutlineAncestorIter<'a> {
     fn from(node: &OutlineNodeRef<'a>) -> Self {
         OutlineAncestorIter {
             database: node.database,
+            tree: &node.database.outline_result().tree,
             node_id: node.node_id,
             initialized: false,
         }
@@ -171,7 +173,7 @@ impl<'a> Iterator for OutlineAncestorIter<'a> {
                 node_id: self.node_id,
             })
         } else {
-            let parent_node_id = self.database.outline_result().tree[self.node_id].parent;
+            let parent_node_id = self.tree[self.node_id].parent;
             if parent_node_id == self.node_id {
                 None
             } else {
