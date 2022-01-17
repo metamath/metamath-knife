@@ -909,6 +909,8 @@ pub enum HeadingLevel {
     SubSection,
     /// Subsubsection
     SubSubSection,
+    /// Statement
+    Statement,
 }
 
 impl Default for HeadingLevel {
@@ -1479,6 +1481,13 @@ fn collect_definitions(seg: &mut Segment) {
         let index = index as StatementIndex;
         if stmt.stype.takes_label() {
             seg.labels.push(LabelDef { index });
+        }
+        if let Axiom | Provable = stmt.stype {
+            seg.outline.push(HeadingDef {
+                name: (*b"").into(),
+                index,
+                level: HeadingLevel::Statement,
+            });
         }
 
         if stmt.group_end != NO_STATEMENT {

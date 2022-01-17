@@ -1,6 +1,7 @@
 //! A Tree implementation to be used for `Formula`
 //!
 use core::ops::Index;
+use core::ops::IndexMut;
 
 pub(crate) type NodeId = usize;
 
@@ -17,7 +18,7 @@ pub(crate) struct Tree<TreeItem> {
     nodes: Vec<TreeNode<TreeItem>>,
 }
 
-impl<TreeItem: Copy> Tree<TreeItem> {
+impl<TreeItem: Clone> Tree<TreeItem> {
     /// Create a new node with the given item and children (previously added to the tree)
     /// This way of constructing the tree forces to use a bottom-up approach,
     /// where the leafs are added first, followed by the branch nodes.
@@ -37,7 +38,7 @@ impl<TreeItem: Copy> Tree<TreeItem> {
                 "Children added to a node shall not be chained yet!"
             );
         }
-        self.nodes.push(new_node);
+        self.nodes.push(new_node.clone());
         self.nodes.len()
     }
 
@@ -91,6 +92,12 @@ impl<TreeItem> Index<NodeId> for Tree<TreeItem> {
 
     fn index(&self, node_id: NodeId) -> &Self::Output {
         &self.nodes[node_id - 1].item
+    }
+}
+
+impl<TreeItem> IndexMut<NodeId> for Tree<TreeItem> {
+    fn index_mut(&mut self, node_id: NodeId) -> &mut Self::Output {
+        &mut self.nodes[node_id - 1].item
     }
 }
 
