@@ -13,9 +13,15 @@ struct TreeNode<TreeItem> {
 }
 
 /// A tree implementation, hopefully efficient for representing formulas
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(crate) struct Tree<TreeItem> {
     nodes: Vec<TreeNode<TreeItem>>,
+}
+
+impl<TreeItem> Default for Tree<TreeItem> {
+    fn default() -> Self {
+        Self { nodes: vec![] }
+    }
 }
 
 impl<TreeItem: Clone> Tree<TreeItem> {

@@ -22,7 +22,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 /// A node of a database outline
 struct OutlineNode {
     /// Name of this outline
