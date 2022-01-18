@@ -12,6 +12,8 @@ use crate::parser::SegmentId;
 use crate::parser::SegmentRef;
 use crate::parser::StatementAddress;
 use crate::parser::StatementIndex;
+use crate::parser::StatementRef;
+use crate::parser::StatementType;
 use crate::parser::Token;
 use crate::segment_set::SegmentSet;
 use crate::tree::NodeId;
@@ -77,50 +79,120 @@ impl OutlineNode {
     }
 }
 
-#[derive(Debug)]
 /// A reference to an outline node
-pub struct OutlineNodeRef<'a> {
-    database: &'a Database,
-    node_id: NodeId,
+#[derive(Debug, Clone, Copy)]
+#[allow(missing_docs)]
+pub enum OutlineNodeRef<'a> {
+    Chapter {
+        database: &'a Database,
+        node_id: NodeId,
+    },
+    Statement {
+        database: &'a Database,
+        sref: StatementRef<'a>,
+    },
+}
+
+impl<'a> OutlineNodeRef<'a> {
+    /// Creates an `OutlineNodeRef` for the root of this database
+    #[must_use]
+    pub fn root_node(database: &'a Database) -> Self {
+        OutlineNodeRef::Chapter {
+            database,
+            node_id: database.outline_result().root,
+        }
+    }
+
+    /// Creates an `OutlineNodeRef` for the given statement
+    #[must_use]
+    pub const fn statement_node(database: &'a Database, sref: StatementRef<'a>) -> Self {
+        OutlineNodeRef::Statement { database, sref }
+    }
+
+    /// Returns this node's parent, or `None` if this is the root node
+    #[inline]
+    #[must_use]
+    pub fn parent(self) -> Option<OutlineNodeRef<'a>> {
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => {
+                let node = &database.outline_result().tree[node_id];
+                if node.level == HeadingLevel::Database {
+                    None
+                } else {
+                    Some(OutlineNodeRef::Chapter {
+                        database,
+                        node_id: node.parent,
+                    })
+                }
+            }
+            OutlineNodeRef::Statement { database, sref } => {
+                let outline = database.outline_result();
+                Some(OutlineNodeRef::Chapter {
+                    database,
+                    node_id: outline.statement_node_inside(sref.address(), outline.root, database),
+                })
+            }
+        }
+    }
 }
 
 impl OutlineNodeRef<'_> {
     /// Iterator through the children outline nodes
-    pub fn children_iter(&self) -> impl Iterator<Item = OutlineNodeRef<'_>> + '_ {
-        self.database
-            .outline_result()
-            .tree
-            .children_iter(self.node_id)
-            .map(move |node_id| OutlineNodeRef {
-                database: self.database,
-                node_id,
-            })
+    #[must_use]
+    pub fn children_iter(&self) -> Box<dyn Iterator<Item = OutlineNodeRef<'_>> + '_> {
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => Box::new(
+                // We first iterate over the statements within the chapter,
+                // then over the sub-chapters
+                ChapterStatementIter::new(database, *node_id).chain(
+                    database
+                        .outline_result()
+                        .tree
+                        .children_iter(*node_id)
+                        .map(move |node_id| OutlineNodeRef::Chapter { database, node_id }),
+                ),
+            ),
+            OutlineNodeRef::Statement { .. } => Box::new(std::iter::empty()),
+        }
     }
 
     /// Returns this node's parent, its parent's parent, etc. until the root (database) node.
     pub fn ancestors_iter(&self) -> impl Iterator<Item = OutlineNodeRef<'_>> + '_ {
-        OutlineAncestorIter::from(self)
+        OutlineAncestorIter::from(*self)
     }
 
     /// Returns the name of that node, i.e. the heading title or statement label
     #[inline]
     #[must_use]
     pub fn get_name(&self) -> &str {
-        self.database.outline_result().tree[self.node_id].get_name(self.database)
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => {
+                database.outline_result().tree[*node_id].get_name(database)
+            }
+            OutlineNodeRef::Statement { sref, .. } => as_str(sref.label()),
+        }
     }
 
     /// Returns the level of that node
     #[inline]
     #[must_use]
     pub fn get_level(&self) -> HeadingLevel {
-        self.database.outline_result().tree[self.node_id].level
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => {
+                database.outline_result().tree[*node_id].level
+            }
+            OutlineNodeRef::Statement { .. } => HeadingLevel::Statement,
+        }
     }
 
     /// Returns the name of that node, i.e. the heading title or statement label
     #[inline]
     #[must_use]
     pub const fn get_ref(&self) -> usize {
-        self.node_id
+        match self {
+            OutlineNodeRef::Chapter { node_id, .. } => *node_id,
+            OutlineNodeRef::Statement { .. } => panic!("No ref is provided for Statement nodes."),
+        }
     }
 
     // TODO(tirix) Getters for next and previous references in the database order
@@ -144,21 +216,11 @@ impl Display for OutlineNodeRef<'_> {
     }
 }
 
-struct OutlineAncestorIter<'a> {
-    database: &'a Database,
-    tree: &'a Tree<OutlineNode>,
-    node_id: NodeId,
-    initialized: bool,
-}
+struct OutlineAncestorIter<'a>(Option<OutlineNodeRef<'a>>);
 
-impl<'a> From<&OutlineNodeRef<'a>> for OutlineAncestorIter<'a> {
-    fn from(node: &OutlineNodeRef<'a>) -> Self {
-        OutlineAncestorIter {
-            database: node.database,
-            tree: &node.database.outline_result().tree,
-            node_id: node.node_id,
-            initialized: false,
-        }
+impl<'a> From<OutlineNodeRef<'a>> for OutlineAncestorIter<'a> {
+    fn from(node: OutlineNodeRef<'a>) -> Self {
+        OutlineAncestorIter(Some(node))
     }
 }
 
@@ -166,24 +228,49 @@ impl<'a> Iterator for OutlineAncestorIter<'a> {
     type Item = OutlineNodeRef<'a>;
 
     fn next(&mut self) -> Option<OutlineNodeRef<'a>> {
-        if !self.initialized {
-            self.initialized = true;
-            Some(OutlineNodeRef {
-                database: self.database,
-                node_id: self.node_id,
-            })
-        } else {
-            let parent_node_id = self.tree[self.node_id].parent;
-            if parent_node_id == self.node_id {
-                None
-            } else {
-                self.node_id = parent_node_id;
-                Some(OutlineNodeRef {
-                    database: self.database,
-                    node_id: parent_node_id,
-                })
-            }
+        let node = self.0;
+        self.0 = node.and_then(OutlineNodeRef::parent);
+        node
+    }
+}
+
+/// This iterator will yield an outline node for each statement encountered, skipping any non-statement (comments, etc.),
+/// and stopping with the next chapter comment or at the end of the segment
+struct ChapterStatementIter<'a> {
+    database: &'a Database,
+    stmt_address: StatementAddress,
+    segments: &'a Arc<SegmentSet>,
+}
+
+impl<'a> ChapterStatementIter<'a> {
+    fn new(database: &'a Database, node_id: NodeId) -> Self {
+        Self {
+            database,
+            stmt_address: database.outline_result().tree[node_id].stmt_address,
+            segments: database.parse_result(),
         }
+    }
+}
+
+impl<'a> Iterator for ChapterStatementIter<'a> {
+    type Item = OutlineNodeRef<'a>;
+
+    fn next(&mut self) -> Option<OutlineNodeRef<'a>> {
+        let mut stmt_address = self.stmt_address;
+        while {
+            stmt_address = StatementAddress::new(stmt_address.segment_id, stmt_address.index + 1);
+            let sref = self.segments.statement(stmt_address);
+            match sref.statement_type() {
+                StatementType::Provable | StatementType::Axiom => false,
+                StatementType::HeadingComment(_) | StatementType::Eof => return None,
+                _ => true,
+            }
+        } {}
+        self.stmt_address = stmt_address;
+        Some(OutlineNodeRef::Statement {
+            database: self.database,
+            sref: self.segments.statement(stmt_address),
+        })
     }
 }
 
@@ -199,7 +286,7 @@ impl Database {
     /// Returns the outline node with the given internal reference
     #[must_use]
     pub const fn get_outline_node_by_ref(&self, chapter_ref: NodeId) -> OutlineNodeRef<'_> {
-        OutlineNodeRef {
+        OutlineNodeRef::Chapter {
             database: self,
             node_id: chapter_ref,
         }
@@ -207,26 +294,6 @@ impl Database {
 }
 
 impl Outline {
-    /// Returns the root outline node (at database level)
-    pub(crate) const fn root_node<'a>(&self, database: &'a Database) -> OutlineNodeRef<'a> {
-        OutlineNodeRef {
-            database,
-            node_id: self.root,
-        }
-    }
-
-    /// Returns the deepest outline node containing the given statement
-    pub(crate) fn statement_node<'a>(
-        &self,
-        sref: StatementAddress,
-        database: &'a Database,
-    ) -> OutlineNodeRef<'a> {
-        OutlineNodeRef {
-            database,
-            node_id: self.statement_node_inside(sref, self.root, database),
-        }
-    }
-
     /// Returns the smallest outline node containing the given statement, starting from the given node
     fn statement_node_inside(
         &self,
