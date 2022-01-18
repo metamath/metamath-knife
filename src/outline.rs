@@ -136,28 +136,76 @@ impl<'a> OutlineNodeRef<'a> {
     }
 }
 
-impl OutlineNodeRef<'_> {
-    /// Iterator through the children outline nodes
-    #[must_use]
-    pub fn children_iter(&self) -> Box<dyn Iterator<Item = OutlineNodeRef<'_>> + '_> {
-        match self {
-            OutlineNodeRef::Chapter { database, node_id } => Box::new(
+/// An iterator over the children of an outline node, both statements and other chapters.
+/// See [`OutlineNodeRef::children_iter`]
+#[derive(Debug)]
+enum OutlineChildrenIterInner<'a> {
+    Statement {
+        iter: ChapterStatementIter<'a>,
+        node_id: NodeId,
+    },
+    Children {
+        database: &'a Database,
+        iter: crate::tree::SiblingIter<'a, OutlineNode>,
+    },
+    Done,
+}
+
+/// An iterator over the children of an outline node, both statements and other chapters.
+/// See [`OutlineNodeRef::children_iter`]
+#[derive(Debug)]
+#[must_use]
+pub struct OutlineChildrenIter<'a>(OutlineChildrenIterInner<'a>);
+
+impl<'a> Iterator for OutlineChildrenIter<'a> {
+    type Item = OutlineNodeRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.0 {
                 // We first iterate over the statements within the chapter,
+                OutlineChildrenIterInner::Statement {
+                    ref mut iter,
+                    node_id,
+                } => match iter.next() {
+                    Some(node) => return Some(node),
+                    None => {
+                        self.0 = OutlineChildrenIterInner::Children {
+                            database: iter.database,
+                            iter: iter.database.outline_result().tree.children_iter(node_id),
+                        }
+                    }
+                },
                 // then over the sub-chapters
-                ChapterStatementIter::new(database, *node_id).chain(
-                    database
-                        .outline_result()
-                        .tree
-                        .children_iter(*node_id)
-                        .map(move |node_id| OutlineNodeRef::Chapter { database, node_id }),
-                ),
-            ),
-            OutlineNodeRef::Statement { .. } => Box::new(std::iter::empty()),
+                OutlineChildrenIterInner::Children {
+                    database,
+                    ref mut iter,
+                } => {
+                    return Some(OutlineNodeRef::Chapter {
+                        database,
+                        node_id: iter.next()?,
+                    })
+                }
+                OutlineChildrenIterInner::Done => return None,
+            }
         }
+    }
+}
+
+impl<'a> OutlineNodeRef<'a> {
+    /// Iterator through the children outline nodes
+    pub fn children_iter(&self) -> OutlineChildrenIter<'a> {
+        OutlineChildrenIter(match *self {
+            OutlineNodeRef::Chapter { database, node_id } => OutlineChildrenIterInner::Statement {
+                iter: ChapterStatementIter::new(database, node_id),
+                node_id,
+            },
+            OutlineNodeRef::Statement { .. } => OutlineChildrenIterInner::Done,
+        })
     }
 
     /// Returns this node's parent, its parent's parent, etc. until the root (database) node.
-    pub fn ancestors_iter(&self) -> impl Iterator<Item = OutlineNodeRef<'_>> + '_ {
+    pub fn ancestors_iter(&self) -> OutlineAncestorIter<'a> {
         OutlineAncestorIter::from(*self)
     }
 
@@ -216,7 +264,10 @@ impl Display for OutlineNodeRef<'_> {
     }
 }
 
-struct OutlineAncestorIter<'a>(Option<OutlineNodeRef<'a>>);
+/// An iterator over the parents of a node. See [`OutlineNodeRef::ancestors_iter`]
+#[derive(Debug)]
+#[must_use]
+pub struct OutlineAncestorIter<'a>(Option<OutlineNodeRef<'a>>);
 
 impl<'a> From<OutlineNodeRef<'a>> for OutlineAncestorIter<'a> {
     fn from(node: OutlineNodeRef<'a>) -> Self {
@@ -236,7 +287,8 @@ impl<'a> Iterator for OutlineAncestorIter<'a> {
 
 /// This iterator will yield an outline node for each statement encountered, skipping any non-statement (comments, etc.),
 /// and stopping with the next chapter comment or at the end of the segment
-struct ChapterStatementIter<'a> {
+#[derive(Debug)]
+pub struct ChapterStatementIter<'a> {
     database: &'a Database,
     stmt_address: StatementAddress,
     segments: &'a Arc<SegmentSet>,
