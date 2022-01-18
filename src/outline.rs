@@ -303,27 +303,18 @@ impl Outline {
     ) -> NodeId {
         let order = &database.parse_result().order;
         let node = &self.tree[node_id];
-        let mut pair = (None, None);
-        if stmt_address == node.stmt_address {
+        if stmt_address == node.stmt_address || !self.tree.has_children(node_id) {
             node_id
         } else {
-            self.tree
-                .children_iter(node_id)
-                .take_while(|this_node_id| {
-                    pair = (pair.1, Some(*this_node_id));
-                    let node = &self.tree[*this_node_id];
-                    order.cmp(&stmt_address, &node.stmt_address) != Ordering::Less
-                })
-                .last();
-            if let (Some(last_node_id), _) | (None, Some(last_node_id)) = pair {
-                if last_node_id != node_id {
-                    self.statement_node_inside(stmt_address, last_node_id, database)
-                } else {
-                    node_id
+            let mut last_node_id = node_id;
+            for this_node_id in self.tree.children_iter(node_id) {
+                let node = &self.tree[this_node_id];
+                if order.cmp(&stmt_address, &node.stmt_address) == Ordering::Less {
+                    return self.statement_node_inside(stmt_address, last_node_id, database);
                 }
-            } else {
-                node_id
+                last_node_id = this_node_id;
             }
+            self.statement_node_inside(stmt_address, last_node_id, database)
         }
     }
 
