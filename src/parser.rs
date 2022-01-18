@@ -909,6 +909,8 @@ pub enum HeadingLevel {
     SubSection,
     /// Subsubsection
     SubSubSection,
+    /// Statement
+    Statement,
 }
 
 impl Default for HeadingLevel {

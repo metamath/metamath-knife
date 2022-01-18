@@ -128,6 +128,7 @@ fn main() {
         }
 
         if matches.is_present("outline") {
+            db.outline_pass();
             db.print_outline();
         }
 
