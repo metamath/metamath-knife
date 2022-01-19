@@ -591,9 +591,7 @@ impl Database {
     pub fn outline_pass(&mut self) -> &Arc<Outline> {
         if self.outline.is_none() {
             time(&self.options.clone(), "outline", || {
-                let parse = self.parse_result().clone();
-                let mut outline = Outline::default();
-                parse.build_outline(&mut outline);
+                let outline = self.parse_result().build_outline();
                 self.outline = Some(Arc::new(outline));
             })
         }
