@@ -226,7 +226,7 @@ impl SegmentSet {
     pub(crate) fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
         let mut out = Vec::new();
         for sref in self.segments() {
-            for &(ix, ref command) in &sref.commands {
+            for &(ix, ref command) in &sref.j_commands {
                 out.push((StatementAddress::new(sref.id, ix), command.clone()));
             }
         }

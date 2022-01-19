@@ -46,8 +46,10 @@
 //! it makes no sense to have a segment-local segment reference.
 
 use crate::diag::Diagnostic;
+use crate::segment_set::SegmentSet;
 use std::cmp;
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::mem;
 use std::ops::Deref;
 use std::slice;
@@ -404,8 +406,27 @@ pub struct HeadingDef {
     pub level: HeadingLevel,
 }
 
+/// An individual symbol in a command, either a string or other keyword.
+#[derive(Clone, Debug)]
+pub enum CommandToken {
+    /// A keyword (an identifier or symbol not surrounded in quotes)
+    Keyword(Token),
+    /// A string surrounded by `'` or `"` quotes
+    String(Token),
+}
+
+impl CommandToken {
+    /// Get the string corresponding to this token.
+    #[must_use]
+    pub const fn value(&self) -> TokenPtr<'_> {
+        match self {
+            Self::Keyword(s) | Self::String(s) => s,
+        }
+    }
+}
+
 /// Extra information residing in a $j comment
-pub type Command = Vec<Token>;
+pub type Command = Vec<CommandToken>;
 
 /// A parsed segment, containing parsed statement data and some extractions.
 ///
@@ -445,8 +466,10 @@ pub struct Segment {
     pub floats: Vec<FloatDef>,
     /// Top-level headings extracted for outline
     pub outline: Vec<HeadingDef>,
+    /// Parser commands provided in $t typesetting comments.
+    pub t_commands: Vec<(StatementIndex, Command)>,
     /// Parser commands provided in $j additional information comments.
-    pub commands: Vec<(StatementIndex, Command)>,
+    pub j_commands: Vec<(StatementIndex, Command)>,
 }
 
 /// A pointer to a segment which knows its identity.
@@ -1400,7 +1423,8 @@ impl<'a> Scanner<'a> {
             diagnostics: Vec::new(),
             span_pool: Vec::new(),
             outline: Vec::new(),
-            commands: Vec::new(),
+            t_commands: Vec::new(),
+            j_commands: Vec::new(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -1540,10 +1564,18 @@ fn collect_definitions(seg: &mut Segment) {
                     level,
                 });
             }
-            AdditionalInfoComment => match commands(buf, stmt.span.start) {
+            TypesettingComment => match commands(buf, b't', stmt.span.start) {
                 Ok(commands) => {
                     for command in commands {
-                        seg.commands.push((index, command));
+                        seg.t_commands.push((index, command));
+                    }
+                }
+                Err(diag) => seg.diagnostics.push((index, diag)),
+            },
+            AdditionalInfoComment => match commands(buf, b'j', stmt.span.start) {
+                Ok(commands) => {
+                    for command in commands {
+                        seg.j_commands.push((index, command));
                     }
                 }
                 Err(diag) => seg.diagnostics.push((index, diag)),
@@ -1599,18 +1631,18 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr<'_> {
     &buffer[index..eol]
 }
 
-/// Extract the parser commands out of a $j "additional information" comment
-fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
+/// Extract the parser commands out of a $t or $j special comment
+fn commands(buffer: &[u8], ch: u8, pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
     let mut iter = CommandIter {
         buffer,
         index: pos as usize,
     };
-    iter.skip_white_spaces();
+    let _ = iter.skip_white_spaces();
     iter.expect(b'$')?;
     iter.expect(b'(')?;
-    iter.skip_white_spaces();
+    let _ = iter.skip_white_spaces();
     iter.expect(b'$')?;
-    iter.expect(b'j')?;
+    iter.expect(ch)?;
     Ok(iter)
 }
 
@@ -1628,13 +1660,30 @@ impl CommandIter<'_> {
         self.buffer[self.index]
     }
 
-    fn skip_white_spaces(&mut self) {
-        // Skip any white spaces and line feeds
-        while self.has_more()
-            && (self.next_char() == b' ' || self.next_char() == b'\n' || self.next_char() == b'\r')
-        {
+    fn skip_white_spaces(&mut self) -> Option<()> {
+        'outer_loop: while self.has_more() {
+            match self.next_char() {
+                b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
+                // End upon comment closing, $)
+                b'$' => return None,
+                // Found a comment start
+                b'/' if self.buffer.get(self.index + 1) == Some(&b'*') => {
+                    for i in self.index + 2..self.buffer.len() - 1 {
+                        // found the end of the comment
+                        if self.buffer[i] == b'*' && self.buffer[i + 1] == b'/' {
+                            self.index = i + 2;
+                            continue 'outer_loop;
+                        }
+                    }
+                    // unclosed comment, don't advance self.index
+                    return None;
+                }
+                // Else stop
+                _ => break,
+            }
             self.index += 1;
         }
+        Some(())
     }
 
     #[allow(clippy::if_not_else)]
@@ -1656,67 +1705,42 @@ impl Iterator for CommandIter<'_> {
     type Item = Command;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.has_more() {
-            match self.next_char() {
-                b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
-                b'$' => {
-                    // End upon comment closing, $)
-                    return None;
-                }
-                _ => {
-                    // Else stop
-                    break;
-                }
-            }
-            self.index += 1;
-        }
+        self.skip_white_spaces()?;
 
         let mut command = Vec::new();
         while self.has_more() {
-            let quoted = self.next_char() == b'\'';
-            let token_start = self.index;
-            while self.has_more() {
-                match self.next_char() {
-                    b' ' | b'\t' | b'\n' | b'\r' | b';' => {
-                        // Stop if unquoted white spaces, line feeds or semicolon
-                        if !quoted {
-                            break;
-                        }
-                    }
-                    b'\'' => {
-                        // Stop if quoted and end quote
-                        if quoted && token_start != self.index {
-                            self.index += 1;
-                            break;
-                        }
-                    }
-                    _ => {} // Else continue
-                }
+            let token = if let quote @ (b'\'' | b'\"') = self.next_char() {
                 self.index += 1;
-            }
-
-            // New token found - ignore quotes if any
-            let token = if quoted {
-                &self.buffer[token_start + 1..self.index - 1]
-            } else {
-                &self.buffer[token_start..self.index]
-            };
-            command.push(token.into());
-
-            while self.has_more() {
-                match self.next_char() {
-                    b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
-                    b';' => {
-                        // Stop if unquoted semicolon $)
-                        self.index += 1;
-                        return Some(command);
+                let token_start = self.index;
+                // Stop if end quote
+                loop {
+                    if !self.has_more() {
+                        return None;
                     }
-                    _ => {
-                        // Stop otherwise
+                    let ch = self.next_char();
+                    self.index += 1;
+                    if ch == quote {
                         break;
                     }
                 }
+                CommandToken::String(self.buffer[token_start..self.index - 1].into())
+            } else {
+                let token_start = self.index;
+                // Stop if unquoted white spaces, line feeds or semicolon
+                while self.has_more()
+                    && !matches!(self.next_char(), b' ' | b'\t' | b'\n' | b'\r' | b';')
+                {
+                    self.index += 1;
+                }
+                CommandToken::Keyword(self.buffer[token_start..self.index].into())
+            };
+            command.push(token);
+
+            let _ = self.skip_white_spaces();
+            if self.has_more() && self.next_char() == b';' {
+                // Stop if unquoted semicolon $)
                 self.index += 1;
+                return Some(command);
             }
         }
         None
@@ -1783,4 +1807,204 @@ pub fn dummy_segment(diag: Diagnostic) -> Arc<Segment> {
     let mut seg = parse_segments(&Arc::new(Vec::new())).pop().unwrap();
     Arc::get_mut(&mut seg).unwrap().diagnostics.push((0, diag));
     seg
+}
+
+/// The parsed `$t` comment data.
+#[derive(Debug, Default, Clone)]
+pub struct TypesettingData {
+    /// LaTeX definitions are used to replace a token with a piece of latex syntax.
+    /// Each entry has the form `(token, replacement)`.
+    /// ```text
+    /// latexdef "ph" as "\varphi";
+    /// ```
+    pub latex_defs: Vec<(Token, Token)>,
+
+    /// HTML definitions are used to replace a token with a piece of HTML syntax.
+    /// This version will generally be used for the GIF rendering version of the web pages.
+    /// Each entry has the form `(token, replacement)`.
+    /// ```text
+    /// htmldef "ph" as "<IMG SRC='_varphi.gif' WIDTH=11 HEIGHT=19 ALT=' ph' TITLE='ph'>";
+    /// ```
+    pub html_defs: Vec<(Token, Token)>,
+
+    /// HTML definitions are used to replace a token with a piece of HTML syntax.
+    /// This version will generally be used for the unicode rendering version of the web pages.
+    /// Each entry has the form `(token, replacement)`.
+    /// ```text
+    /// althtmldef "ph" as "<SPAN CLASS=wff STYLE='color:blue'>&#x1D711;</SPAN>";
+    /// ```
+    pub alt_html_defs: Vec<(Token, Token)>,
+
+    /// A piece of HTML to give the variable color key. All `htmlvarcolor` directives are given
+    /// separately here, but they are logically concatenated with spaces for rendering.
+    /// ```text
+    /// htmlvarcolor '<SPAN CLASS=wff STYLE="color:blue;font-style:normal">wff</SPAN> '
+    ///   + '<SPAN CLASS=setvar STYLE="color:red;font-style:normal">setvar</SPAN> '
+    ///   + '<SPAN CLASS=class STYLE="color:#C3C;font-style:normal">class</SPAN>';
+    /// ```
+    pub html_var_color: Vec<Token>,
+
+    /// The title of the generated HTML page.
+    /// ```text
+    /// htmltitle "Metamath Proof Explorer";
+    /// ```
+    pub html_title: Option<Token>,
+
+    /// The link to the home page in the generated HTML page.
+    /// ```text
+    /// htmlhome '<A HREF="mmset.html"><FONT SIZE=-2 FACE=sans-serif>' +
+    ///     '<IMG SRC="mm.gif" BORDER=0 ALT='  +
+    ///     '"Home" HEIGHT=32 WIDTH=32 ALIGN=MIDDLE STYLE="margin-bottom:0px">' +
+    ///     'Home</FONT></A>';
+    /// ```
+    pub html_home: Option<Token>,
+
+    /// The relative path from the unicode version to the GIF version. Used for cross references.
+    /// (This is a set.mm specific hack.)
+    /// ```text
+    /// htmldir "../mpegif/";
+    /// ```
+    pub html_dir: Option<Token>,
+
+    /// The relative path from the GIF version to the unicode version. Used for cross references.
+    /// (This is a set.mm specific hack.)
+    /// ```text
+    /// althtmldir "../mpeuni/";
+    /// ```
+    pub alt_html_dir: Option<Token>,
+
+    /// Optional file where bibliographic references are kept.
+    /// ```text
+    /// htmlbibliography "mmset.html";
+    /// ```
+    pub html_bibliography: Option<Token>,
+
+    /// Custom CSS to be placed in the header of generated files.
+    /// Note that any `\n` escapes are not yet replaced by newlines in this `html_css` variable;
+    /// library consumers are responsible for performing this replacement.
+    /// ```text
+    /// htmlcss '<STYLE TYPE="text/css">\n' +
+    ///   '</STYLE>\n' +
+    ///   '<LINK href="mmset.css" title="mmset"\n' +
+    ///   '    rel="stylesheet" type="text/css">\n';
+    /// ```
+    pub html_css: Option<Token>,
+
+    /// Tag(s) for the main SPAN surrounding all Unicode math.
+    /// ```text
+    /// htmlfont 'CLASS=math';
+    /// ```
+    pub html_font: Option<Token>,
+
+    /// A label, such that everything after this label uses the `ext_*` variables instead of the
+    /// regular ones.
+    /// (This is a set.mm specific hack.)
+    /// ```text
+    /// exthtmllabel "chil";
+    /// ```
+    pub ext_html_label: Option<Token>,
+
+    /// The title of the generated HTML page, for the Hilbert Space extension.
+    /// (This is a set.mm specific hack.)
+    /// ```text
+    /// exthtmltitle "Hilbert Space Explorer";
+    /// ```
+    pub ext_html_title: Option<Token>,
+
+    /// The link to the home page in the generated HTML page, for the Hilbert Space extension.
+    /// (This is a set.mm specific hack.)
+    /// ```text
+    /// exthtmlhome '<A HREF="mmhil.html"><FONT SIZE=-2 FACE=sans-serif>' +
+    ///    '<IMG SRC="atomic.gif" BORDER=0 ALT='  +
+    ///    '"Home" HEIGHT=32 WIDTH=32 ALIGN=MIDDLE STYLE="margin-bottom:0px">' +
+    ///    'Home</FONT></A>';
+    /// ```
+    pub ext_html_home: Option<Token>,
+
+    /// Optional file where bibliographic references are kept, for the Hilbert Space extension.
+    /// (This is a set.mm specific hack.)
+    /// ```text
+    /// exthtmlbibliography "mmhil.html";
+    /// ```
+    pub ext_html_bibliography: Option<Token>,
+
+    /// Optional link(s) to other versions of the theorem page.  A "*" is replaced
+    /// with the label of the current theorem.  If you need a literal "*" as part
+    /// of the URL, use the alternate URL encoding "%2A". (Note that `*` characters are not
+    /// interpreted in this string; library consumers are responsible for implementing this spec.)
+    /// ```text
+    /// htmlexturl '<A HREF="http://metamath.tirix.org/*.html">'
+    ///     + 'Structured version</A>&nbsp;&nbsp; '
+    ///     + '<A HREF="https://expln.github.io/metamath/asrt/*.html">'
+    ///     + 'Visualization version</A>&nbsp;&nbsp; ';
+    /// ```
+    pub html_ext_url: Option<Token>,
+}
+
+fn parse_string_sum(mut rest: std::slice::Iter<'_, CommandToken>) -> Token {
+    let mut buf: Vec<u8> = match rest.next() {
+        Some(CommandToken::String(s)) => (**s).into(),
+        _ => panic!("expected a string"),
+    };
+    loop {
+        match rest.next() {
+            None => return buf.into(),
+            Some(CommandToken::Keyword(plus)) if **plus == *b"+" => {}
+            _ => panic!("expected '+' or ';'"),
+        }
+        match rest.next() {
+            Some(CommandToken::String(s)) => buf.extend_from_slice(s),
+            _ => panic!("expected a string"),
+        }
+    }
+}
+
+fn parse_string_as(rest: &mut std::slice::Iter<'_, CommandToken>) -> Token {
+    let s = match rest.next() {
+        Some(CommandToken::String(s)) => s,
+        _ => panic!("expected a string"),
+    };
+    match rest.next() {
+        Some(CommandToken::Keyword(as_)) if **as_ == *b"as" => {}
+        _ => panic!("expected 'as'"),
+    }
+    s.clone()
+}
+
+impl SegmentSet {
+    pub(crate) fn build_typesetting_data(&self) -> TypesettingData {
+        let mut data = TypesettingData::default();
+        for (_, command) in self.segments().iter().flat_map(|seg| &seg.t_commands) {
+            let (cmd, mut rest) = match command.split_first() {
+                Some((CommandToken::Keyword(k), rest)) => (&**k, rest.iter()),
+                _ => panic!("empty or invalid $t command"),
+            };
+            match cmd {
+                b"latexdef" => data
+                    .latex_defs
+                    .push((parse_string_as(&mut rest), parse_string_sum(rest))),
+                b"htmldef" => data
+                    .html_defs
+                    .push((parse_string_as(&mut rest), parse_string_sum(rest))),
+                b"althtmldef" => data
+                    .alt_html_defs
+                    .push((parse_string_as(&mut rest), parse_string_sum(rest))),
+                b"htmlvarcolor" => data.html_var_color.push(parse_string_sum(rest)),
+                b"htmltitle" => data.html_title = Some(parse_string_sum(rest)),
+                b"htmlhome" => data.html_home = Some(parse_string_sum(rest)),
+                b"exthtmltitle" => data.ext_html_title = Some(parse_string_sum(rest)),
+                b"exthtmlhome" => data.ext_html_home = Some(parse_string_sum(rest)),
+                b"exthtmllabel" => data.ext_html_label = Some(parse_string_sum(rest)),
+                b"htmldir" => data.html_dir = Some(parse_string_sum(rest)),
+                b"althtmldir" => data.alt_html_dir = Some(parse_string_sum(rest)),
+                b"htmlbibliography" => data.html_bibliography = Some(parse_string_sum(rest)),
+                b"exthtmlbibliography" => data.ext_html_bibliography = Some(parse_string_sum(rest)),
+                b"htmlcss" => data.html_css = Some(parse_string_sum(rest)),
+                b"htmlfont" => data.html_font = Some(parse_string_sum(rest)),
+                b"htmlexturl" => data.html_ext_url = Some(parse_string_sum(rest)),
+                k => panic!("unexpected $t keyword '{}'", str::from_utf8(k).unwrap()),
+            }
+        }
+        data
+    }
 }

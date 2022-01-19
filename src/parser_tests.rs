@@ -1,5 +1,4 @@
 use crate::database::Database;
-use crate::database::DbOptions;
 use crate::diag::Diagnostic;
 use crate::parser::Comparer;
 use crate::parser::SegmentOrder;
@@ -36,8 +35,7 @@ fn test_segment_order() {
 }
 
 fn mkdb(text: &[u8]) -> Database {
-    let dbo = DbOptions::default();
-    let mut db = Database::new(dbo);
+    let mut db = Database::default();
     db.parse(
         "test.mm".to_owned(),
         vec![("test.mm".to_owned(), text.to_owned())],
