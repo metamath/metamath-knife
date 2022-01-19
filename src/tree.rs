@@ -63,6 +63,7 @@ impl<TreeItem: Clone> Tree<TreeItem> {
     }
 
     /// returns the child node with the given index among children nodes
+    /// Indices starts with 1; querying index 0 will return the node itself
     pub(crate) fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
         let mut iter = self.children_iter(node_id);
         let mut nth_node_id = node_id;

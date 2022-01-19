@@ -358,7 +358,7 @@ impl Outline {
         if stmt_address == node.stmt_address || !self.tree.has_children(node_id) {
             node_id
         } else {
-            let mut last_node_id = node_id;
+            let mut last_node_id = self.tree.nth_child(node_id, 1).unwrap(); // It is safe to unwrap here, as we have checked that this node has some children.
             for this_node_id in self.tree.children_iter(node_id) {
                 let node = &self.tree[this_node_id];
                 if order.cmp(&stmt_address, &node.stmt_address) == Ordering::Less {
