@@ -328,7 +328,7 @@ impl<'a> Iterator for ChapterStatementIter<'a> {
 
 /// A structure holding the general outline of the database,
 /// with chapters, sections, subsections, etc., down to the statement level.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Outline {
     tree: Arc<Tree<OutlineNode>>,
     root: NodeId,
@@ -394,36 +394,50 @@ impl Outline {
 
 /// Builds the overall outline from the different segments
 impl SegmentSet {
-    pub(crate) fn build_outline(&self, outline: &mut Outline) {
+    pub(crate) fn build_outline(&self) -> Outline {
         let mut tree: Tree<OutlineNode> = Tree::default();
         let segments = self.segments();
         assert!(!segments.is_empty(), "Parse returned no segment!");
-        let mut node_stack = vec![OutlineNode::root_node(&segments)];
-        let mut sibling_stack = vec![vec![]];
-        let mut current_siblings = vec![];
+        let mut current_node = OutlineNode::root_node(&segments);
+        let mut node_stack = vec![];
+        let mut sibling_stack = vec![];
         for vsr in &segments {
-            for HeadingDef { name, index, level } in &vsr.segment.outline {
-                let new_node = OutlineNode::new(name.clone(), *level, vsr.id, *index);
-                while level <= &node_stack.last().unwrap().level {
+            for &HeadingDef {
+                ref name,
+                index,
+                level,
+            } in &vsr.segment.outline
+            {
+                let new_node = OutlineNode::new(name.clone(), level, vsr.id, index);
+                while level <= current_node.level {
                     // Next chapter is a higher level, pop from the stack onto the tree
-                    let lowest_node = node_stack.pop().unwrap();
-                    let lowest_node_id = lowest_node.add_to_tree(&mut tree, &current_siblings);
-                    current_siblings = sibling_stack.pop().unwrap();
-                    current_siblings.push(lowest_node_id);
+                    let (lowest_node, sibling_idx) = node_stack
+                        .pop()
+                        .expect("impossible because root node has lowest level");
+                    let lowest_node_id = std::mem::replace(&mut current_node, lowest_node)
+                        .add_to_tree(&mut tree, &sibling_stack[sibling_idx..]);
+                    sibling_stack.truncate(sibling_idx);
+                    sibling_stack.push(lowest_node_id);
                 }
                 // Next chapter is at a lower level, push onto the stack
-                sibling_stack.push(current_siblings);
-                node_stack.push(new_node);
-                current_siblings = vec![];
+                node_stack.push((
+                    std::mem::replace(&mut current_node, new_node),
+                    sibling_stack.len(),
+                ));
             }
         }
         // Finally, pop everything from the stack onto the tree
-        for (node, siblings) in node_stack.into_iter().zip(sibling_stack.into_iter()).rev() {
-            outline.root = node.add_to_tree(&mut tree, &current_siblings);
-            current_siblings = siblings;
-            current_siblings.push(outline.root);
+        for (node, sibling_idx) in node_stack.into_iter().rev() {
+            let node_id = node.add_to_tree(&mut tree, &sibling_stack[sibling_idx..]);
+            sibling_stack.truncate(sibling_idx);
+            sibling_stack.push(node_id);
         }
-        tree[outline.root].parent = outline.root;
-        outline.tree = Arc::new(tree);
+        let root = current_node.add_to_tree(&mut tree, &sibling_stack);
+        tree[root].parent = root;
+
+        Outline {
+            tree: Arc::new(tree),
+            root,
+        }
     }
 }

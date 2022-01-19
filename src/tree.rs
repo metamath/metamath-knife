@@ -24,7 +24,7 @@ impl<TreeItem> Default for Tree<TreeItem> {
     }
 }
 
-impl<TreeItem: Clone> Tree<TreeItem> {
+impl<TreeItem> Tree<TreeItem> {
     /// Create a new node with the given item and children (previously added to the tree)
     /// This way of constructing the tree forces to use a bottom-up approach,
     /// where the leafs are added first, followed by the branch nodes.
@@ -44,7 +44,7 @@ impl<TreeItem: Clone> Tree<TreeItem> {
                 "Children added to a node shall not be chained yet!"
             );
         }
-        self.nodes.push(new_node.clone());
+        self.nodes.push(new_node);
         self.nodes.len()
     }
 
