@@ -28,7 +28,8 @@ fn main() {
         (@arg timing: --timing "Print milliseconds after each stage")
         (@arg verify: -v --verify "Check proof validity")
         (@arg outline: -O --outline "Show database outline")
-        (@arg typesetting: -t --typesetting "Show typesetting information")
+        (@arg print_typesetting: --("dump-typesetting") "Show typesetting information")
+        (@arg parse_typesetting: -t --("parse-typesetting") "Parse typesetting information")
         (@arg grammar: -g --grammar "Check grammar")
         (@arg parse_stmt: -p --("parse-stmt")
             "Parse all statements according to the database's grammar")
@@ -103,6 +104,10 @@ fn main() {
             types.push(DiagnosticClass::StmtParse);
         }
 
+        if matches.is_present("parse_typesetting") {
+            types.push(DiagnosticClass::Typesetting);
+        }
+
         if matches.is_present("verify_parse_stmt") {
             db.stmt_parse_pass();
             db.verify_parse_stmt();
@@ -133,7 +138,7 @@ fn main() {
             db.print_outline();
         }
 
-        if matches.is_present("typesetting") {
+        if matches.is_present("print_typesetting") {
             db.typesetting_pass();
             db.print_typesetting();
         }

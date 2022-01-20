@@ -6,11 +6,17 @@
 //! used to collect information for generating HTML in the style of
 //! [`metamath.exe`](https://github.com/metamath/metamath-exe).
 
-use crate::parser::{as_str, Token};
+use crate::{
+    diag::Diagnostic,
+    parser::{as_str, StatementAddress, Token},
+};
 
 /// The parsed `$t` comment data.
 #[derive(Debug, Default, Clone)]
 pub struct TypesettingData {
+    /// Any errors detected while parsing this segment.
+    pub diagnostics: Vec<(StatementAddress, Diagnostic)>,
+
     /// LaTeX definitions are used to replace a token with a piece of latex syntax.
     /// Each entry has the form `(token, replacement)`.
     /// ```text

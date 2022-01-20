@@ -875,6 +875,9 @@ impl Database {
         if types.contains(&DiagnosticClass::StmtParse) {
             diags.extend(self.stmt_parse_pass().diagnostics());
         }
+        if types.contains(&DiagnosticClass::Typesetting) {
+            diags.extend(self.typesetting_pass().diagnostics.iter().cloned());
+        }
         time(&self.options.clone(), "diag", move || {
             diag::to_annotations(self.parse_result(), &mut lc, diags, f)
         })
