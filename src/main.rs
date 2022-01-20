@@ -28,6 +28,7 @@ fn main() {
         (@arg timing: --timing "Print milliseconds after each stage")
         (@arg verify: -v --verify "Check proof validity")
         (@arg outline: -O --outline "Show database outline")
+        (@arg typesetting: -t --typesetting "Show typesetting information")
         (@arg grammar: -g --grammar "Check grammar")
         (@arg parse_stmt: -p --("parse-stmt")
             "Parse all statements according to the database's grammar")
@@ -130,6 +131,11 @@ fn main() {
         if matches.is_present("outline") {
             db.outline_pass();
             db.print_outline();
+        }
+
+        if matches.is_present("typesetting") {
+            db.typesetting_pass();
+            db.print_typesetting();
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {

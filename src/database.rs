@@ -111,11 +111,11 @@ use crate::outline::Outline;
 use crate::outline::OutlineNodeRef;
 use crate::parser::Comparer;
 use crate::parser::StatementRef;
-use crate::parser::TypesettingData;
 use crate::proof::ProofTreeArray;
 use crate::scopeck;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
+use crate::typesetting::TypesettingData;
 use crate::verify;
 use crate::verify::VerifyResult;
 use annotate_snippets::snippet::Snippet;
@@ -592,7 +592,7 @@ impl Database {
         )
     }
 
-    /// Computes and returns the root node of the outline.
+    /// Computes and returns the typesetting data.
     pub fn typesetting_pass(&mut self) -> &Arc<TypesettingData> {
         if self.typesetting.is_none() {
             time(&self.options.clone(), "typesetting", || {
@@ -603,7 +603,7 @@ impl Database {
         self.typesetting_result()
     }
 
-    /// Returns the root node of the typesetting.
+    /// Returns the typesetting data.
     /// Panics if [`Database::typesetting_pass`] was not previously called.
     #[inline]
     #[must_use]
@@ -822,6 +822,14 @@ impl Database {
     pub fn print_outline(&self) {
         time(&self.options, "print_outline", || {
             self.outline_result().dump(self);
+        })
+    }
+
+    /// Dump the typesetting information.
+    /// Requires: [`Database::typesetting_pass`]
+    pub fn print_typesetting(&self) {
+        time(&self.options, "print_typesetting", || {
+            self.typesetting_result().dump();
         })
     }
 

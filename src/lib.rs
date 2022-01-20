@@ -65,6 +65,7 @@ pub mod outline;
 pub mod parser;
 pub mod proof;
 pub mod scopeck;
+pub mod typesetting;
 pub mod verify;
 
 #[cfg(test)]
