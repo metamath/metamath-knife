@@ -56,8 +56,8 @@ macro_rules! try_assert {
 /// compressed proof.  Compressed steps are either saved prior
 /// results/hypotheses, which are copied directly onto the stack, or previously
 /// proved assertions which require substitution before use.
-enum PreparedStep<'a, D> {
-    Hyp(Bitset, Atom, Range<usize>, D),
+enum PreparedStep<'a, D, I> {
+    Hyp(Bitset, Atom, I, D),
     Assert(&'a Frame),
 }
 use self::PreparedStep::*;
@@ -69,10 +69,10 @@ use self::PreparedStep::*;
 /// This type would be Copy except for the fact that the bitset can require
 /// overflow storage :(.
 #[derive(Clone, Debug)]
-pub struct StackSlot {
+pub struct StackSlot<I> {
     vars: Bitset,
     code: Atom,
-    expr: Range<usize>,
+    expr: I,
 }
 
 /// A constructor trait for plugging in to the verifier, to collect extra data during the
@@ -82,6 +82,8 @@ pub trait ProofBuilder {
     type Item: Clone;
     /// The hyp gathering type
     type Accum: Default;
+    /// The internal stack buffer type
+    type StackBuffer: ProofStack + Default;
 
     /// Add a new hyp to the accumulation type
     fn push(&mut self, hyps: &mut Self::Accum, hyp: Self::Item);
@@ -92,8 +94,8 @@ pub trait ProofBuilder {
         &mut self,
         addr: StatementAddress,
         hyps: Self::Accum,
-        pool: &[u8],
-        expr: Range<usize>,
+        pool: &Self::StackBuffer,
+        expr: <Self::StackBuffer as ProofStack>::Idx,
     ) -> Self::Item;
 }
 
@@ -103,10 +105,11 @@ pub trait ProofBuilder {
 impl ProofBuilder for () {
     type Item = ();
     type Accum = ();
+    type StackBuffer = Vec<u8>;
 
     fn push(&mut self, _: &mut (), _: ()) {}
 
-    fn build(&mut self, _: StatementAddress, _: (), _: &[u8], _: Range<usize>) {}
+    fn build(&mut self, _: StatementAddress, _: (), _: &Vec<u8>, _: Range<usize>) {}
 }
 
 /// Working memory used by the verifier on a segment.  This expands for the
@@ -125,17 +128,17 @@ struct VerifyState<'a, P: ProofBuilder> {
     /// The extended frame we are working on
     cur_frame: &'a Frame,
     /// Steps which can be invoked in the current proof, grows on every Z
-    prepared: Vec<PreparedStep<'a, P::Item>>,
+    prepared: Vec<PreparedStep<'a, P::Item, <P::StackBuffer as ProofStack>::Idx>>,
     /// Stack of active subtrees
-    stack: Vec<(P::Item, StackSlot)>,
+    stack: Vec<(P::Item, StackSlot<<P::StackBuffer as ProofStack>::Idx>)>,
     /// Buffer for math strings of subtrees and hypotheses; shared to reduce
     /// actual copying when a hypothesis or saved step is recalled
-    stack_buffer: Vec<u8>,
+    stack_buffer: P::StackBuffer,
     /// Scratch space used only when checking the final step
-    temp_buffer: Vec<u8>,
+    temp_buffer: P::StackBuffer,
     /// Scratch space used for a substitution mapping while invoking a prior
     /// assertion
-    subst_info: Vec<(Range<usize>, Bitset)>,
+    subst_info: Vec<(<P::StackBuffer as ProofStack>::Idx, Bitset)>,
     /// Tracks mandatory and optional variables in use in the current proof
     var2bit: HashMap<Atom, usize>,
     /// Disjoint variable conditions in the current extended frame
@@ -163,49 +166,26 @@ fn map_var<P: ProofBuilder>(state: &mut VerifyState<'_, P>, token: Atom) -> usiz
 // no longer have pseudo-frames, so this is the only way to prepare an $e
 fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<'_, P>, hyp: &'a scopeck::Hyp) {
     let mut vars = Bitset::new();
-    let tos = state.stack_buffer.len();
-    match *hyp {
-        Floating(_addr, var_index, _typecode) => {
-            fast_extend(
-                &mut state.stack_buffer,
-                state.nameset.atom_name(state.cur_frame.var_list[var_index]),
-            );
-            *state.stack_buffer.last_mut().unwrap() |= 0x80;
-            vars.set_bit(var_index); // and we have prior knowledge it's identity mapped
-        }
-        Essential(_addr, ref expr) => {
-            // this is the first of many subtle variations on the "interpret an
-            // ExprFragment" theme in this module.
-            for part in &*expr.tail {
-                fast_extend(
-                    &mut state.stack_buffer,
-                    &state.cur_frame.const_pool[part.prefix.clone()],
-                );
-                fast_extend(
-                    &mut state.stack_buffer,
-                    state.nameset.atom_name(state.cur_frame.var_list[part.var]),
-                );
-                *state.stack_buffer.last_mut().unwrap() |= 0x80;
-                vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
-            }
-            fast_extend(
-                &mut state.stack_buffer,
-                &state.cur_frame.const_pool[expr.rump.clone()],
-            );
+    let stack_expr = match *hyp {
+        Floating(_addr, var_index, _typecode) => state
+            .stack_buffer
+            .push_floating(state.nameset, state.cur_frame.var_list[var_index]),
+        Essential(addr, ref expr) => {
+            state
+                .stack_buffer
+                .push_essential(state.nameset, state.cur_frame, addr, expr, &mut vars)
         }
     };
-
-    let n_tos = state.stack_buffer.len();
 
     state.prepared.push(Hyp(
         vars,
         hyp.typecode(),
-        tos..n_tos,
+        stack_expr.clone(),
         state.builder.build(
             hyp.address(),
             Default::default(),
             &state.stack_buffer,
-            tos..n_tos,
+            stack_expr,
         ),
     ));
 }
@@ -331,18 +311,16 @@ fn prepare_step<'a, P: ProofBuilder>(
             vars.set_bit(map_var(state, var));
         }
 
-        let old_top = state.stack_buffer.len();
-        fast_extend(&mut state.stack_buffer, &frame.stub_expr);
-        let new_top = state.stack_buffer.len();
+        let stack_id = state.stack_buffer.push_floating_frame(frame);
         state.prepared.push(Hyp(
             vars,
             frame.target.typecode,
-            old_top..new_top,
+            stack_id.clone(),
             state.builder.build(
                 valid.start,
                 Default::default(),
                 &state.stack_buffer,
-                old_top..new_top,
+                stack_id,
             ),
         ));
     }
@@ -350,73 +328,186 @@ fn prepare_step<'a, P: ProofBuilder>(
     Ok(out)
 }
 
-// perform a substitution after it has been built in `vars`, appending to
-// `target`
-#[inline(always)]
-fn do_substitute(
-    target: &mut Vec<u8>,
-    frame: &Frame,
-    expr: &VerifyExpr,
-    vars: &[(Range<usize>, Bitset)],
-) {
-    for part in &*expr.tail {
-        fast_extend(target, &frame.const_pool[part.prefix.clone()]);
-        target.extend_from_within(vars[part.var].0.clone());
-    }
-    fast_extend(target, &frame.const_pool[expr.rump.clone()]);
+/// Trait for representing proof stacks, providing methods
+/// for pushing hypotheses on the stack, as well as performing
+/// substitutions and equality checks.
+pub trait ProofStack {
+    /// Index into this stack buffer
+    type Idx: Clone + Default;
+    /// Expressions stored in this stack buffer
+    type Expr: PartialEq + ?Sized;
+
+    /// Clears the stack.
+    fn clear(&mut self);
+
+    /// Push a floating hypothesis on the stack
+    fn push_floating<'a>(&mut self, nset: &'a Nameset, floating: Atom) -> Self::Idx;
+
+    /// Push a floating frame on the stack
+    fn push_floating_frame<'a>(&mut self, frame: &'a Frame) -> Self::Idx;
+
+    /// Push an essential hypothesis on the stack
+    fn push_essential<'a>(
+        &mut self,
+        nset: &'a Nameset,
+        cur_frame: &'a Frame,
+        _addr: StatementAddress,
+        expr: &'a VerifyExpr,
+        vars: &mut Bitset,
+    ) -> Self::Idx;
+
+    /// Perform a substitution after it has been built in `vars`,
+    /// appending to this stack
+    fn do_substitute<'a>(
+        &mut self,
+        frame: &'a Frame,
+        expr: &'a VerifyExpr,
+        vars: &'a [(Self::Idx, Bitset)],
+    ) -> Self::Idx;
+
+    /// like a substitution and equality check, but in one pass
+    fn do_substitute_eq(
+        &mut self,
+        compare_idx: Self::Idx,
+        frame: &Frame,
+        expr: &VerifyExpr,
+        vars: &[(Self::Idx, Bitset)],
+    ) -> bool;
+
+    /// substitute with the _names_ of variables, for the final "did we prove what we
+    /// claimed we would" check
+    fn do_substitute_raw<'a>(&mut self, frame: &'a Frame, nset: &'a Nameset) -> Self::Idx;
+
+    /// Compare the expressions stored at `index` in this stack.
+    fn compare(stack1: &Self, index1: Self::Idx, stack2: &Self, index2: Self::Idx) -> bool;
 }
 
-// like a substitution and equality check, but in one pass
-#[inline(always)]
-fn do_substitute_eq(
-    mut compare: &[u8],
-    frame: &Frame,
-    expr: &VerifyExpr,
-    vars: &[(Range<usize>, Bitset)],
-    var_buffer: &[u8],
-) -> bool {
-    fn step(compare: &mut &[u8], slice: &[u8]) -> bool {
-        let len = slice.len();
-        if (*compare).len() < len {
-            return true;
-        }
-        if slice != &(*compare)[0..len] {
-            return true;
-        }
-        *compare = &(*compare)[len..];
-        false
+/// A special type of proof builder, where the stack is a string of bytes,
+/// using 0x80 as a marker between tokens.  Expressions on the stack are identified
+/// using `usize` ranges over that string.
+impl ProofStack for Vec<u8> {
+    type Idx = Range<usize>;
+    type Expr = [u8];
+
+    fn clear(&mut self) {
+        fast_clear(self);
     }
 
-    for part in &*expr.tail {
-        if step(&mut compare, &frame.const_pool[part.prefix.clone()]) {
+    fn push_floating<'a>(&mut self, nset: &'a Nameset, floating: Atom) -> Self::Idx {
+        let tos = self.len();
+        fast_extend(self, nset.atom_name(floating));
+        *self.last_mut().unwrap() |= 0x80;
+        let n_tos = self.len();
+        tos..n_tos
+    }
+
+    fn push_floating_frame<'a>(&mut self, frame: &'a Frame) -> Self::Idx {
+        let old_top = self.len();
+        fast_extend(self, &frame.stub_expr);
+        let new_top = self.len();
+        old_top..new_top
+    }
+
+    fn push_essential<'a>(
+        &mut self,
+        nset: &'a Nameset,
+        cur_frame: &'a Frame,
+        _addr: StatementAddress,
+        expr: &'a VerifyExpr,
+        vars: &mut Bitset,
+    ) -> Self::Idx {
+        let tos = self.len();
+        // this is the first of many subtle variations on the "interpret an
+        // ExprFragment" theme in this module.
+        for part in &*expr.tail {
+            fast_extend(self, &cur_frame.const_pool[part.prefix.clone()]);
+            fast_extend(self, nset.atom_name(cur_frame.var_list[part.var]));
+            *self.last_mut().unwrap() |= 0x80;
+            vars.set_bit(part.var); // and we have prior knowledge it's identity mapped
+        }
+        fast_extend(self, &cur_frame.const_pool[expr.rump.clone()]);
+        let n_tos = self.len();
+        tos..n_tos
+    }
+
+    // perform a substitution after it has been built in `vars`, appending to
+    // `target`
+    #[inline(always)]
+    fn do_substitute<'a>(
+        &mut self,
+        frame: &'a Frame,
+        expr: &'a VerifyExpr,
+        vars: &[(Range<usize>, Bitset)],
+    ) -> Self::Idx {
+        let old_top = self.len();
+        for part in &*expr.tail {
+            fast_extend(self, &frame.const_pool[part.prefix.clone()]);
+            self.extend_from_within(vars[part.var].0.clone());
+        }
+        fast_extend(self, &frame.const_pool[expr.rump.clone()]);
+        let new_top = self.len();
+        old_top..new_top
+    }
+
+    // like a substitution and equality check, but in one pass
+    #[inline(always)]
+    fn do_substitute_eq(
+        &mut self,
+        compare_idx: Self::Idx,
+        frame: &Frame,
+        expr: &VerifyExpr,
+        vars: &[(Range<usize>, Bitset)],
+    ) -> bool {
+        fn step(compare: &mut &[u8], slice: &[u8]) -> bool {
+            let len = slice.len();
+            if (*compare).len() < len {
+                return true;
+            }
+            if slice != &(*compare)[0..len] {
+                return true;
+            }
+            *compare = &(*compare)[len..];
+            false
+        }
+
+        let mut compare = &self[compare_idx];
+        for part in &*expr.tail {
+            if step(&mut compare, &frame.const_pool[part.prefix.clone()]) {
+                return false;
+            }
+            if step(&mut compare, &self[vars[part.var].0.clone()]) {
+                return false;
+            }
+        }
+
+        if step(&mut compare, &frame.const_pool[expr.rump.clone()]) {
             return false;
         }
-        if step(&mut compare, &var_buffer[vars[part.var].0.clone()]) {
-            return false;
+
+        compare.is_empty()
+    }
+
+    // substitute with the _names_ of variables, for the final "did we prove what we
+    // claimed we would" check
+    fn do_substitute_raw<'a>(&mut self, frame: &'a Frame, nset: &'a Nameset) -> Self::Idx {
+        for part in &*frame.target.tail {
+            fast_extend(self, &frame.const_pool[part.prefix.clone()]);
+            fast_extend(self, nset.atom_name(frame.var_list[part.var]));
+            *self.last_mut().unwrap() |= 0x80;
         }
+        fast_extend(self, &frame.const_pool[frame.target.rump.clone()]);
+        0..self.len()
     }
 
-    if step(&mut compare, &frame.const_pool[expr.rump.clone()]) {
-        return false;
+    /// Compare the expressions stored at `index` in this stack.
+    fn compare(stack1: &Self, index1: Self::Idx, stack2: &Self, index2: Self::Idx) -> bool {
+        stack1[index1] == stack2[index2]
     }
-
-    compare.is_empty()
-}
-
-// substitute with the _names_ of variables, for the final "did we prove what we
-// claimed we would" check
-fn do_substitute_raw(target: &mut Vec<u8>, frame: &Frame, nameset: &Nameset) {
-    for part in &*frame.target.tail {
-        fast_extend(target, &frame.const_pool[part.prefix.clone()]);
-        fast_extend(target, nameset.atom_name(frame.var_list[part.var]));
-        *target.last_mut().unwrap() |= 0x80;
-    }
-    fast_extend(target, &frame.const_pool[frame.target.rump.clone()]);
 }
 
 // generate a bitmask for a substituted expression
 #[inline(always)]
-fn do_substitute_vars(expr: &[ExprFragment], vars: &[(Range<usize>, Bitset)]) -> Bitset {
+fn do_substitute_vars<I: Clone + Default>(expr: &[ExprFragment], vars: &[(I, Bitset)]) -> Bitset {
     let mut out = Bitset::new();
     for part in expr {
         out |= &vars[part.var].1;
@@ -440,7 +531,8 @@ fn process_hyp<P: ProofBuilder>(
     ix: usize,
     hyp: &scopeck::Hyp,
 ) -> Result<()> {
-    let (ref data, ref slot): (P::Item, StackSlot) = state.stack[ix];
+    let (ref data, ref slot): (P::Item, StackSlot<<P::StackBuffer as ProofStack>::Idx>) =
+        state.stack[ix];
     state.builder.push(datavec, data.clone());
     match *hyp {
         Floating(_addr, var_index, typecode) => {
@@ -450,12 +542,11 @@ fn process_hyp<P: ProofBuilder>(
         Essential(_addr, ref expr) => {
             try_assert!(slot.code == expr.typecode, Diagnostic::StepEssenWrongType);
             try_assert!(
-                do_substitute_eq(
-                    &state.stack_buffer[slot.expr.clone()],
+                state.stack_buffer.do_substitute_eq(
+                    slot.expr.clone(),
                     frame,
                     expr,
                     &state.subst_info,
-                    &state.stack_buffer
                 ),
                 Diagnostic::StepEssenWrong
             );
@@ -502,7 +593,10 @@ fn execute_step<P: ProofBuilder>(
     while state.subst_info.len() < fref.mandatory_count {
         // this is mildly unhygenic, since slots corresponding to $e hyps won't get cleared, but
         // scopeck shouldn't generate references to them
-        state.subst_info.push((0..0, Bitset::new()));
+        state.subst_info.push((
+            <P::StackBuffer as ProofStack>::Idx::default(),
+            Bitset::new(),
+        ));
     }
 
     let mut datavec = Default::default();
@@ -579,14 +673,9 @@ fn execute_step<P: ProofBuilder>(
     // pool, because they might have been saved steps or hypotheses, and
     // deciding whether we need to move anything would swamp any savings, anyway
     // - remember that this function is largely a branch predictor benchmark
-    let old_top = state.stack_buffer.len();
-    do_substitute(
-        &mut state.stack_buffer,
-        fref,
-        &fref.target,
-        &state.subst_info,
-    );
-    let new_top = state.stack_buffer.len();
+    let stack_id = state
+        .stack_buffer
+        .do_substitute(fref, &fref.target, &state.subst_info);
 
     state.stack.truncate(sbase);
     state.stack.push((
@@ -594,12 +683,12 @@ fn execute_step<P: ProofBuilder>(
             fref.valid.start,
             datavec,
             &state.stack_buffer,
-            old_top..new_top,
+            stack_id.clone(),
         ),
         StackSlot {
             code: fref.target.typecode,
             vars: do_substitute_vars(&fref.target.tail, &state.subst_info),
-            expr: old_top..new_top,
+            expr: stack_id,
         },
     ));
 
@@ -630,11 +719,13 @@ fn finalize_step<P: ProofBuilder>(state: &mut VerifyState<'_, P>) -> Result<P::I
         Diagnostic::ProofWrongTypeEnd
     );
 
-    fast_clear(&mut state.temp_buffer);
-    do_substitute_raw(&mut state.temp_buffer, state.cur_frame, state.nameset);
+    state.temp_buffer.clear();
+    let final_expr = state
+        .temp_buffer
+        .do_substitute_raw(state.cur_frame, state.nameset);
 
     try_assert!(
-        state.stack_buffer[tos.expr.clone()] == state.temp_buffer[..],
+        P::StackBuffer::compare(&state.stack_buffer, tos.expr.clone(), &state.temp_buffer, final_expr),
         Diagnostic::ProofWrongExprEnd
     );
 
@@ -661,7 +752,7 @@ fn verify_proof<'a, P: ProofBuilder>(
 ) -> Result<P::Item> {
     // clear, but do not free memory
     state.stack.clear();
-    fast_clear(&mut state.stack_buffer);
+    state.stack_buffer.clear();
     state.prepared.clear();
     state.var2bit.clear();
     state.dv_map = &state.cur_frame.optional_dv;
@@ -900,9 +991,9 @@ pub(crate) fn verify_one<P: ProofBuilder>(
         order: &db.parse_result().order,
         cur_frame: &dummy_frame,
         stack: Vec::new(),
-        stack_buffer: Vec::new(),
+        stack_buffer: P::StackBuffer::default(),
         prepared: Vec::new(),
-        temp_buffer: Vec::new(),
+        temp_buffer: P::StackBuffer::default(),
         subst_info: Vec::new(),
         var2bit: HashMap::default(),
         dv_map: &dummy_frame.optional_dv,

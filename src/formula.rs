@@ -33,6 +33,7 @@ use crate::util::HashMap;
 use crate::verify::ProofBuilder;
 use crate::Database;
 use core::ops::Index;
+use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::FromIterator;
@@ -89,6 +90,24 @@ impl Substitutions {
     #[must_use]
     pub fn get(&self, label: Label) -> Option<&Formula> {
         self.0.get(&label)
+    }
+
+    /// An iterator visiting all substitutions in arbitrary order.
+    /// The iterator element type is `(&Label, &Formula)`.
+    #[inline]
+    #[must_use]
+    pub fn iter(&self) -> Iter<'_, Label, Formula> {
+        self.0.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Substitutions {
+    type Item = (&'a Label, &'a Formula);
+    type IntoIter = Iter<'a, Label, Formula>;
+
+    #[inline]
+    fn into_iter(self) -> Iter<'a, Label, Formula> {
+        self.iter()
     }
 }
 
@@ -353,7 +372,7 @@ impl<'a> FormulaRef<'a> {
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         self,
         stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A, StackBuffer = Vec<u8>>,
     ) -> I {
         self.sub_build_syntax_proof(self.root, stack_buffer, arr)
     }
@@ -369,7 +388,7 @@ impl<'a> FormulaRef<'a> {
         self,
         node_id: NodeId,
         stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A, StackBuffer = Vec<u8>>,
     ) -> I {
         let nset = self.db.name_result();
 
