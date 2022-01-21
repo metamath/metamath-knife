@@ -56,7 +56,7 @@ fn test_db_formula() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     {
-        let sref = db.statement("ax-com").unwrap();
+        let sref = db.statement(b"ax-com").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cadd");
@@ -115,7 +115,7 @@ fn test_db_32_formula() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     {
-        let sref = db.statement("check").unwrap();
+        let sref = db.statement(b"check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cov");
@@ -169,7 +169,7 @@ fn test_db_43_formula() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     {
-        let sref = db.statement("check").unwrap();
+        let sref = db.statement(b"check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cab");
@@ -215,7 +215,7 @@ fn test_garden_path_1() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     assert!(sset.parse_diagnostics().is_empty());
-    let sref = db.statement("formula1").unwrap();
+    let sref = db.statement(b"formula1").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
     assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
@@ -230,7 +230,7 @@ fn test_garden_path_2() {
     let mut db = mkdb(GARDEN_PATH_DB);
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
-    let sref = db.statement("formula2").unwrap();
+    let sref = db.statement(b"formula2").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
     assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
@@ -247,7 +247,7 @@ fn test_garden_path_3() {
     let mut db = mkdb(GARDEN_PATH_DB);
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
-    let sref = db.statement("formula3").unwrap();
+    let sref = db.statement(b"formula3").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
     assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");

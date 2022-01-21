@@ -857,7 +857,7 @@ pub(crate) fn verify(
 ) {
     let old = mem::take(&mut result.segments);
     let mut ssrq = Vec::new();
-    for sref in segments.segments() {
+    for sref in segments.segments(..) {
         let segments2 = segments.clone();
         let nset = nset.clone();
         let scope = scope.clone();

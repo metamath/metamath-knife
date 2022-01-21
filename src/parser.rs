@@ -52,7 +52,9 @@ use std::cmp;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::mem;
+use std::ops::Bound;
 use std::ops::Deref;
+use std::ops::RangeBounds;
 use std::slice;
 use std::str;
 use std::sync::Arc;
@@ -158,17 +160,15 @@ pub type TokenIndex = i32;
 /// `SegmentOrder` implements the [`Comparer`] trait, allowing it to be used
 /// polymorphically with the `cmp` method to order lists of segments,
 /// statements, or tokens.
-#[derive(Clone, Debug, Default)]
-pub struct SegmentOrder {
+#[derive(Clone, Debug)]
+pub(crate) struct SegmentOrder {
     high_water: u32,
     order: Vec<SegmentId>,
     reverse: Vec<usize>,
 }
 
-impl SegmentOrder {
-    /// Creates a new empty segment ordering.
-    #[must_use]
-    pub fn new() -> Self {
+impl Default for SegmentOrder {
+    fn default() -> Self {
         // pre-assign 1 as "start".  (think "cyclic order")
         SegmentOrder {
             high_water: 2,
@@ -176,10 +176,12 @@ impl SegmentOrder {
             reverse: vec![0; 2],
         }
     }
+}
 
+impl SegmentOrder {
     /// Each segment ordering has a single ID which will not be used otherwise;
     /// pass this to `new_before` to get an ID larger than all created IDs.
-    pub const START: SegmentId = SegmentId(1);
+    pub(crate) const START: SegmentId = SegmentId(1);
 
     fn alloc_id(&mut self) -> SegmentId {
         let index = self.high_water;
@@ -199,18 +201,59 @@ impl SegmentOrder {
     /// freed.
     ///
     /// The ID itself will not be reissued.
-    pub fn free_id(&mut self, id: SegmentId) {
+    pub(crate) fn free_id(&mut self, id: SegmentId) {
         self.order.remove(self.reverse[id.0 as usize]);
         self.reindex();
     }
 
     /// Gets a new ID, and adds it to the order before the named ID, or at the
     /// end if you pass `start()`.
-    pub fn new_before(&mut self, after: SegmentId) -> SegmentId {
+    pub(crate) fn new_before(&mut self, after: SegmentId) -> SegmentId {
         let id = self.alloc_id();
         self.order.insert(self.reverse[after.0 as usize], id);
         self.reindex();
         id
+    }
+
+    pub(crate) fn range(&self, range: impl RangeBounds<SegmentId>) -> SegmentIter<'_> {
+        let start = match range.start_bound() {
+            Bound::Included(id) => self.reverse[id.0 as usize],
+            Bound::Excluded(id) => self.reverse[id.0 as usize] + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(id) => self.reverse[id.0 as usize] + 1,
+            Bound::Excluded(id) => self.reverse[id.0 as usize],
+            Bound::Unbounded => self.order.len(),
+        };
+        SegmentIter(self.order[start..end].iter())
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SegmentIter<'a>(std::slice::Iter<'a, SegmentId>);
+
+impl<'a> Iterator for SegmentIter<'a> {
+    type Item = SegmentId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().copied()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
+    }
+}
+
+impl<'a> ExactSizeIterator for SegmentIter<'a> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a> DoubleEndedIterator for SegmentIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back().copied()
     }
 }
 
@@ -229,15 +272,15 @@ impl Comparer<SegmentId> for SegmentOrder {
 
 impl Comparer<StatementAddress> for SegmentOrder {
     fn cmp(&self, left: &StatementAddress, right: &StatementAddress) -> Ordering {
-        let order = self.cmp(&left.segment_id, &right.segment_id);
-        (order, left.index).cmp(&(Ordering::Equal, right.index))
+        self.cmp(&left.segment_id, &right.segment_id)
+            .then_with(|| left.index.cmp(&right.index))
     }
 }
 
 impl Comparer<TokenAddress> for SegmentOrder {
     fn cmp(&self, left: &TokenAddress, right: &TokenAddress) -> Ordering {
-        let order = self.cmp(&left.statement, &right.statement);
-        (order, left.token_index).cmp(&(Ordering::Equal, right.token_index))
+        self.cmp(&left.statement, &right.statement)
+            .then_with(|| left.token_index.cmp(&right.token_index))
     }
 }
 
@@ -518,6 +561,71 @@ impl<'a> SegmentRef<'a> {
     #[must_use]
     pub fn bytes(self) -> usize {
         self.buffer.len()
+    }
+
+    /// Returns a new empty statement iterator.
+    fn empty(self) -> StatementIter<'a> {
+        StatementIter {
+            slice_iter: [].iter(),
+            segment: self,
+            index: 0,
+        }
+    }
+
+    /// Returns an iterator over a range of statement indices in the current segment.
+    #[must_use]
+    pub fn range(self, range: impl RangeBounds<StatementIndex>) -> StatementIter<'a> {
+        let start = match range.start_bound() {
+            Bound::Included(&i) => i,
+            Bound::Excluded(&i) => i + 1,
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&i) => i as usize + 1,
+            Bound::Excluded(&i) => i as usize,
+            Bound::Unbounded => self.segment.statements.len(),
+        };
+        StatementIter {
+            slice_iter: self.segment.statements[start as usize..end].iter(),
+            segment: self,
+            index: start,
+        }
+    }
+
+    /// Returns an iterator over a range of statement addresses in the current segment.
+    #[must_use]
+    pub(crate) fn range_address(
+        self,
+        order: &SegmentOrder,
+        range: impl RangeBounds<StatementAddress>,
+    ) -> StatementIter<'a> {
+        let start = match range.start_bound() {
+            Bound::Included(addr) => match order.cmp(&addr.segment_id, &self.id) {
+                Ordering::Less => Bound::Unbounded,
+                Ordering::Equal => Bound::Included(addr.index),
+                Ordering::Greater => return self.empty(),
+            },
+            Bound::Excluded(addr) => match order.cmp(&addr.segment_id, &self.id) {
+                Ordering::Less => Bound::Unbounded,
+                Ordering::Equal => Bound::Excluded(addr.index),
+                Ordering::Greater => return self.empty(),
+            },
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(addr) => match order.cmp(&addr.segment_id, &self.id) {
+                Ordering::Less => return self.empty(),
+                Ordering::Equal => Bound::Included(addr.index),
+                Ordering::Greater => Bound::Unbounded,
+            },
+            Bound::Excluded(addr) => match order.cmp(&addr.segment_id, &self.id) {
+                Ordering::Less => return self.empty(),
+                Ordering::Equal => Bound::Excluded(addr.index),
+                Ordering::Greater => Bound::Unbounded,
+            },
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        self.range((start, end))
     }
 }
 
@@ -815,6 +923,26 @@ impl<'a> Iterator for StatementIter<'a> {
                 index,
             }
         })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
+    }
+}
+
+impl<'a> DoubleEndedIterator for StatementIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.slice_iter.next_back().map(|st_ref| StatementRef {
+            segment: self.segment,
+            statement: st_ref,
+            index: self.index + self.slice_iter.len() as StatementIndex,
+        })
+    }
+}
+
+impl<'a> ExactSizeIterator for StatementIter<'a> {
+    fn len(&self) -> usize {
+        self.slice_iter.len()
     }
 }
 
@@ -1911,7 +2039,7 @@ impl SegmentSet {
         }
 
         let mut data = TypesettingData::default();
-        for seg in self.segments() {
+        for seg in self.segments(..) {
             for &(ix, (span, ref command)) in &seg.t_commands {
                 if let Err(diag) = parse_one(&mut data, &seg.buffer, span, command) {
                     let address = StatementAddress::new(seg.id, ix);

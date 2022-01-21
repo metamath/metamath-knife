@@ -113,7 +113,7 @@ pub struct ExprFragment {
 /// between math symbols are indicated by setting the 8th bit on the last byte
 /// of each symbol.  The same compressed representation is used in literal
 /// segments so that execution can be simple copying.
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct VerifyExpr {
     /// Atom representation of the first constant symbol in the expression.
     pub typecode: Atom,
@@ -123,16 +123,6 @@ pub struct VerifyExpr {
     /// The parts of the expression up to and including the last variable, as a
     /// sequence of literal, variable pairs.
     pub tail: Box<[ExprFragment]>,
-}
-
-impl Default for VerifyExpr {
-    fn default() -> VerifyExpr {
-        VerifyExpr {
-            typecode: Atom::default(),
-            rump: 0..0,
-            tail: Box::default(),
-        }
-    }
 }
 
 /// Representation of a hypothesis in a frame program.
@@ -990,7 +980,7 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
         for (sid, ssr) in result.segments.iter().enumerate() {
             prev.insert(SegmentId(sid as u32), ssr.clone());
         }
-        for sref in segments.segments() {
+        for sref in segments.segments(..) {
             let segments2 = segments.clone();
             let names = names.clone();
             let id = sref.id;
@@ -1020,7 +1010,7 @@ pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names
         }
     }
 
-    for sref in segments.segments() {
+    for sref in segments.segments(..) {
         match ssrq.pop_front().unwrap().wait() {
             Some(scoperes) => {
                 to_add.push(scoperes);
