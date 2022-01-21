@@ -322,7 +322,7 @@ fn prepare_step<'a, P: ProofBuilder>(
         Diagnostic::StepUsedAfterScope(label.into())
     );
 
-    if frame.stype == StatementType::Axiom || frame.stype == StatementType::Provable {
+    if frame.stype.is_assertion() {
         state.prepared.push(Assert(frame));
     } else {
         let mut vars = Bitset::new();
