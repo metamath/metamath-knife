@@ -1883,9 +1883,15 @@ impl SegmentSet {
             };
 
             match cmd.as_ref(buf) {
-                b"latexdef" => data.latex_defs.push((as_(&mut rest)?, sum(rest)?)),
-                b"htmldef" => data.html_defs.push((as_(&mut rest)?, sum(rest)?)),
-                b"althtmldef" => data.alt_html_defs.push((as_(&mut rest)?, sum(rest)?)),
+                b"latexdef" => {
+                    data.latex_defs.insert(as_(&mut rest)?, sum(rest)?);
+                }
+                b"htmldef" => {
+                    data.html_defs.insert(as_(&mut rest)?, sum(rest)?);
+                }
+                b"althtmldef" => {
+                    data.alt_html_defs.insert(as_(&mut rest)?, sum(rest)?);
+                }
                 b"htmlvarcolor" => data.html_var_color.push(sum(rest)?),
                 b"htmltitle" => data.html_title = Some(sum(rest)?),
                 b"htmlhome" => data.html_home = Some(sum(rest)?),
