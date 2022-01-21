@@ -428,15 +428,13 @@ impl SegmentSet {
         }
 
         // Finally, pop everything from the stack onto the tree
-        let mut last_sibling_idx = 0;
         for (node, sibling_idx) in node_stack.into_iter().rev() {
             let node_id = std::mem::replace(&mut current_node, node)
                 .add_to_tree(&mut tree, &sibling_stack[sibling_idx..]);
             sibling_stack.truncate(sibling_idx);
             sibling_stack.push(node_id);
-            last_sibling_idx = sibling_idx;
         }
-        let root = current_node.add_to_tree(&mut tree, &sibling_stack[..=last_sibling_idx]);
+        let root = current_node.add_to_tree(&mut tree, &sibling_stack);
         tree[root].parent = root;
 
         Outline {
