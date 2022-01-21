@@ -8,8 +8,9 @@
 
 use crate::{
     diag::Diagnostic,
-    parser::{as_str, StatementAddress, Token},
+    parser::{as_str, StatementAddress, Token, TokenPtr},
 };
+use std::collections::HashMap;
 
 /// The parsed `$t` comment data.
 #[derive(Debug, Default, Clone)]
@@ -22,7 +23,7 @@ pub struct TypesettingData {
     /// ```text
     /// latexdef "ph" as "\varphi";
     /// ```
-    pub latex_defs: Vec<(Token, Token)>,
+    pub latex_defs: HashMap<Token, Token>,
 
     /// HTML definitions are used to replace a token with a piece of HTML syntax.
     /// This version will generally be used for the GIF rendering version of the web pages.
@@ -30,7 +31,7 @@ pub struct TypesettingData {
     /// ```text
     /// htmldef "ph" as "<IMG SRC='_varphi.gif' WIDTH=11 HEIGHT=19 ALT=' ph' TITLE='ph'>";
     /// ```
-    pub html_defs: Vec<(Token, Token)>,
+    pub html_defs: HashMap<Token, Token>,
 
     /// HTML definitions are used to replace a token with a piece of HTML syntax.
     /// This version will generally be used for the unicode rendering version of the web pages.
@@ -38,7 +39,7 @@ pub struct TypesettingData {
     /// ```text
     /// althtmldef "ph" as "<SPAN CLASS=wff STYLE='color:blue'>&#x1D711;</SPAN>";
     /// ```
-    pub alt_html_defs: Vec<(Token, Token)>,
+    pub alt_html_defs: HashMap<Token, Token>,
 
     /// A piece of HTML to give the variable color key. All `htmlvarcolor` directives are given
     /// separately here, but they are logically concatenated with spaces for rendering.
@@ -147,6 +148,12 @@ pub struct TypesettingData {
 }
 
 impl TypesettingData {
+    /// Get the unicode rendering for a given symbol
+    #[must_use]
+    pub fn get_alt_html_def(&self, symbol: TokenPtr<'_>) -> Option<&Token> {
+        self.alt_html_defs.get(symbol)
+    }
+
     /// Dump the content of this outline to the standard output
     pub(crate) fn dump(&self) {
         for v in &self.html_var_color {
