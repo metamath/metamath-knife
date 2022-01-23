@@ -51,7 +51,7 @@
 use crate::database::{DbOptions, Executor, Promise};
 use crate::diag::Diagnostic;
 use crate::parser::{
-    self, Command, Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, Span, StatementAddress,
+    self, Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, Span, StatementAddress,
     StatementRef,
 };
 use crate::util::{find_chapter_header, HashMap, HashSet};
@@ -217,17 +217,6 @@ impl SegmentSet {
         for sref in self.segments() {
             for &(ix, ref d) in &sref.diagnostics {
                 out.push((StatementAddress::new(sref.id, ix), d.clone()));
-            }
-        }
-        out
-    }
-
-    /// Returns the commands parsed from the $j comments
-    pub(crate) fn parser_commands(&self) -> Vec<(StatementAddress, Command)> {
-        let mut out = Vec::new();
-        for sref in self.segments() {
-            for &(ix, ref command) in &sref.commands {
-                out.push((StatementAddress::new(sref.id, ix), command.clone()));
             }
         }
         out

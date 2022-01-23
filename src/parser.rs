@@ -46,8 +46,11 @@
 //! it makes no sense to have a segment-local segment reference.
 
 use crate::diag::Diagnostic;
+use crate::segment_set::SegmentSet;
+use crate::typesetting::TypesettingData;
 use std::cmp;
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::mem;
 use std::ops::Deref;
 use std::slice;
@@ -404,8 +407,36 @@ pub struct HeadingDef {
     pub level: HeadingLevel,
 }
 
+/// An individual symbol in a command, either a string or other keyword.
+#[derive(Clone, Copy, Debug)]
+pub enum CommandToken {
+    /// A keyword (an identifier or symbol not surrounded in quotes)
+    Keyword(Span),
+    /// A string surrounded by `'` or `"` quotes
+    String(Span),
+}
+
+impl CommandToken {
+    /// Get the string corresponding to this token.
+    #[must_use]
+    pub fn value(self, buf: &[u8]) -> TokenPtr<'_> {
+        match self {
+            Self::Keyword(s) | Self::String(s) => s.as_ref(buf),
+        }
+    }
+
+    /// Get the full span of the token, including exterior quotes.
+    #[must_use]
+    pub const fn full_span(self) -> Span {
+        match self {
+            Self::Keyword(s) => s,
+            Self::String(s) => Span::new2(s.start - 1, s.end + 1),
+        }
+    }
+}
+
 /// Extra information residing in a $j comment
-pub type Command = Vec<Token>;
+pub type Command = (Span, Vec<CommandToken>);
 
 /// A parsed segment, containing parsed statement data and some extractions.
 ///
@@ -445,8 +476,10 @@ pub struct Segment {
     pub floats: Vec<FloatDef>,
     /// Top-level headings extracted for outline
     pub outline: Vec<HeadingDef>,
+    /// Parser commands provided in $t typesetting comments.
+    pub t_commands: Vec<(StatementIndex, Command)>,
     /// Parser commands provided in $j additional information comments.
-    pub commands: Vec<(StatementIndex, Command)>,
+    pub j_commands: Vec<(StatementIndex, Command)>,
 }
 
 /// A pointer to a segment which knows its identity.
@@ -1412,7 +1445,8 @@ impl<'a> Scanner<'a> {
             diagnostics: Vec::new(),
             span_pool: Vec::new(),
             outline: Vec::new(),
-            commands: Vec::new(),
+            t_commands: Vec::new(),
+            j_commands: Vec::new(),
         };
         let mut top_group = NO_STATEMENT;
         let is_end;
@@ -1552,10 +1586,24 @@ fn collect_definitions(seg: &mut Segment) {
                     level,
                 });
             }
-            AdditionalInfoComment => match commands(buf, stmt.span.start) {
+            TypesettingComment => match commands(buf, b't', stmt.span.start) {
                 Ok(commands) => {
-                    for command in commands {
-                        seg.commands.push((index, command));
+                    for result in commands {
+                        match result {
+                            Ok(command) => seg.t_commands.push((index, command)),
+                            Err(diag) => seg.diagnostics.push((index, diag)),
+                        }
+                    }
+                }
+                Err(diag) => seg.diagnostics.push((index, diag)),
+            },
+            AdditionalInfoComment => match commands(buf, b'j', stmt.span.start) {
+                Ok(commands) => {
+                    for result in commands {
+                        match result {
+                            Ok(command) => seg.j_commands.push((index, command)),
+                            Err(diag) => seg.diagnostics.push((index, diag)),
+                        }
                     }
                 }
                 Err(diag) => seg.diagnostics.push((index, diag)),
@@ -1611,18 +1659,18 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr<'_> {
     &buffer[index..eol]
 }
 
-/// Extract the parser commands out of a $j "additional information" comment
-fn commands(buffer: &[u8], pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
+/// Extract the parser commands out of a $t or $j special comment
+fn commands(buffer: &[u8], ch: u8, pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
     let mut iter = CommandIter {
         buffer,
         index: pos as usize,
     };
-    iter.skip_white_spaces();
+    let _ = iter.skip_white_spaces()?;
     iter.expect(b'$')?;
     iter.expect(b'(')?;
-    iter.skip_white_spaces();
+    let _ = iter.skip_white_spaces()?;
     iter.expect(b'$')?;
-    iter.expect(b'j')?;
+    iter.expect(ch)?;
     Ok(iter)
 }
 
@@ -1640,22 +1688,41 @@ impl CommandIter<'_> {
         self.buffer[self.index]
     }
 
-    fn skip_white_spaces(&mut self) {
-        // Skip any white spaces and line feeds
-        while self.has_more()
-            && (self.next_char() == b' ' || self.next_char() == b'\n' || self.next_char() == b'\r')
-        {
+    fn skip_white_spaces(&mut self) -> Result<Option<()>, Diagnostic> {
+        'outer_loop: while self.has_more() {
+            match self.next_char() {
+                b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
+                // End upon comment closing, $)
+                b'$' => return Ok(None),
+                // Found a comment start
+                b'/' if self.buffer.get(self.index + 1) == Some(&b'*') => {
+                    for i in self.index + 2..self.buffer.len() - 1 {
+                        // found the end of the comment
+                        if self.buffer[i] == b'*' && self.buffer[i + 1] == b'/' {
+                            self.index = i + 2;
+                            continue 'outer_loop;
+                        }
+                    }
+                    // unclosed comment, advance self.index to end
+                    let cspan = Span::new(self.index, self.buffer.len());
+                    self.index = self.buffer.len();
+                    return Err(Diagnostic::UnclosedCommandComment(cspan));
+                }
+                // Else stop
+                _ => break,
+            }
             self.index += 1;
         }
+        Ok(Some(()))
     }
 
     #[allow(clippy::if_not_else)]
     fn expect(&mut self, c: u8) -> Result<(), Diagnostic> {
         if !self.has_more() {
-            let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
+            let cspan = Span::new(self.index, self.buffer.len());
             Err(Diagnostic::UnclosedComment(cspan))
         } else if self.next_char() != c {
-            let cspan = Span::new2(self.index as u32, self.buffer.len() as FilePos);
+            let cspan = Span::new(self.index, self.buffer.len());
             Err(Diagnostic::MalformedAdditionalInfo(cspan))
         } else {
             self.index += 1;
@@ -1665,70 +1732,53 @@ impl CommandIter<'_> {
 }
 
 impl Iterator for CommandIter<'_> {
-    type Item = Command;
+    type Item = Result<Command, Diagnostic>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.has_more() {
-            match self.next_char() {
-                b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
-                b'$' => {
-                    // End upon comment closing, $)
-                    return None;
-                }
-                _ => {
-                    // Else stop
-                    break;
-                }
-            }
-            self.index += 1;
+        match self.skip_white_spaces() {
+            Ok(Some(())) => {}
+            Ok(None) => return None,
+            Err(diag) => return Some(Err(diag)),
         }
 
+        let command_start = self.index;
         let mut command = Vec::new();
         while self.has_more() {
-            let quoted = self.next_char() == b'\'';
-            let token_start = self.index;
-            while self.has_more() {
-                match self.next_char() {
-                    b' ' | b'\t' | b'\n' | b'\r' | b';' => {
-                        // Stop if unquoted white spaces, line feeds or semicolon
-                        if !quoted {
-                            break;
-                        }
-                    }
-                    b'\'' => {
-                        // Stop if quoted and end quote
-                        if quoted && token_start != self.index {
-                            self.index += 1;
-                            break;
-                        }
-                    }
-                    _ => {} // Else continue
-                }
+            let token = if let quote @ (b'\'' | b'\"') = self.next_char() {
                 self.index += 1;
-            }
-
-            // New token found - ignore quotes if any
-            let token = if quoted {
-                &self.buffer[token_start + 1..self.index - 1]
-            } else {
-                &self.buffer[token_start..self.index]
-            };
-            command.push(token.into());
-
-            while self.has_more() {
-                match self.next_char() {
-                    b' ' | b'\t' | b'\n' | b'\r' => {} // Skip white spaces and line feeds
-                    b';' => {
-                        // Stop if unquoted semicolon $)
-                        self.index += 1;
-                        return Some(command);
+                let token_start = self.index;
+                // Stop if end quote
+                loop {
+                    if !self.has_more() {
+                        let cspan = Span::new(token_start, self.buffer.len());
+                        return Some(Err(Diagnostic::UnclosedCommandString(cspan)));
                     }
-                    _ => {
-                        // Stop otherwise
+                    let ch = self.next_char();
+                    self.index += 1;
+                    if ch == quote {
                         break;
                     }
                 }
+                CommandToken::String(Span::new(token_start, self.index - 1))
+            } else {
+                let token_start = self.index;
+                // Stop if unquoted white spaces, line feeds or semicolon
+                while self.has_more()
+                    && !matches!(self.next_char(), b' ' | b'\t' | b'\n' | b'\r' | b';')
+                {
+                    self.index += 1;
+                }
+                CommandToken::Keyword(Span::new(token_start, self.index))
+            };
+            command.push(token);
+
+            if let Err(diag) = self.skip_white_spaces() {
+                return Some(Err(diag));
+            }
+            if self.has_more() && self.next_char() == b';' {
+                // Stop if unquoted semicolon $)
                 self.index += 1;
+                return Some(Ok((Span::new(command_start, self.index), command)));
             }
         }
         None
@@ -1795,4 +1845,92 @@ pub fn dummy_segment(diag: Diagnostic) -> Arc<Segment> {
     let mut seg = parse_segments(&Arc::new(Vec::new())).pop().unwrap();
     Arc::get_mut(&mut seg).unwrap().diagnostics.push((0, diag));
     seg
+}
+
+impl SegmentSet {
+    pub(crate) fn build_typesetting_data(&self) -> TypesettingData {
+        fn parse_one(
+            data: &mut TypesettingData,
+            buf: &[u8],
+            span: Span,
+            command: &[CommandToken],
+        ) -> Result<(), Diagnostic> {
+            fn as_string<'a>(
+                buf: &'a [u8],
+                span: Span,
+                tok: Option<&CommandToken>,
+            ) -> Result<&'a [u8], Diagnostic> {
+                match tok {
+                    Some(&CommandToken::String(s)) => Ok(s.as_ref(buf)),
+                    None => Err(Diagnostic::CommandIncomplete(span)),
+                    Some(&CommandToken::Keyword(s)) => Err(Diagnostic::CommandExpectedString(s)),
+                }
+            }
+
+            let (cmd, mut rest) = match command.split_first() {
+                Some((&CommandToken::Keyword(k), rest)) => (k, rest.iter()),
+                _ => return Err(Diagnostic::BadCommand(span)),
+            };
+
+            let sum = |mut rest: std::slice::Iter<'_, CommandToken>| {
+                let mut accum: Vec<u8> = as_string(buf, span, rest.next())?.into();
+                loop {
+                    match rest.next() {
+                        None => return Ok(accum.into()),
+                        Some(CommandToken::Keyword(plus)) if plus.as_ref(buf) == b"+" => {}
+                        _ => return Err(Diagnostic::CommandIncomplete(span)),
+                    }
+                    accum.extend_from_slice(as_string(buf, span, rest.next())?)
+                }
+            };
+
+            let as_ = |rest: &mut std::slice::Iter<'_, CommandToken>| {
+                let s = as_string(buf, span, rest.next())?;
+                match rest.next() {
+                    Some(CommandToken::Keyword(as_)) if as_.as_ref(buf) == b"as" => {}
+                    None => return Err(Diagnostic::CommandIncomplete(span)),
+                    Some(tk) => return Err(Diagnostic::CommandExpectedAs(tk.full_span())),
+                }
+                Ok(s.into())
+            };
+
+            match cmd.as_ref(buf) {
+                b"latexdef" => {
+                    data.latex_defs.insert(as_(&mut rest)?, sum(rest)?);
+                }
+                b"htmldef" => {
+                    data.html_defs.insert(as_(&mut rest)?, sum(rest)?);
+                }
+                b"althtmldef" => {
+                    data.alt_html_defs.insert(as_(&mut rest)?, sum(rest)?);
+                }
+                b"htmlvarcolor" => data.html_var_color.push(sum(rest)?),
+                b"htmltitle" => data.html_title = Some(sum(rest)?),
+                b"htmlhome" => data.html_home = Some(sum(rest)?),
+                b"exthtmltitle" => data.ext_html_title = Some(sum(rest)?),
+                b"exthtmlhome" => data.ext_html_home = Some(sum(rest)?),
+                b"exthtmllabel" => data.ext_html_label = Some(sum(rest)?),
+                b"htmldir" => data.html_dir = Some(sum(rest)?),
+                b"althtmldir" => data.alt_html_dir = Some(sum(rest)?),
+                b"htmlbibliography" => data.html_bibliography = Some(sum(rest)?),
+                b"exthtmlbibliography" => data.ext_html_bibliography = Some(sum(rest)?),
+                b"htmlcss" => data.html_css = Some(sum(rest)?),
+                b"htmlfont" => data.html_font = Some(sum(rest)?),
+                b"htmlexturl" => data.html_ext_url = Some(sum(rest)?),
+                _ => return Err(Diagnostic::UnknownTypesettingCommand(cmd)),
+            }
+            Ok(())
+        }
+
+        let mut data = TypesettingData::default();
+        for seg in self.segments() {
+            for &(ix, (span, ref command)) in &seg.t_commands {
+                if let Err(diag) = parse_one(&mut data, &seg.buffer, span, command) {
+                    let address = StatementAddress::new(seg.id, ix);
+                    data.diagnostics.push((address, diag))
+                }
+            }
+        }
+        data
+    }
 }

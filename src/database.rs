@@ -115,6 +115,7 @@ use crate::proof::ProofTreeArray;
 use crate::scopeck;
 use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
+use crate::typesetting::TypesettingData;
 use crate::verify;
 use crate::verify::VerifyResult;
 use annotate_snippets::snippet::Snippet;
@@ -390,6 +391,7 @@ pub struct Database {
     scopes: Option<Arc<ScopeResult>>,
     prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
+    typesetting: Option<Arc<TypesettingData>>,
     outline: Option<Arc<Outline>>,
     grammar: Option<Arc<Grammar>>,
     stmt_parse: Option<Arc<StmtParse>>,
@@ -421,6 +423,7 @@ impl Drop for Database {
             self.prev_nameset = None;
             self.nameset = None;
             Arc::make_mut(&mut self.segments).clear();
+            self.typesetting = None;
             self.outline = None;
         });
     }
@@ -441,6 +444,7 @@ impl Database {
             nameset: None,
             scopes: None,
             verify: None,
+            typesetting: None,
             outline: None,
             grammar: None,
             stmt_parse: None,
@@ -485,6 +489,7 @@ impl Database {
             self.nameset = None;
             self.scopes = None;
             self.verify = None;
+            self.typesetting = None;
             self.outline = None;
             self.grammar = None;
         });
@@ -584,6 +589,27 @@ impl Database {
     pub fn verify_result(&self) -> &Arc<VerifyResult> {
         self.verify.as_ref().expect(
             "The database has not run `verify_pass()`. Please ensure it is run before calling depdending methods."
+        )
+    }
+
+    /// Computes and returns the typesetting data.
+    pub fn typesetting_pass(&mut self) -> &Arc<TypesettingData> {
+        if self.typesetting.is_none() {
+            time(&self.options.clone(), "typesetting", || {
+                let typesetting = self.parse_result().build_typesetting_data();
+                self.typesetting = Some(Arc::new(typesetting));
+            })
+        }
+        self.typesetting_result()
+    }
+
+    /// Returns the typesetting data.
+    /// Panics if [`Database::typesetting_pass`] was not previously called.
+    #[inline]
+    #[must_use]
+    pub fn typesetting_result(&self) -> &Arc<TypesettingData> {
+        self.typesetting.as_ref().expect(
+            "The database has not run `typesetting_pass()`. Please ensure it is run before calling depdending methods."
         )
     }
 
@@ -799,6 +825,14 @@ impl Database {
         })
     }
 
+    /// Dump the typesetting information.
+    /// Requires: [`Database::typesetting_pass`]
+    pub fn print_typesetting(&self) {
+        time(&self.options, "print_typesetting", || {
+            self.typesetting_result().dump();
+        })
+    }
+
     /// Returns the outline node corresponding to the given statement
     #[must_use]
     pub const fn get_outline_node<'a>(&'a self, sref: StatementRef<'a>) -> OutlineNodeRef<'a> {
@@ -840,6 +874,9 @@ impl Database {
         }
         if types.contains(&DiagnosticClass::StmtParse) {
             diags.extend(self.stmt_parse_pass().diagnostics());
+        }
+        if types.contains(&DiagnosticClass::Typesetting) {
+            diags.extend(self.typesetting_pass().diagnostics.iter().cloned());
         }
         time(&self.options.clone(), "diag", move || {
             diag::to_annotations(self.parse_result(), &mut lc, diags, f)

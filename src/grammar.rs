@@ -7,7 +7,8 @@ use crate::diag::Diagnostic;
 use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
 use crate::nameck::{Atom, NameReader, Nameset};
 use crate::parser::{
-    as_str, Segment, SegmentId, StatementAddress, StatementRef, StatementType, SymbolType, Token,
+    as_str, CommandToken, Segment, SegmentId, StatementAddress, StatementRef, StatementType,
+    SymbolType, TokenPtr,
 };
 use crate::segment_set::SegmentSet;
 use crate::util::HashMap;
@@ -405,18 +406,23 @@ impl Default for Grammar {
 impl Grammar {
     /// Initializes the grammar using the parser commands
     fn initialize(&mut self, sset: &SegmentSet, nset: &Nameset) {
-        for (_, command) in sset.parser_commands() {
-            assert!(!command.is_empty(), "Empty parser command!");
-            match &*command {
-                [cmd, sort, as_, logic] if **cmd == *b"syntax" && **as_ == *b"as" => {
-                    self.provable_type = nset.lookup_symbol(sort).unwrap().atom;
-                    self.logic_type = nset.lookup_symbol(logic).unwrap().atom;
-                    self.typecodes.push(self.logic_type);
+        for sref in sset.segments() {
+            let buf = &**sref.buffer;
+            for (_, (_, command)) in &sref.j_commands {
+                use CommandToken::*;
+                match &**command {
+                    [Keyword(cmd), sort, Keyword(as_), logic]
+                        if cmd.as_ref(buf) == b"syntax" && as_.as_ref(buf) == b"as" =>
+                    {
+                        self.provable_type = nset.lookup_symbol(sort.value(buf)).unwrap().atom;
+                        self.logic_type = nset.lookup_symbol(logic.value(buf)).unwrap().atom;
+                        self.typecodes.push(self.logic_type);
+                    }
+                    [Keyword(cmd), sort] if cmd.as_ref(buf) == b"syntax" => self
+                        .typecodes
+                        .push(nset.lookup_symbol(sort.value(buf)).unwrap().atom),
+                    _ => {}
                 }
-                [cmd, sort] if **cmd == *b"syntax" => {
-                    self.typecodes.push(nset.lookup_symbol(sort).unwrap().atom)
-                }
-                _ => {}
             }
         }
     }
@@ -895,8 +901,8 @@ impl Grammar {
     #[allow(clippy::unnecessary_wraps)]
     fn handle_common_prefixes(
         &mut self,
-        prefix: &[Token],
-        shadows: &[Token],
+        prefix: &[TokenPtr<'_>],
+        shadows: &[TokenPtr<'_>],
         db: &Database,
         names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
@@ -910,11 +916,7 @@ impl Grammar {
             }
             // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
             if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
-                let prefix_symbol = db
-                    .name_result()
-                    .lookup_symbol(prefix[index].as_ref())
-                    .unwrap()
-                    .atom;
+                let prefix_symbol = db.name_result().lookup_symbol(prefix[index]).unwrap().atom;
                 let next_node = map
                     .get(&(SymbolType::Constant, prefix_symbol))
                     .expect("Prefix cannot be parsed!");
@@ -926,7 +928,7 @@ impl Grammar {
         }
 
         // We note the typecode and next branch of the "shadowed" prefix
-        let shadowed_typecode = names.lookup_float(&shadows[index]).unwrap().typecode_atom;
+        let shadowed_typecode = names.lookup_float(shadows[index]).unwrap().typecode_atom;
         let (shadowed_next_node, _) = self
             .next_var_node(node_id, shadowed_typecode)
             .expect("Shadowed prefix cannot be parsed!");
@@ -975,7 +977,7 @@ impl Grammar {
             }
         }
 
-        debug!("Shadowed token: {}", as_str(&shadows[index]));
+        debug!("Shadowed token: {}", as_str(shadows[index]));
         debug!("Missing reduces: {}", missing_reduce.len());
         debug!(
             "Handle shadowed next node {}, typecode {:?}",
@@ -1030,40 +1032,63 @@ impl Grammar {
         names: &mut NameReader<'_>,
     ) -> Result<(), (StatementAddress, Diagnostic)> {
         let nset = db.name_result();
-        for (address, command) in db.parse_result().parser_commands() {
-            assert!(!command.is_empty(), "Empty parser command!");
-            if &command[0].as_ref() == b"syntax" {
-                if command.len() == 4 && &command[2].as_ref() == b"as" {
-                    // syntax '|-' as 'wff';
-                    self.provable_type = nset.lookup_symbol(&command[1]).unwrap().atom;
-                    self.typecodes
-                        .push(nset.lookup_symbol(&command[3]).unwrap().atom);
-                } else if command.len() == 2 {
-                    // syntax 'setvar';
-                    self.typecodes
-                        .push(nset.lookup_symbol(&command[1]).unwrap().atom);
-                }
-            }
-            // Handle Ambiguous prefix commands
-            if &command[0].as_ref() == b"garden_path" {
-                let split_index = command
-                    .iter()
-                    .position(|t| t.as_ref() == b"=>")
-                    .expect("'=>' not present in 'garden_path' command!");
-                let (prefix, shadows) = command.split_at(split_index);
-                if let Err(diag) =
-                    self.handle_common_prefixes(&prefix[1..], &shadows[1..], db, names)
-                {
-                    return Err((address, diag));
-                }
-            }
-            // Handle replacement schemes
-            if &command[0].as_ref() == b"type_conversions" {
-                for (from_typecode, to_typecode, label) in &self.type_conversions.clone() {
-                    if let Err(diag) =
-                        self.perform_type_conversion(*from_typecode, *to_typecode, *label, db)
-                    {
-                        return Err((address, diag));
+        for sref in db.parse_result().segments() {
+            let buf = &**sref.buffer;
+            for &(ix, (_, ref command)) in &sref.j_commands {
+                use CommandToken::*;
+                let address = StatementAddress::new(sref.id, ix);
+                if let (Keyword(k), rest) = command.split_first().expect("Empty parser command!") {
+                    match k.as_ref(buf) {
+                        b"syntax" => match rest {
+                            [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
+                                // syntax '|-' as 'wff';
+                                self.provable_type =
+                                    nset.lookup_symbol(ty.value(buf)).unwrap().atom;
+                                self.typecodes
+                                    .push(nset.lookup_symbol(code.value(buf)).unwrap().atom);
+                            }
+                            [ty] => {
+                                // syntax 'setvar';
+                                self.typecodes
+                                    .push(nset.lookup_symbol(ty.value(buf)).unwrap().atom);
+                            }
+                            _ => {}
+                        },
+                        // Handle Ambiguous prefix commands
+                        b"garden_path" => {
+                            let split_index = rest
+                                .iter()
+                                .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
+                                .expect("'=>' not present in 'garden_path' command!");
+                            let (prefix, shadows) = rest.split_at(split_index);
+                            let prefix =
+                                prefix.iter().map(|tk| tk.value(buf)).collect::<Box<[_]>>();
+                            let shadows = shadows[1..]
+                                .iter()
+                                .map(|tk| tk.value(buf))
+                                .collect::<Box<[_]>>();
+                            if let Err(diag) =
+                                self.handle_common_prefixes(&prefix, &shadows, db, names)
+                            {
+                                return Err((address, diag));
+                            }
+                        }
+                        // Handle replacement schemes
+                        b"type_conversions" => {
+                            for &(from_typecode, to_typecode, label) in
+                                &self.type_conversions.clone()
+                            {
+                                if let Err(diag) = self.perform_type_conversion(
+                                    from_typecode,
+                                    to_typecode,
+                                    label,
+                                    db,
+                                ) {
+                                    return Err((address, diag));
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

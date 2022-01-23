@@ -40,6 +40,8 @@ pub enum DiagnosticClass {
     Grammar,
     /// Statement Parsing result
     StmtParse,
+    /// $t statement parsing result
+    Typesetting,
 }
 
 /// List of all diagnostic codes.  For a description of each, see the source of
@@ -52,11 +54,15 @@ pub enum DiagnosticClass {
 #[allow(missing_docs)]
 pub enum Diagnostic {
     BadCharacter(usize, u8),
+    BadCommand(Span),
     BadCommentEnd(Span, Span),
     BadExplicitLabel(Token),
     BadFloating,
     BadLabel(Span),
     ChainBackref(Span),
+    CommandExpectedAs(Span),
+    CommandExpectedString(Span),
+    CommandIncomplete(Span),
     CommentMarkerNotStart(Span),
     ConstantNotTopLevel,
     DisjointSingle,
@@ -114,11 +120,14 @@ pub enum Diagnostic {
     SymbolRedeclared(TokenIndex, TokenAddress),
     UnclosedBeforeEof,
     UnclosedBeforeInclude(StatementIndex),
+    UnclosedCommandComment(Span),
+    UnclosedCommandString(Span),
     UnclosedComment(Span),
     UnclosedInclude,
     UnclosedMath,
     UnclosedProof,
     UnknownKeyword(Span),
+    UnknownTypesettingCommand(Span),
     UnmatchedCloseGroup,
     UnparseableStatement(TokenIndex),
     VariableMissingFloat(TokenIndex),
@@ -234,6 +243,12 @@ impl Diagnostic {
                 stmt,
                 Span::new(*pos, *pos + 1),
             )]),
+            BadCommand(span) => ("Invalid command".into(), vec![(
+                AnnotationType::Warning,
+                "Commands must start with a keyword".into(),
+                stmt,
+                *span,
+            )]),
             BadCommentEnd(tok, opener) => ("Bad comment end".into(), vec![(
                 AnnotationType::Warning,
                 "$) sequence must be surrounded by whitespace to end a comment".into(),
@@ -266,6 +281,24 @@ impl Diagnostic {
             ChainBackref(span) => ("Chain backref".into(), vec![(
                 AnnotationType::Error,
                 "Backreference steps are not permitted to have local labels".into(),
+                stmt,
+                *span,
+            )]),
+            CommandExpectedAs(span) => ("Expected 'as'".into(), vec![(
+                AnnotationType::Warning,
+                "Expected the keyword 'as' here".into(),
+                stmt,
+                *span,
+            )]),
+            CommandExpectedString(span) => ("Expected string, got keyword argument".into(), vec![(
+                AnnotationType::Warning,
+                "Expected a string here".into(),
+                stmt,
+                *span,
+            )]),
+            CommandIncomplete(span) => ("Incomplete command".into(), vec![(
+                AnnotationType::Warning,
+                "This command ended early, it was expecting more arguments".into(),
                 stmt,
                 *span,
             )]),
@@ -661,6 +694,18 @@ impl Diagnostic {
                 stmt.segment().statement(*index),
                 stmt.segment().statement(*index).span(),
             )]),
+            UnclosedCommandComment(span) => ("Unclosed comment".into(), vec![(
+                AnnotationType::Error,
+                "$t/$j comment requires closing */ before end of statement".into(),
+                stmt,
+                *span,
+            )]),
+            UnclosedCommandString(span) => ("Unclosed string".into(), vec![(
+                AnnotationType::Error,
+                "A string must be closed with ' or \"".into(),
+                stmt,
+                *span,
+            )]),
             UnclosedComment(comment) => ("Unclosed comment".into(), vec![(
                 AnnotationType::Error,
                 "Comment requires closing $) before end of file".into(),
@@ -688,6 +733,15 @@ impl Diagnostic {
             UnknownKeyword(kwspan) => ("Unknown keyword".into(), vec![(
                 AnnotationType::Error,
                 "Statement-starting keyword must be one of $a $c $d $e $f $p $v".into(),
+                stmt,
+                *kwspan,
+            )]),
+            UnknownTypesettingCommand(kwspan) => ("Unknown $t command".into(), vec![(
+                AnnotationType::Error,
+                "Typesetting command must be one of:\n\
+                latexdef, htmldef, althtmldef, htmlvarcolor, htmltitle, htmlhome,\n\
+                exthtmltitle, exthtmlhome, exthtmllabel, htmldir, althtmldir,\n\
+                htmlbibliography, exthtmlbibliography, htmlcss, htmlfont, htmlexturl".into(),
                 stmt,
                 *kwspan,
             )]),
