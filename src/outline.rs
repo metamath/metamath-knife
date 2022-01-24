@@ -179,22 +179,21 @@ impl<'a> OutlineNodeRef<'a> {
             // In a statement,
             OutlineNodeRef::Statement { database, sref } => {
                 let address = sref.address();
-                OutlineNodeRef::next_assertion(database, address).map_or_else(
-                    // If there are no more statements after this one
-                    || {
-                        let outline = database.outline_result();
-                        let parent_node_id =
-                            outline.statement_node_inside(address, outline.root, database);
-                        match outline.tree.first_child(parent_node_id) {
-                            // Return the first chapter child if any
-                            Some(node_id) => Some(OutlineNodeRef::Chapter { database, node_id }),
-                            // Else return the parent's next sibling
-                            None => self.parent()?.next_up(),
-                        }
-                    },
+                if let Some(sref) = OutlineNodeRef::next_assertion(database, address) {
                     // if there are more statements after this one, return the next one
-                    |sref| Some(OutlineNodeRef::Statement { database, sref }),
-                )
+                    Some(OutlineNodeRef::Statement { database, sref })
+                } else {
+                    // else, if there are no more statements after this one
+                    let outline = database.outline_result();
+                    let parent_node_id =
+                        outline.statement_node_inside(address, outline.root, database);
+                    match outline.tree.first_child(parent_node_id) {
+                        // Return the first chapter child if any
+                        Some(node_id) => Some(OutlineNodeRef::Chapter { database, node_id }),
+                        // Else return the parent's next sibling
+                        None => self.parent()?.next_up(),
+                    }
+                }
             }
         }
     }
