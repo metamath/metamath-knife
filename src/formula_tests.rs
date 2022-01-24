@@ -71,11 +71,11 @@ fn test_substitute() {
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
     assert!(as_str(names.atom_name(subst[a].get_by_path(&[]).unwrap())) == "cadd");
-    assert!(as_str(names.atom_name(subst[a].get_by_path(&[1]).unwrap())) == "c1");
-    assert!(as_str(names.atom_name(subst[a].get_by_path(&[2]).unwrap())) == "c2");
+    assert!(as_str(names.atom_name(subst[a].get_by_path(&[0]).unwrap())) == "c1");
+    assert!(as_str(names.atom_name(subst[a].get_by_path(&[1]).unwrap())) == "c2");
     assert!(as_str(names.atom_name(subst[b].get_by_path(&[]).unwrap())) == "cadd");
-    assert!(as_str(names.atom_name(subst[b].get_by_path(&[1]).unwrap())) == "c2");
-    assert!(as_str(names.atom_name(subst[b].get_by_path(&[2]).unwrap())) == "c1");
+    assert!(as_str(names.atom_name(subst[b].get_by_path(&[0]).unwrap())) == "c2");
+    assert!(as_str(names.atom_name(subst[b].get_by_path(&[1]).unwrap())) == "c1");
     let stmt = stmt_parse
         .get_formula(&db.statement("addeq1").unwrap())
         .unwrap();

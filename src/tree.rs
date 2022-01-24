@@ -48,34 +48,57 @@ impl<TreeItem> Tree<TreeItem> {
         self.nodes.len()
     }
 
+    /// Checked accessor to a tree node
+    #[inline]
+    fn node(&self, node_id: NodeId) -> &'_ TreeNode<TreeItem> {
+        assert!(node_id > 0, "Cannot index null node!");
+        assert!(node_id <= self.nodes.len(), "Cannot index outside of tree!");
+        &self.nodes[node_id - 1]
+    }
+
+    /// Checked mutable accessor to a tree node
+    #[inline]
+    fn node_mut(&mut self, node_id: NodeId) -> &'_ mut TreeNode<TreeItem> {
+        assert!(node_id > 0, "Cannot index null node!");
+        assert!(node_id <= self.nodes.len(), "Cannot index outside of tree!");
+        &mut self.nodes[node_id - 1]
+    }
+
     /// iterator through the children of the given node
     pub(crate) fn children_iter(&self, node_id: NodeId) -> SiblingIter<'_, TreeItem> {
-        assert!(node_id > 0, "Cannot iterate null node!");
-        assert!(
-            node_id <= self.nodes.len(),
-            "Cannot iterate outside of tree!"
-        );
-        let node = &self.nodes[node_id - 1];
         SiblingIter {
             tree: self,
-            current_id: node.first_child,
+            current_id: self.first_child(node_id),
+        }
+    }
+
+    /// returns the next sibling node id, or `None` if this is the last sibling.
+    /// This executes in O(1)
+    pub(crate) fn next_sibling(&self, node_id: NodeId) -> Option<NodeId> {
+        match self.node(node_id).next_sibling {
+            0 => None,
+            node_id => Some(node_id),
+        }
+    }
+
+    /// returns the first child node, if any
+    pub(crate) fn first_child(&self, node_id: NodeId) -> Option<NodeId> {
+        match self.node(node_id).first_child {
+            0 => None,
+            node_id => Some(node_id),
         }
     }
 
     /// returns the child node with the given index among children nodes
-    /// Indices starts with 1; querying index 0 will return the node itself
+    /// Indices starts with 0, so querying index 0 will return the first child node, if any.
+    /// This executes in O(n)
     pub(crate) fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
-        let mut iter = self.children_iter(node_id);
-        let mut nth_node_id = node_id;
-        for _ in 0..index {
-            nth_node_id = iter.next()?;
-        }
-        Some(nth_node_id)
+        self.children_iter(node_id).nth(index)
     }
 
     /// returns whether the given node has children or not
     pub(crate) fn has_children(&self, node_id: NodeId) -> bool {
-        self.nodes[node_id - 1].first_child != 0
+        self.node(node_id).first_child != 0
     }
 
     /// Debug only, dumps the internal structure of the tree.
@@ -98,13 +121,13 @@ impl<TreeItem> Index<NodeId> for Tree<TreeItem> {
     type Output = TreeItem;
 
     fn index(&self, node_id: NodeId) -> &Self::Output {
-        &self.nodes[node_id - 1].item
+        &self.node(node_id).item
     }
 }
 
 impl<TreeItem> IndexMut<NodeId> for Tree<TreeItem> {
     fn index_mut(&mut self, node_id: NodeId) -> &mut Self::Output {
-        &mut self.nodes[node_id - 1].item
+        &mut self.node_mut(node_id).item
     }
 }
 
@@ -132,7 +155,7 @@ impl<TreeItem: Clone> Clone for Tree<TreeItem> {
 #[derive(Debug)]
 pub(crate) struct SiblingIter<'a, TreeItem> {
     tree: &'a Tree<TreeItem>,
-    current_id: NodeId,
+    current_id: Option<NodeId>,
 }
 
 impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
@@ -140,7 +163,6 @@ impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_id = self.current_id;
-        self.current_id = self.tree.nodes[current_id.checked_sub(1)?].next_sibling;
-        Some(current_id)
+        std::mem::replace(&mut self.current_id, self.tree.next_sibling(current_id?))
     }
 }

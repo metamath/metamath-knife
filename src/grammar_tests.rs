@@ -59,12 +59,12 @@ fn test_db_formula() {
         let sref = db.statement("ax-com").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cadd");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 0]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1]).unwrap())) == "cB");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cadd");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())) == "cB");
         assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "cA");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "cB");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cadd");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cB");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2, 2]).unwrap())) == "cA");
     }
 }
 
@@ -86,10 +86,10 @@ fn test_parse_formula() {
         .parse_formula(&mut fmla_vec.clone().into_iter(), &[wff, class], &names)
         .unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cadd");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cB");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 2]).unwrap())) == "cA");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cA");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cadd");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())) == "cB");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "cA");
     assert!(formula.as_ref(&db).iter().eq(fmla_vec.into_iter()));
 }
 
@@ -118,12 +118,12 @@ fn test_db_32_formula() {
         let sref = db.statement("check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cov");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "cv");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1, 1]).unwrap())) == "vx");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "cA");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 3]).unwrap())) == "cB");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cC");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cov");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 0]).unwrap())) == "cv");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 0, 0]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 2]).unwrap())) == "cB");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cC");
     }
 }
 
@@ -139,7 +139,7 @@ fn test_setvar_as_class() {
             .parse_formula(&mut vec![x_symbol].into_iter(), &[class_symbol], &names)
             .unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "cv");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "vx");
     }
 }
 
@@ -172,15 +172,15 @@ fn test_db_43_formula() {
         let sref = db.statement("check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
         assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cab");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "vx");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "wa");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1]).unwrap())) == "wcel");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1, 1]).unwrap())) == "cv");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1, 1, 1]).unwrap())) == "vx");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 1, 2]).unwrap())) == "cA");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2, 2]).unwrap())) == "wph");
-        assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "cB");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cab");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 0]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1]).unwrap())) == "wa");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1, 0]).unwrap())) == "wcel");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1, 0, 0]).unwrap())) == "cv");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1, 0, 0, 0]).unwrap())) == "vx");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1, 0, 1]).unwrap())) == "cA");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[0, 1, 1]).unwrap())) == "wph");
+        assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cB");
     }
 }
 
@@ -218,11 +218,11 @@ fn test_garden_path_1() {
     let sref = db.statement("formula1").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "csn");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cop");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1, 1]).unwrap())) == "cB");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1, 2]).unwrap())) == "cC");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cA");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "csn");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())) == "cop");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0, 0]).unwrap())) == "cB");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0, 1]).unwrap())) == "cC");
 }
 
 #[test]
@@ -233,13 +233,13 @@ fn test_garden_path_2() {
     let sref = db.statement("formula2").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "csn");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "cop");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1, 1]).unwrap())) == "cv");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1, 1, 1]).unwrap())) == "vx");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1, 1]).unwrap())) == "cv");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1, 2, 1]).unwrap())) == "vy");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cA");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "csn");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())) == "cop");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0, 0]).unwrap())) == "cv");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0, 0, 0]).unwrap())) == "vx");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0, 0]).unwrap())) == "cv");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0, 1, 0]).unwrap())) == "vy");
 }
 
 #[test]
@@ -250,14 +250,14 @@ fn test_garden_path_3() {
     let sref = db.statement("formula3").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cA");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2]).unwrap())) == "copab");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 1]).unwrap())) == "vx");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 2]).unwrap())) == "vy");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 3]).unwrap())) == "cB");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 4]).unwrap())) == "weq");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 4, 1]).unwrap())) == "cC");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[2, 4, 2]).unwrap())) == "cD");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cA");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "copab");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())) == "vx");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "vy");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 2]).unwrap())) == "cB");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 3]).unwrap())) == "weq");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 3, 0]).unwrap())) == "cC");
+    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 3, 1]).unwrap())) == "cD");
 }
 
 macro_rules! sa {

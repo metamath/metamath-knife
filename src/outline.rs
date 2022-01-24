@@ -134,6 +134,88 @@ impl<'a> OutlineNodeRef<'a> {
             }
         }
     }
+
+    /// returns the first child node of this node, if any
+    #[must_use]
+    pub fn first_child(self) -> Option<OutlineNodeRef<'a>> {
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => {
+                let node = &database.outline_result().tree[node_id];
+                if let Some(sref) = OutlineNodeRef::next_assertion(database, node.stmt_address) {
+                    // return statement following this chapter heading, if any
+                    Some(OutlineNodeRef::Statement { database, sref })
+                } else {
+                    // otherwise, return the first child chapter
+                    Some(OutlineNodeRef::Chapter {
+                        database,
+                        node_id: database.outline_result().tree.first_child(node_id)?,
+                    })
+                }
+            }
+            OutlineNodeRef::Statement { .. } => None,
+        }
+    }
+
+    /// Returns the next statement or chapter, in depth-first traversal order
+    #[must_use]
+    pub fn next(self) -> Option<OutlineNodeRef<'a>> {
+        // First attempt to find a child, since we are depth-first
+        self.first_child().or_else(|| self.next_up())
+    }
+
+    /// Returns the next statement or chapter, in depth-first traversal order
+    /// but never diving into this node's children
+    fn next_up(self) -> Option<OutlineNodeRef<'a>> {
+        match self {
+            // In a chapter, the next node is the next chapter
+            OutlineNodeRef::Chapter { database, node_id } => database
+                .outline_result()
+                .tree
+                .next_sibling(node_id)
+                .map_or_else(
+                    || self.parent()?.next_up(),
+                    |node_id| Some(OutlineNodeRef::Chapter { database, node_id }),
+                ),
+            // In a statement,
+            OutlineNodeRef::Statement { database, sref } => {
+                let address = sref.address();
+                OutlineNodeRef::next_assertion(database, address).map_or_else(
+                    // If there are no more statements after this one
+                    || {
+                        let outline = database.outline_result();
+                        let parent_node_id =
+                            outline.statement_node_inside(address, outline.root, database);
+                        match outline.tree.first_child(parent_node_id) {
+                            // Return the first chapter child if any
+                            Some(node_id) => Some(OutlineNodeRef::Chapter { database, node_id }),
+                            // Else return the parent's next sibling
+                            None => self.parent()?.next_up(),
+                        }
+                    },
+                    // if there are more statements after this one, return the next one
+                    |sref| Some(OutlineNodeRef::Statement { database, sref }),
+                )
+            }
+        }
+    }
+
+    /// returns the next assertion in the database, until a heading comment or the end of the database is met
+    fn next_assertion(
+        database: &'a Database,
+        stmt_address: StatementAddress,
+    ) -> Option<StatementRef<'a>> {
+        let mut stmt_address = stmt_address;
+        while {
+            stmt_address = StatementAddress::new(stmt_address.segment_id, stmt_address.index + 1);
+            let sref = database.parse_result().statement(stmt_address);
+            match sref.statement_type() {
+                StatementType::Provable | StatementType::Axiom => false,
+                StatementType::HeadingComment(_) | StatementType::Eof => return None,
+                _ => true,
+            }
+        } {}
+        Some(database.parse_result().statement(stmt_address))
+    }
 }
 
 /// An iterator over the children of an outline node, both statements and other chapters.
@@ -291,7 +373,6 @@ impl<'a> Iterator for OutlineAncestorIter<'a> {
 pub struct ChapterStatementIter<'a> {
     database: &'a Database,
     stmt_address: StatementAddress,
-    segments: &'a Arc<SegmentSet>,
 }
 
 impl<'a> ChapterStatementIter<'a> {
@@ -299,7 +380,6 @@ impl<'a> ChapterStatementIter<'a> {
         Self {
             database,
             stmt_address: database.outline_result().tree[node_id].stmt_address,
-            segments: database.parse_result(),
         }
     }
 }
@@ -308,20 +388,11 @@ impl<'a> Iterator for ChapterStatementIter<'a> {
     type Item = OutlineNodeRef<'a>;
 
     fn next(&mut self) -> Option<OutlineNodeRef<'a>> {
-        let mut stmt_address = self.stmt_address;
-        while {
-            stmt_address = StatementAddress::new(stmt_address.segment_id, stmt_address.index + 1);
-            let sref = self.segments.statement(stmt_address);
-            match sref.statement_type() {
-                StatementType::Provable | StatementType::Axiom => false,
-                StatementType::HeadingComment(_) | StatementType::Eof => return None,
-                _ => true,
-            }
-        } {}
-        self.stmt_address = stmt_address;
+        let sref = OutlineNodeRef::next_assertion(self.database, self.stmt_address)?;
+        self.stmt_address = sref.address();
         Some(OutlineNodeRef::Statement {
             database: self.database,
-            sref: self.segments.statement(stmt_address),
+            sref,
         })
     }
 }
@@ -358,10 +429,13 @@ impl Outline {
         if stmt_address == node.stmt_address || !self.tree.has_children(node_id) {
             node_id
         } else {
-            let mut last_node_id = self.tree.nth_child(node_id, 1).unwrap(); // It is safe to unwrap here, as we have checked that this node has some children.
+            let mut last_node_id = node_id;
             for this_node_id in self.tree.children_iter(node_id) {
                 let node = &self.tree[this_node_id];
                 if order.cmp(&stmt_address, &node.stmt_address) == Ordering::Less {
+                    if last_node_id == node_id {
+                        return node_id;
+                    }
                     return self.statement_node_inside(stmt_address, last_node_id, database);
                 }
                 last_node_id = this_node_id;
