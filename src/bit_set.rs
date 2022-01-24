@@ -120,6 +120,15 @@ impl Bitset {
             old
         }
     }
+
+    /// Returns true if this bitset has no bits set.
+    pub fn is_empty(&self) -> bool {
+        self.head == 0
+            && match &self.tail {
+                None => true,
+                Some(bx) => bx.iter().all(|&word| word == 0),
+            }
+    }
 }
 
 impl<'a> BitOrAssign<&'a Bitset> for Bitset {

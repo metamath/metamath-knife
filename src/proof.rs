@@ -535,7 +535,7 @@ impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
         }
 
         // stable sort to put all hypotheses first
-        proof_ordered.sort_by_key(|(stmt, _)| matches!(stmt.statement_type(), Axiom | Provable));
+        proof_ordered.sort_by_key(|(stmt, _)| stmt.is_assertion());
 
         // get the length of each label, plus 1 for the space
         let values: Vec<u16> = proof_ordered

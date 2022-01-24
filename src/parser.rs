@@ -697,6 +697,12 @@ impl Default for StatementType {
 }
 
 impl StatementType {
+    /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.
+    #[must_use]
+    pub const fn is_assertion(self) -> bool {
+        matches!(self, Axiom | Provable)
+    }
+
     const fn takes_label(self) -> bool {
         matches!(self, Axiom | Provable | Essential | Floating)
     }
@@ -769,6 +775,12 @@ impl<'a> StatementRef<'a> {
     #[must_use]
     pub const fn statement_type(self) -> StatementType {
         self.statement.stype
+    }
+
+    /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.
+    #[must_use]
+    pub const fn is_assertion(self) -> bool {
+        self.statement.stype.is_assertion()
     }
 
     /// Obtain a globally-meaningful address for this statement.
