@@ -202,18 +202,17 @@ impl<'a> OutlineNodeRef<'a> {
     /// returns the next assertion in the database, until a heading comment or the end of the database is met
     fn next_assertion(
         database: &'a Database,
-        stmt_address: StatementAddress,
+        mut stmt_address: StatementAddress,
     ) -> Option<StatementRef<'a>> {
-        let mut stmt_address = stmt_address;
-        while {
+        loop {
             stmt_address = StatementAddress::new(stmt_address.segment_id, stmt_address.index + 1);
             let sref = database.parse_result().statement(stmt_address);
             match sref.statement_type() {
-                StatementType::Provable | StatementType::Axiom => false,
+                StatementType::Provable | StatementType::Axiom => break,
                 StatementType::HeadingComment(_) | StatementType::Eof => return None,
-                _ => true,
+                _ => {}
             }
-        } {}
+        }
         Some(database.parse_result().statement(stmt_address))
     }
 }
