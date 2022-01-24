@@ -196,7 +196,7 @@ impl Nameset {
             self.remove_segment(seg_id);
         }
 
-        for sref in segs.segments() {
+        for sref in segs.segments(..) {
             self.add_segment(sref.id, sref.segment);
         }
     }
@@ -320,6 +320,7 @@ impl Nameset {
     ///
     /// If you don't know about the name, use [`lookup_symbol`](Self::lookup_symbol) instead.
     #[must_use]
+    #[track_caller]
     pub fn get_atom(&self, name: TokenPtr<'_>) -> Atom {
         *self
             .atom_table

@@ -61,6 +61,7 @@ use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
 use std::mem;
+use std::ops::RangeBounds;
 use std::str;
 use std::sync::Arc;
 
@@ -153,7 +154,7 @@ impl SegmentSet {
         SegmentSet {
             options: opts,
             exec: exec.clone(),
-            order: Arc::new(SegmentOrder::new()),
+            order: Arc::default(),
             segments: HashMap::default(),
             parse_cache: HashMap::default(),
             file_cache: HashMap::default(),
@@ -162,25 +163,23 @@ impl SegmentSet {
 
     /// Reset the segment set to the empty state.
     pub(crate) fn clear(&mut self) {
-        *Arc::make_mut(&mut self.order) = SegmentOrder::new();
+        *Arc::make_mut(&mut self.order) = SegmentOrder::default();
         self.segments = HashMap::default();
         self.parse_cache = HashMap::default();
         self.file_cache = HashMap::default();
     }
 
     /// Iterates over all loaded segments in logical order.
-    pub(crate) fn segments(&self) -> Vec<SegmentRef<'_>> {
-        // this might be an actual iterator in the future if needs be
-        let mut out: Vec<SegmentRef<'_>> = self
-            .segments
-            .iter()
-            .map(|(&seg_id, &(ref seg, ref _sinfo))| SegmentRef {
-                id: seg_id,
-                segment: seg,
+    pub(crate) fn segments(
+        &self,
+        range: impl RangeBounds<SegmentId>,
+    ) -> impl DoubleEndedIterator<Item = SegmentRef<'_>> + Clone {
+        self.order.range(range).filter_map(move |id| {
+            Some(SegmentRef {
+                id,
+                segment: &self.segments.get(&id)?.0,
             })
-            .collect();
-        out.sort_by(|x, y| self.order.cmp(&x.id, &y.id));
-        out
+        })
     }
 
     /// Fetch a handle to a loaded segment given its ID.
@@ -214,7 +213,7 @@ impl SegmentSet {
     /// Reports any parse errors associated with loaded segments.
     pub(crate) fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();
-        for sref in self.segments() {
+        for sref in self.segments(..) {
             for &(ix, ref d) in &sref.diagnostics {
                 out.push((StatementAddress::new(sref.id, ix), d.clone()));
             }
