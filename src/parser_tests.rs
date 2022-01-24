@@ -12,7 +12,7 @@ use std::cmp::Ordering;
 #[test]
 #[allow(clippy::many_single_char_names)]
 fn test_segment_order() {
-    let mut so = SegmentOrder::new();
+    let mut so = SegmentOrder::default();
     let f = SegmentOrder::START;
     let e = so.new_before(f);
     let b = so.new_before(e);
@@ -46,7 +46,7 @@ fn mkdb(text: &[u8]) -> Database {
 #[test]
 fn test_segref() {
     let db = mkdb(b"${ $}");
-    let seg = db.parse_result().segments()[0];
+    let seg = db.parse_result().segments(..).next().unwrap();
     assert_eq!(seg.bytes(), 5);
     let mut stmt_iter = seg.into_iter();
     assert_eq!(
@@ -67,7 +67,7 @@ fn test_segref() {
 #[test]
 fn test_stref_v() {
     let db = mkdb(b"$v X $. ${ $v Y Z $. $}");
-    let seg = db.parse_result().segments()[0];
+    let seg = db.parse_result().segments(..).next().unwrap();
     let vx = seg.statement(0);
     let vyz = seg.statement(2);
     assert_eq!(vx.statement_type(), StatementType::Variable);
@@ -94,7 +94,7 @@ macro_rules! parse_test {
         #[test]
         fn $name() {
             let db = mkdb($text);
-            let seg = db.parse_result().segments()[0];
+            let seg = db.parse_result().segments(..).next().unwrap();
             assert_eq!(seg.diagnostics, &$diags);
         }
     };

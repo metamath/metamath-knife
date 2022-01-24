@@ -109,7 +109,9 @@ use crate::line_cache::LineCache;
 use crate::nameck::Nameset;
 use crate::outline::Outline;
 use crate::outline::OutlineNodeRef;
+use crate::parser::as_str;
 use crate::parser::Comparer;
+use crate::parser::StatementAddress;
 use crate::parser::StatementRef;
 use crate::proof::ProofTreeArray;
 use crate::scopeck;
@@ -124,6 +126,8 @@ use std::collections::BinaryHeap;
 use std::fmt;
 use std::fmt::Debug;
 use std::fs::File;
+use std::ops::Bound;
+use std::ops::RangeBounds;
 use std::panic;
 use std::sync::Arc;
 use std::sync::Condvar;
@@ -693,41 +697,66 @@ impl Database {
 
     /// Get a statement by label. Requires: [`Database::name_pass`]
     #[must_use]
-    pub fn statement(&self, name: &str) -> Option<StatementRef<'_>> {
-        let lookup = self.name_result().lookup_label(name.as_bytes())?;
-        Some(self.parse_result().statement(lookup.address))
+    pub fn statement(&self, name: &[u8]) -> Option<StatementRef<'_>> {
+        let lookup = self.name_result().lookup_label(name)?;
+        Some(self.statement_by_address(lookup.address))
     }
 
-    /// Get a statement by label atom.
+    /// Get a statement by label atom. Requires: [`Database::name_pass`]
     #[must_use]
     pub fn statement_by_label(&self, label: Label) -> Option<StatementRef<'_>> {
         let token = self.name_result().atom_name(label);
         let lookup = self.name_result().lookup_label(token)?;
-        Some(self.parse_result().statement(lookup.address))
+        Some(self.statement_by_address(lookup.address))
+    }
+
+    /// Get a statement by address. **Panics** if the statement does not exist.
+    #[must_use]
+    pub fn statement_by_address(&self, addr: StatementAddress) -> StatementRef<'_> {
+        self.parse_result().statement(addr)
     }
 
     /// Iterates over all the statements
-    pub fn statements(&self) -> impl Iterator<Item = StatementRef<'_>> + '_ {
-        self.segments.segments().into_iter().flatten()
+    #[must_use]
+    pub fn statements(&self) -> impl DoubleEndedIterator<Item = StatementRef<'_>> + Clone + '_ {
+        self.segments.segments(..).flatten()
     }
 
-    /// Iterates over all the statements until, but not including, the given label
-    #[must_use]
-    pub fn statements_until(
+    /// Iterates over the statements in a given range.
+    pub fn statements_range(
         &self,
-        label: Label,
-    ) -> Option<impl Iterator<Item = StatementRef<'_>> + '_> {
-        let token = self.name_result().atom_name(label);
-        let lookup = self.name_result().lookup_label(token)?;
-        Some(
-            self.segments
-                .segments()
-                .into_iter()
-                .flatten()
-                .take_while(move |sref| {
-                    self.segments.order.cmp(&sref.address(), &lookup.address) == Ordering::Less
-                }),
-        )
+        range: impl RangeBounds<Label>,
+    ) -> impl DoubleEndedIterator<Item = StatementRef<'_>> + Clone + '_ {
+        let f = |label| {
+            let token = self.name_result().atom_name(label);
+            self.name_result()
+                .lookup_label(token)
+                .unwrap_or_else(|| panic!("statement '{}' does not exist", as_str(token)))
+                .address
+        };
+        let map = |bound: Bound<&Label>| match bound {
+            Bound::Included(&label) => Bound::Included(f(label)),
+            Bound::Excluded(&label) => Bound::Excluded(f(label)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        self.statements_range_address((map(range.start_bound()), map(range.end_bound())))
+    }
+
+    /// Iterates over the statements in a given range.
+    pub fn statements_range_address(
+        &self,
+        range: impl RangeBounds<StatementAddress>,
+    ) -> impl DoubleEndedIterator<Item = StatementRef<'_>> + Clone + '_ {
+        let get_bound = |bound: Bound<&StatementAddress>| match bound {
+            Bound::Included(&addr) => (Bound::Included(addr.segment_id), Bound::Included(addr)),
+            Bound::Excluded(&addr) => (Bound::Included(addr.segment_id), Bound::Excluded(addr)),
+            Bound::Unbounded => (Bound::Unbounded, Bound::Unbounded),
+        };
+        let (start1, start2) = get_bound(range.start_bound());
+        let (end1, end2) = get_bound(range.end_bound());
+        self.segments
+            .segments((start1, end1))
+            .flat_map(move |seg| seg.range_address(&self.segments.order, (start2, end2)))
     }
 
     /// Compare the database position of two labels. Proofs can only reference earlier theorems.
@@ -748,7 +777,7 @@ impl Database {
     /// Requires: [`Database::name_pass`], [`Database::scope_pass`]
     pub fn export(&self, stmt: &str) {
         time(&self.options, "export", || {
-            let sref = self.statement(stmt).unwrap_or_else(|| {
+            let sref = self.statement(stmt.as_bytes()).unwrap_or_else(|| {
                 panic!("Label {} did not correspond to an existing statement", stmt)
             });
 

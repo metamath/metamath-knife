@@ -39,11 +39,11 @@ struct OutlineNode {
 
 impl OutlineNode {
     /// Build the root node for a database
-    fn root_node(segments: &[SegmentRef<'_>]) -> Self {
+    fn root_node(segment1: SegmentRef<'_>) -> Self {
         OutlineNode {
             name: (*b"Database").into(),
             level: HeadingLevel::Database,
-            stmt_address: StatementAddress::new(segments[0].id, 0),
+            stmt_address: StatementAddress::new(segment1.id, 0),
             parent: 0,
         }
     }
@@ -470,12 +470,12 @@ impl Outline {
 impl SegmentSet {
     pub(crate) fn build_outline(&self) -> Outline {
         let mut tree: Tree<OutlineNode> = Tree::default();
-        let segments = self.segments();
-        assert!(!segments.is_empty(), "Parse returned no segment!");
-        let mut current_node = OutlineNode::root_node(&segments);
+        let segments = self.segments(..);
+        let mut current_node =
+            OutlineNode::root_node(segments.clone().next().expect("Parse returned no segment!"));
         let mut node_stack = vec![];
         let mut sibling_stack = vec![];
-        for vsr in &segments {
+        for vsr in segments {
             for &HeadingDef {
                 ref name,
                 index,

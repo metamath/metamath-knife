@@ -406,7 +406,7 @@ impl Default for Grammar {
 impl Grammar {
     /// Initializes the grammar using the parser commands
     fn initialize(&mut self, sset: &SegmentSet, nset: &Nameset) {
-        for sref in sset.segments() {
+        for sref in sset.segments(..) {
             let buf = &**sref.buffer;
             for (_, (_, command)) in &sref.j_commands {
                 use CommandToken::*;
@@ -1032,7 +1032,7 @@ impl Grammar {
         names: &mut NameReader<'_>,
     ) -> Result<(), (StatementAddress, Diagnostic)> {
         let nset = db.name_result();
-        for sref in db.parse_result().segments() {
+        for sref in db.parse_result().segments(..) {
             let buf = &**sref.buffer;
             for &(ix, (_, ref command)) in &sref.j_commands {
                 use CommandToken::*;
@@ -1424,10 +1424,13 @@ impl Grammar {
         let mut names = NameReader::new(nset);
 
         // Build the initial grammar tree, just form syntax axioms and floats.
-        let segments = sset.segments();
-        assert!(!segments.is_empty(), "Parse returned no segment!");
-        for segment in &segments {
-            for sref in *segment {
+        let segments = sset.segments(..);
+        assert!(
+            segments.clone().next().is_some(),
+            "Parse returned no segment!"
+        );
+        for segment in segments {
+            for sref in segment {
                 if let Err(diag) = match sref.statement_type() {
                     StatementType::Axiom => grammar.add_axiom(&sref, nset, &mut names),
                     StatementType::Floating => grammar.add_floating(&sref, nset, &mut names),
@@ -1588,7 +1591,7 @@ pub(crate) fn parse_statements(
     grammar: &Arc<Grammar>,
 ) {
     let mut ssrq = Vec::new();
-    for sref in segments.segments() {
+    for sref in segments.segments(..) {
         let segments2 = segments.clone();
         let nset = nset.clone();
         let grammar = grammar.clone();

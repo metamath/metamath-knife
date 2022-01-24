@@ -28,10 +28,10 @@ fn test_unify() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     let goal = stmt_parse
-        .get_formula(&db.statement("1p2com").unwrap())
+        .get_formula(&db.statement(b"1p2com").unwrap())
         .unwrap();
     let axiom = stmt_parse
-        .get_formula(&db.statement("ax-com").unwrap())
+        .get_formula(&db.statement(b"ax-com").unwrap())
         .unwrap();
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
@@ -46,10 +46,10 @@ fn test_unify_fail() {
     let mut db = mkdb(FORMULA_DB);
     let stmt_parse = db.stmt_parse_pass().clone();
     let goal = stmt_parse
-        .get_formula(&db.statement("1p2com").unwrap())
+        .get_formula(&db.statement(b"1p2com").unwrap())
         .unwrap();
     let axiom = stmt_parse
-        .get_formula(&db.statement("addeq1").unwrap())
+        .get_formula(&db.statement(b"addeq1").unwrap())
         .unwrap();
     assert!(goal.unify(axiom).is_none());
 }
@@ -62,10 +62,10 @@ fn test_substitute() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let names = db.name_pass().clone();
     let goal = stmt_parse
-        .get_formula(&db.statement("1p2com").unwrap())
+        .get_formula(&db.statement(b"1p2com").unwrap())
         .unwrap();
     let axiom = stmt_parse
-        .get_formula(&db.statement("addeq1.1").unwrap())
+        .get_formula(&db.statement(b"addeq1.1").unwrap())
         .unwrap();
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
@@ -77,10 +77,10 @@ fn test_substitute() {
     assert!(as_str(names.atom_name(subst[b].get_by_path(&[0]).unwrap())) == "c2");
     assert!(as_str(names.atom_name(subst[b].get_by_path(&[1]).unwrap())) == "c1");
     let stmt = stmt_parse
-        .get_formula(&db.statement("addeq1").unwrap())
+        .get_formula(&db.statement(b"addeq1").unwrap())
         .unwrap();
     let formula = stmt_parse
-        .get_formula(&db.statement("formula").unwrap())
+        .get_formula(&db.statement(b"formula").unwrap())
         .unwrap();
     let result = stmt.substitute(&subst);
     assert!(result == *formula);
