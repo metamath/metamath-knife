@@ -35,8 +35,8 @@ fn test_unify() {
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
-    assert!(subst[a].as_ref(&db).s_expression() == "(c1)");
-    assert!(subst[b].as_ref(&db).s_expression() == "(c2)");
+    assert_eq!(subst[a].as_ref(&db).as_sexpr(), "c1");
+    assert_eq!(subst[b].as_ref(&db).as_sexpr(), "c2");
 }
 
 #[test]
@@ -69,8 +69,8 @@ fn test_substitute() {
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
-    assert!(subst[a].as_ref(&db).s_expression() == "(cadd(c1)(c2))");
-    assert!(subst[b].as_ref(&db).s_expression() == "(cadd(c2)(c1))");
+    assert_eq!(subst[a].as_ref(&db).as_sexpr(), "(cadd c1 c2)");
+    assert_eq!(subst[b].as_ref(&db).as_sexpr(), "(cadd c2 c1)");
     let stmt = stmt_parse
         .get_formula(&db.statement(b"addeq1").unwrap())
         .unwrap();
@@ -78,5 +78,5 @@ fn test_substitute() {
         .get_formula(&db.statement(b"formula").unwrap())
         .unwrap();
     let result = stmt.substitute(&subst);
-    assert!(result == *formula);
+    assert_eq!(result, *formula);
 }

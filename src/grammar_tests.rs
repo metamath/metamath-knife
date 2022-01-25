@@ -33,10 +33,22 @@ pub(super) fn mkdb(text: &[u8]) -> Database {
 fn test_lookup() {
     let mut db = mkdb(GRAMMAR_DB);
     let names = db.name_pass();
-    assert!(as_str(names.atom_name(names.lookup_symbol(b"A").unwrap().atom)) == "A");
-    assert!(as_str(names.atom_name(names.lookup_symbol(b"B").unwrap().atom)) == "B");
-    assert!(as_str(names.atom_name(names.lookup_label(b"weq").unwrap().atom)) == "weq");
-    assert!(as_str(names.atom_name(names.lookup_label(b"cadd").unwrap().atom)) == "cadd");
+    assert_eq!(
+        as_str(names.atom_name(names.lookup_symbol(b"A").unwrap().atom)),
+        "A"
+    );
+    assert_eq!(
+        as_str(names.atom_name(names.lookup_symbol(b"B").unwrap().atom)),
+        "B"
+    );
+    assert_eq!(
+        as_str(names.atom_name(names.lookup_label(b"weq").unwrap().atom)),
+        "weq"
+    );
+    assert_eq!(
+        as_str(names.atom_name(names.lookup_label(b"cadd").unwrap().atom)),
+        "cadd"
+    );
 }
 
 #[test]
@@ -57,7 +69,10 @@ fn test_db_formula() {
     {
         let sref = db.statement(b"ax-com").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
-        assert!(formula.as_ref(&db).s_expression() == "(weq(cadd(cA)(cB))(cadd(cB)(cA)))");
+        assert_eq!(
+            formula.as_ref(&db).as_sexpr(),
+            "(weq (cadd cA cB) (cadd cB cA))"
+        );
     }
 }
 
@@ -79,13 +94,28 @@ fn test_parse_formula() {
         .parse_formula(&mut fmla_vec.clone().into_iter(), &[wff, class], &names)
         .unwrap();
     // Accessing formula using paths to labels
-    assert!(as_str(names.atom_name(formula.get_by_path(&[]).unwrap())) == "weq");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())) == "cA");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())) == "cadd");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())) == "cB");
-    assert!(as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())) == "cA");
+    assert_eq!(
+        as_str(names.atom_name(formula.get_by_path(&[]).unwrap())),
+        "weq"
+    );
+    assert_eq!(
+        as_str(names.atom_name(formula.get_by_path(&[0]).unwrap())),
+        "cA"
+    );
+    assert_eq!(
+        as_str(names.atom_name(formula.get_by_path(&[1]).unwrap())),
+        "cadd"
+    );
+    assert_eq!(
+        as_str(names.atom_name(formula.get_by_path(&[1, 0]).unwrap())),
+        "cB"
+    );
+    assert_eq!(
+        as_str(names.atom_name(formula.get_by_path(&[1, 1]).unwrap())),
+        "cA"
+    );
     // Accessing formula as S-Expression
-    assert!(formula.as_ref(&db).s_expression() == "(weq(cA)(cadd(cB)(cA)))");
+    assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (cadd cB cA))");
     // Accessing formula as flattened string of tokens
     assert!(formula.as_ref(&db).iter().eq(fmla_vec.into_iter()));
 }
@@ -113,7 +143,10 @@ fn test_db_32_formula() {
     {
         let sref = db.statement(b"check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap();
-        assert!(formula.as_ref(&db).s_expression() == "(weq(cov(cv(vx))(cA)(cB))(cC))");
+        assert_eq!(
+            formula.as_ref(&db).as_sexpr(),
+            "(weq (cov (cv vx) cA cB) cC)"
+        );
     }
 }
 
@@ -128,7 +161,7 @@ fn test_setvar_as_class() {
         let formula = grammar
             .parse_formula(&mut vec![x_symbol].into_iter(), &[class_symbol], &names)
             .unwrap();
-        assert!(formula.as_ref(&db).s_expression() == "(cv(vx))");
+        assert_eq!(formula.as_ref(&db).as_sexpr(), "(cv vx)");
     }
 }
 
@@ -159,7 +192,10 @@ fn test_db_43_formula() {
     {
         let sref = db.statement(b"check").unwrap();
         let formula = stmt_parse.get_formula(&sref).unwrap().as_ref(&db);
-        assert!(formula.s_expression() == "(weq(cab(vx)(wa(wcel(cv(vx))(cA))(wph)))(cB))");
+        assert_eq!(
+            formula.as_sexpr(),
+            "(weq (cab vx (wa (wcel (cv vx) cA) wph)) cB)"
+        );
     }
 }
 
@@ -195,7 +231,7 @@ fn test_garden_path_1() {
     assert!(sset.parse_diagnostics().is_empty());
     let sref = db.statement(b"formula1").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
-    assert!(formula.as_ref(&db).s_expression() == "(weq(cA)(csn(cop(cB)(cC))))");
+    assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (csn (cop cB cC)))");
 }
 
 #[test]
@@ -204,7 +240,10 @@ fn test_garden_path_2() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let sref = db.statement(b"formula2").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
-    assert!(formula.as_ref(&db).s_expression() == "(weq(cA)(csn(cop(cv(vx))(cv(vy)))))");
+    assert_eq!(
+        formula.as_ref(&db).as_sexpr(),
+        "(weq cA (csn (cop (cv vx) (cv vy))))"
+    );
 }
 
 #[test]
@@ -213,7 +252,10 @@ fn test_garden_path_3() {
     let stmt_parse = db.stmt_parse_pass().clone();
     let sref = db.statement(b"formula3").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
-    assert!(formula.as_ref(&db).s_expression() == "(weq(cA)(copab(vx)(vy)(cB)(weq(cC)(cD))))");
+    assert_eq!(
+        formula.as_ref(&db).as_sexpr(),
+        "(weq cA (copab vx vy cB (weq cC cD)))"
+    );
 }
 
 macro_rules! sa {

@@ -378,24 +378,32 @@ impl<'a> FormulaRef<'a> {
         self.db.name_result().get_atom(sref.math_at(0).slice)
     }
 
-    /// Displays this formula as an S-expression
+    /// Convert this formula into an s-expression string.
     #[must_use]
-    pub fn s_expression(&self) -> String {
-        self.sub_s_expression(self.root)
+    pub fn as_sexpr(&self) -> String {
+        let mut s = String::new();
+        self.write_sexpr(&mut s).unwrap();
+        s
     }
 
-    /// Displays this formula as an S-expression, starting from the given node
-    fn sub_s_expression(&self, node_id: NodeId) -> String {
-        format!(
-            "({}{})",
-            as_str(self.db.name_result().atom_name(self.formula.tree[node_id])),
-            self.formula
-                .tree
-                .children_iter(node_id)
-                .map(|i| self.sub_s_expression(i))
-                .collect::<Vec<String>>()
-                .join("")
-        )
+    /// Write this formula as an s-expression to the given writer.
+    pub fn write_sexpr(&self, w: &mut impl std::fmt::Write) -> std::fmt::Result {
+        self.write_sub_sexpr(self.root, w)
+    }
+
+    /// Write a subformula as an s-expression to the given writer.
+    fn write_sub_sexpr(&self, node_id: NodeId, w: &mut impl std::fmt::Write) -> std::fmt::Result {
+        let name = as_str(self.db.name_result().atom_name(self.formula.tree[node_id]));
+        if self.formula.tree.has_children(node_id) {
+            write!(w, "({}", name)?;
+            for i in self.formula.tree.children_iter(node_id) {
+                write!(w, " ")?;
+                self.write_sub_sexpr(i, w)?;
+            }
+            write!(w, ")")
+        } else {
+            write!(w, "{}", name)
+        }
     }
 
     /// Appends this formula to the provided stack buffer.
