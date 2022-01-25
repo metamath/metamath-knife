@@ -69,7 +69,6 @@ fn test_substitute() {
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
-    println!("{}", subst[a].as_ref(&db).s_expression());
     assert!(subst[a].as_ref(&db).s_expression() == "(cadd(c1)(c2))");
     assert!(subst[b].as_ref(&db).s_expression() == "(cadd(c2)(c1))");
     let stmt = stmt_parse
