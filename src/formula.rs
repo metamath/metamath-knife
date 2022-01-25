@@ -378,6 +378,26 @@ impl<'a> FormulaRef<'a> {
         self.db.name_result().get_atom(sref.math_at(0).slice)
     }
 
+    /// Displays this formula as an S-expression
+    #[must_use]
+    pub fn s_expression(&self) -> String {
+        self.sub_s_expression(self.root)
+    }
+
+    /// Displays this formula as an S-expression, starting from the given node
+    fn sub_s_expression(&self, node_id: NodeId) -> String {
+        format!(
+            "({}{})",
+            as_str(self.db.name_result().atom_name(self.formula.tree[node_id])),
+            self.formula
+                .tree
+                .children_iter(node_id)
+                .map(|i| self.sub_s_expression(i))
+                .collect::<Vec<String>>()
+                .join("")
+        )
+    }
+
     /// Appends this formula to the provided stack buffer.
     ///
     /// The [`ProofBuilder`] structure uses a dense representation of formulas as byte strings,

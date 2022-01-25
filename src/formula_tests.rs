@@ -1,5 +1,4 @@
 use crate::grammar_tests::mkdb;
-use crate::parser::as_str;
 
 const FORMULA_DB: &[u8] = b"
     $c |- wff class ( ) + = 1 2 $.
@@ -36,8 +35,8 @@ fn test_unify() {
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
-    assert!(as_str(names.atom_name(subst[a].get_by_path(&[]).unwrap())) == "c1");
-    assert!(as_str(names.atom_name(subst[b].get_by_path(&[]).unwrap())) == "c2");
+    assert!(subst[a].as_ref(&db).s_expression() == "(c1)");
+    assert!(subst[b].as_ref(&db).s_expression() == "(c2)");
 }
 
 #[test]
@@ -70,12 +69,9 @@ fn test_substitute() {
     let subst = goal.unify(axiom).unwrap();
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
-    assert!(as_str(names.atom_name(subst[a].get_by_path(&[]).unwrap())) == "cadd");
-    assert!(as_str(names.atom_name(subst[a].get_by_path(&[0]).unwrap())) == "c1");
-    assert!(as_str(names.atom_name(subst[a].get_by_path(&[1]).unwrap())) == "c2");
-    assert!(as_str(names.atom_name(subst[b].get_by_path(&[]).unwrap())) == "cadd");
-    assert!(as_str(names.atom_name(subst[b].get_by_path(&[0]).unwrap())) == "c2");
-    assert!(as_str(names.atom_name(subst[b].get_by_path(&[1]).unwrap())) == "c1");
+    println!("{}", subst[a].as_ref(&db).s_expression());
+    assert!(subst[a].as_ref(&db).s_expression() == "(cadd(c1)(c2))");
+    assert!(subst[b].as_ref(&db).s_expression() == "(cadd(c2)(c1))");
     let stmt = stmt_parse
         .get_formula(&db.statement(b"addeq1").unwrap())
         .unwrap();
