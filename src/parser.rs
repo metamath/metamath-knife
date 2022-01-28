@@ -45,6 +45,7 @@
 //! `SegmentId` and `SegmentRef` cover the same use cases for segments, although
 //! it makes no sense to have a segment-local segment reference.
 
+use crate::comment_parser::CommentParser;
 use crate::diag::Diagnostic;
 use crate::segment_set::SegmentSet;
 use crate::typesetting::TypesettingData;
@@ -908,6 +909,24 @@ impl<'a> StatementRef<'a> {
         } else {
             None
         }
+    }
+
+    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters,
+    /// and trimming an extra space from the trailing delimiter.
+    /// (We can't trim both sides without extra checks, because it would double count
+    /// the middle space in `$( $)`.)
+    #[must_use]
+    pub const fn comment_contents(&self) -> Span {
+        Span::new2(self.statement.label.start + 2, self.span_full().end - 3)
+    }
+
+    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters,
+    /// and trimming an extra space from the trailing delimiter.
+    /// (We can't trim both sides without extra checks, because it would double count
+    /// the middle space in `$( $)`.)
+    #[must_use]
+    pub fn comment_parser(&self) -> CommentParser<'a> {
+        CommentParser::new(&self.segment.segment.buffer, self.comment_contents())
     }
 }
 

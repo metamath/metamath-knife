@@ -54,6 +54,7 @@ mod segment_set;
 mod tree;
 mod util;
 
+pub mod comment_parser;
 pub mod database;
 pub mod diag;
 pub mod export;
@@ -68,6 +69,8 @@ pub mod scopeck;
 pub mod typesetting;
 pub mod verify;
 
+#[cfg(test)]
+mod comment_parser_tests;
 #[cfg(test)]
 mod formula_tests;
 #[cfg(test)]
