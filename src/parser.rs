@@ -46,6 +46,7 @@
 //! it makes no sense to have a segment-local segment reference.
 
 use crate::comment_parser::CommentParser;
+use crate::comment_parser::Discouragements;
 use crate::diag::Diagnostic;
 use crate::segment_set::SegmentSet;
 use crate::typesetting::TypesettingData;
@@ -927,6 +928,15 @@ impl<'a> StatementRef<'a> {
     #[must_use]
     pub fn comment_parser(&self) -> CommentParser<'a> {
         CommentParser::new(&self.segment.segment.buffer, self.comment_contents())
+    }
+
+    /// Parse the associated commment to get the discouragements
+    /// (Proof modification / new usage discouraged) for this theorem.
+    pub fn discouragements(&self) -> Discouragements {
+        self.associated_comment()
+            .map_or_else(Discouragements::default, |c| {
+                Discouragements::new(c.comment_contents().as_ref(&self.segment.buffer))
+            })
     }
 }
 

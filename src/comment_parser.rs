@@ -14,6 +14,9 @@
 //! corresponding byte string in the file has to be unescaped before
 //! interpretation, using the [`CommentParser::unescape_text`] and
 //! [`CommentParser::unescape_math`] functions.
+use lazy_static::lazy_static;
+use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
+
 use crate::parser::Span;
 
 /// A comment markup item, which represents either a piece of text from the input
@@ -381,5 +384,124 @@ impl<'a> Iterator for CommentParser<'a> {
             return Some(CommentItem::token(math_token, Span::new(start, end)));
         }
         self.item.take()
+    }
+}
+
+/// Discouragement information about a theorem.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Discouragements {
+    /// Is proof modification discouraged for this theorem?
+    pub modification_discouraged: bool,
+    /// Is new usage discouraged for this theorem?
+    pub usage_discouraged: bool,
+}
+
+impl Discouragements {
+    /// Parse the text of a statement's comment to determine whether proof usage or modification
+    /// is discouraged.
+    #[must_use]
+    pub fn new(buf: &[u8]) -> Self {
+        lazy_static! {
+            static ref MODIFICATION: RegexSet = RegexSet::new(&[
+                r"\(Proof[ \n]+modification[ \n]+is[ \n]+discouraged\.\)",
+                r"\(New[ \n]+usage[ \n]+is[ \n]+discouraged\.\)"
+            ])
+            .unwrap();
+        }
+        let m = MODIFICATION.matches(buf);
+        Self {
+            modification_discouraged: m.matched(0),
+            usage_discouraged: m.matched(1),
+        }
+    }
+}
+
+/// Information about "parentheticals" in the comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Parenthetical {
+    /// A comment like `(Contributed by Foo Bar, 12-Mar-2020.)`.
+    ContributedBy {
+        /// The span of the author in the parenthetical
+        author: Span,
+        /// The date, in the form `DD-MMM-YYYY`
+        date: Span,
+    },
+    /// A comment like `(Revised by Foo Bar, 12-Mar-2020.)`.
+    RevisedBy {
+        /// The span of the author in the parenthetical
+        author: Span,
+        /// The date, in the form `DD-MMM-YYYY`
+        date: Span,
+    },
+    /// A comment like `(Proof shortened by Foo Bar, 12-Mar-2020.)`.
+    ProofShortenedBy {
+        /// The span of the author in the parenthetical
+        author: Span,
+        /// The date, in the form `DD-MMM-YYYY`
+        date: Span,
+    },
+    /// The `(Proof modification is discouraged.)` comment
+    ProofModificationDiscouraged,
+    /// The `(New usage is discouraged.)` comment
+    NewUsageDiscouraged,
+}
+
+/// An iterator over the parentheticals in a comment.
+#[derive(Debug)]
+pub struct ParentheticalIter<'a> {
+    matches: CaptureMatches<'static, 'a>,
+    off: u32,
+}
+
+impl<'a> ParentheticalIter<'a> {
+    /// Construct a new parenthetical iterator given a segment buffer and a span in it.
+    #[must_use]
+    pub fn new(buf: &'a [u8], span: Span) -> Self {
+        lazy_static! {
+            static ref PARENTHETICALS: Regex = Regex::new(concat!(
+                r"\((Contributed|Revised|Proof[ \n]+shortened)",
+                r"[ \n]+by[ \n]+([^,)]+),[ \n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
+                r"\((Proof[ \n]+modification|New[ \n]+usage)[ \n]+is[ \n]+discouraged\.\)",
+            ))
+            .unwrap();
+        }
+
+        Self {
+            matches: PARENTHETICALS.captures_iter(span.as_ref(buf)),
+            off: span.start,
+        }
+    }
+
+    fn to_span(&self, m: Match<'_>) -> Span {
+        Span {
+            start: self.off + m.start() as u32,
+            end: self.off + m.end() as u32,
+        }
+    }
+}
+
+impl<'a> Iterator for ParentheticalIter<'a> {
+    type Item = (Span, Parenthetical);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let groups = self.matches.next()?;
+        let all = groups.get(0).unwrap();
+        let item = if let Some(m) = groups.get(1) {
+            let author = self.to_span(groups.get(2).unwrap());
+            let date = self.to_span(groups.get(3).unwrap());
+            match m.as_bytes()[0] {
+                b'C' => Parenthetical::ContributedBy { author, date },
+                b'R' => Parenthetical::RevisedBy { author, date },
+                b'P' => Parenthetical::ProofShortenedBy { author, date },
+                _ => unreachable!(),
+            }
+        } else {
+            match all.as_bytes()[1] {
+                b'P' => Parenthetical::ProofModificationDiscouraged,
+                b'N' => Parenthetical::NewUsageDiscouraged,
+                _ => unreachable!(),
+            }
+        };
+        Some((self.to_span(all), item))
     }
 }
