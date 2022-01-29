@@ -2,7 +2,9 @@
 //!
 //! The [set.mm](https://github.com/metamath/set.mm/) library contains many
 //! theorems with comments, and those comments contain markup in a special syntax
-//! implemented by [metamath.exe](https://github.com/metamath/metamath-exe).
+//! implemented by [metamath.exe](https://github.com/metamath/metamath-exe),
+//! and specified in Section 4.4.1 of the
+//! [metamath book](http://us.metamath.org/downloads/metamath.pdf).
 //! This module implements a SAX-style parser which yields events about the
 //! beginning and end of each syntax event.
 //!
@@ -28,11 +30,11 @@ pub enum CommentItem {
     LineBreak(usize),
     /// Start math mode, indicated by a backtick character. The usize points to the character.
     /// Between [`StartMathMode`] and [`EndMathMode`],
-    /// there will be no comment items other than [`MathToken`] and [`Escaped`].
+    /// there will be no comment items other than [`MathToken`].
     StartMathMode(usize),
     /// End math mode, indicated by a backtick character. The usize points to the character.
     /// Between [`StartMathMode`] and [`EndMathMode`],
-    /// there will be no comment items other than [`MathToken`] and [`Escaped`].
+    /// there will be no comment items other than [`MathToken`].
     EndMathMode(usize),
     /// A single math token. Beware that [`Escaped`] can split a math token,
     /// so this may not correspond to a `$c` or `$v` token directly.
@@ -66,30 +68,34 @@ pub enum CommentItem {
 impl CommentItem {
     /// Remove text escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
-    pub fn unescape_text(buf: &[u8], out: &mut Vec<u8>) {
-        let mut iter = buf.iter();
-        while let Some(&c) = iter.next() {
-            match c {
-                b'`' | b'[' | b'~' => {
-                    iter.next();
-                }
-                _ => out.push(c),
+    pub fn unescape_text(mut buf: &[u8], out: &mut Vec<u8>) {
+        while let Some(n) = buf.iter().position(|&c| matches!(c, b'`' | b'[' | b'~')) {
+            out.extend_from_slice(&buf[..=n]);
+            if buf.get(n + 1) == Some(&buf[n]) {
+                buf = &buf[n + 2..];
+            } else {
+                // this will not normally happen, but in some cases unescaped escapes
+                // are left uninterpreted because they appear in invalid position,
+                // and in that case they should be left as is
+                buf = &buf[n + 1..];
             }
         }
+        out.extend_from_slice(buf);
     }
 
     /// Remove math escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::MathToken`] field.
-    pub fn unescape_math(buf: &[u8], out: &mut Vec<u8>) {
-        let mut iter = buf.iter();
-        while let Some(&c) = iter.next() {
-            match c {
-                b'`' => {
-                    iter.next();
-                }
-                _ => out.push(c),
+    pub fn unescape_math(mut buf: &[u8], out: &mut Vec<u8>) {
+        while let Some(n) = buf.iter().position(|&c| c == b'`') {
+            out.extend_from_slice(&buf[..=n]);
+            if buf.get(n + 1) == Some(&buf[n]) {
+                buf = &buf[n + 2..];
+            } else {
+                // This should never happen if we are given `MathToken` text
+                buf = &buf[n + 1..];
             }
         }
+        out.extend_from_slice(buf);
     }
 
     const fn token(math: bool, span: Span) -> Self {
