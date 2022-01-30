@@ -36,8 +36,8 @@ pub enum CommentItem {
     /// Between [`StartMathMode`] and [`EndMathMode`],
     /// there will be no comment items other than [`MathToken`].
     EndMathMode(usize),
-    /// A single math token. Beware that [`Escaped`] can split a math token,
-    /// so this may not correspond to a `$c` or `$v` token directly.
+    /// A single math token. After unescaping this should correspond to a `$c` or `$v` statement
+    /// in the database.
     /// Use `unescape_math` to strip the escapes.
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
