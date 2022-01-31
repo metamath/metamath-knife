@@ -97,6 +97,7 @@
 //! To improve packing efficiency, jobs are dispatched in descending order of
 //! estimated runtime.  This requires an additional argument when queueing.
 
+use crate::as_str;
 use crate::diag;
 use crate::diag::DiagnosticClass;
 use crate::export;
@@ -109,17 +110,16 @@ use crate::line_cache::LineCache;
 use crate::nameck::Nameset;
 use crate::outline::Outline;
 use crate::outline::OutlineNodeRef;
-use crate::parser::as_str;
-use crate::parser::Comparer;
-use crate::parser::StatementAddress;
-use crate::parser::StatementRef;
 use crate::proof::ProofTreeArray;
 use crate::scopeck;
 use crate::scopeck::ScopeResult;
+use crate::segment::Comparer;
 use crate::segment_set::SegmentSet;
+use crate::statement::StatementAddress;
 use crate::typesetting::TypesettingData;
 use crate::verify;
 use crate::verify::VerifyResult;
+use crate::StatementRef;
 use annotate_snippets::snippet::Snippet;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

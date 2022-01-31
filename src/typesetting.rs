@@ -7,8 +7,9 @@
 //! [`metamath.exe`](https://github.com/metamath/metamath-exe).
 
 use crate::{
+    as_str,
     diag::Diagnostic,
-    parser::{as_str, StatementAddress, Token, TokenPtr},
+    statement::{StatementAddress, Token, TokenPtr},
 };
 use std::collections::HashMap;
 

@@ -4,21 +4,21 @@
 //! to be instantiated through `Database`.  It is not considered a stable API,
 //! although a stable wrapper may be added in `Database`.
 
-use crate::parser::as_str;
-use crate::parser::Comparer;
-use crate::parser::HeadingDef;
+use crate::as_str;
 use crate::parser::HeadingLevel;
-use crate::parser::SegmentId;
-use crate::parser::SegmentRef;
-use crate::parser::StatementAddress;
-use crate::parser::StatementIndex;
-use crate::parser::StatementRef;
-use crate::parser::StatementType;
-use crate::parser::Token;
+use crate::segment::Comparer;
+use crate::segment::SegmentRef;
 use crate::segment_set::SegmentSet;
+use crate::statement::HeadingDef;
+use crate::statement::SegmentId;
+use crate::statement::StatementAddress;
+use crate::statement::StatementIndex;
+use crate::statement::Token;
 use crate::tree::NodeId;
 use crate::tree::Tree;
 use crate::Database;
+use crate::StatementRef;
+use crate::StatementType;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;

@@ -14,7 +14,7 @@
 //! corresponding byte string in the file has to be unescaped before
 //! interpretation, using the [`CommentParser::unescape_text`] and
 //! [`CommentParser::unescape_math`] functions.
-use crate::parser::Span;
+use crate::Span;
 
 /// A comment markup item, which represents either a piece of text from the input
 /// or some kind of metadata item like the start or end of an italicized group.

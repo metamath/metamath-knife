@@ -31,16 +31,16 @@
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::nameck::{Atom, NameReader, NameUsage, Nameset};
-use crate::parser::{
-    self, Comparer, GlobalRange, Segment, SegmentId, SegmentOrder, SegmentRef, StatementAddress,
-    StatementIndex, StatementRef, StatementType, SymbolType, Token, TokenAddress, TokenPtr,
-    TokenRef, NO_STATEMENT,
-};
+use crate::segment::{Comparer, Segment, SegmentOrder, SegmentRef};
 use crate::segment_set::SegmentSet;
+use crate::statement::{
+    GlobalRange, SegmentId, StatementAddress, StatementIndex, SymbolType, Token, TokenAddress,
+    TokenPtr, TokenRef, NO_STATEMENT,
+};
 use crate::util::{fast_extend, HashMap, HashSet};
-use crate::Database;
-use crate::Formula;
-use crate::Label;
+use crate::{parser, Label};
+use crate::{Database, StatementType};
+use crate::{Formula, StatementRef};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::ops::Range;

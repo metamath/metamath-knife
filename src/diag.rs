@@ -4,18 +4,18 @@
 //! interpretation and testing, as well as a mostly-text representation which
 //! can be used for various human-readable outputs.
 
+use crate::as_str;
 use crate::line_cache::LineCache;
-use crate::parser::as_str;
-use crate::parser::Comparer;
-use crate::parser::Span;
-use crate::parser::StatementAddress;
-use crate::parser::StatementIndex;
-use crate::parser::StatementRef;
-use crate::parser::Token;
-use crate::parser::TokenAddress;
-use crate::parser::TokenIndex;
+use crate::segment::Comparer;
 use crate::segment_set::SegmentSet;
 use crate::segment_set::SourceInfo;
+use crate::statement::StatementAddress;
+use crate::statement::StatementIndex;
+use crate::statement::Token;
+use crate::statement::TokenAddress;
+use crate::statement::TokenIndex;
+use crate::Span;
+use crate::StatementRef;
 use annotate_snippets::display_list::FormatOptions;
 use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
 use std::borrow::Borrow;

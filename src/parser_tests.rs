@@ -1,12 +1,8 @@
 use crate::database::Database;
 use crate::diag::Diagnostic;
-use crate::parser::Comparer;
-use crate::parser::SegmentOrder;
-use crate::parser::Span;
-use crate::parser::StatementAddress;
-use crate::parser::StatementType;
-use crate::parser::TokenRef;
-use crate::parser::NO_STATEMENT;
+use crate::segment::{Comparer, SegmentOrder};
+use crate::statement::{Span, StatementAddress, TokenRef, NO_STATEMENT};
+use crate::StatementType;
 use std::cmp::Ordering;
 
 #[test]

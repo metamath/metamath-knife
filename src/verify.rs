@@ -27,16 +27,14 @@
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::nameck::{Atom, Nameset};
-use crate::parser::{
-    self, Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, Span, StatementAddress,
-    StatementRef, StatementType, TokenPtr, NO_STATEMENT,
-};
 use crate::scopeck::{
     self, ExprFragment, Frame, Hyp::*, ScopeReader, ScopeResult, ScopeUsage, VerifyExpr,
 };
+use crate::segment::{Comparer, Segment, SegmentOrder, SegmentRef};
 use crate::segment_set::SegmentSet;
+use crate::statement::{SegmentId, Span, StatementAddress, TokenPtr, NO_STATEMENT};
 use crate::util::{fast_clear, fast_extend, HashMap};
-use crate::Database;
+use crate::{parser, Database, StatementRef, StatementType};
 use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
