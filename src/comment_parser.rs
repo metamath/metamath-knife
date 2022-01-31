@@ -17,7 +17,7 @@
 use lazy_static::lazy_static;
 use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
 
-use crate::parser::Span;
+use crate::Span;
 
 /// A comment markup item, which represents either a piece of text from the input
 /// or some kind of metadata item like the start or end of an italicized group.

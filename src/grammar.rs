@@ -6,13 +6,11 @@
 use crate::diag::Diagnostic;
 use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
 use crate::nameck::{Atom, NameReader, Nameset};
-use crate::parser::{
-    as_str, CommandToken, Segment, SegmentId, StatementAddress, StatementRef, StatementType,
-    SymbolType, TokenPtr,
-};
+use crate::segment::Segment;
 use crate::segment_set::SegmentSet;
+use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenPtr};
 use crate::util::HashMap;
-use crate::Database;
+use crate::{as_str, Database, StatementRef, StatementType};
 use log::{debug, warn};
 use std::collections::hash_map::Entry;
 use std::fmt;

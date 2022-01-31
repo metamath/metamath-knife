@@ -5,7 +5,7 @@ use crate::{
         Parenthetical::{self, *},
         ParentheticalIter,
     },
-    parser::Span,
+    Span,
 };
 
 #[track_caller]

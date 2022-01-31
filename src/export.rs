@@ -1,13 +1,13 @@
 //! Export support for mmj2 proof files.
 
+use crate::as_str;
 use crate::diag::Diagnostic;
-use crate::parser::as_str;
-use crate::parser::StatementRef;
-use crate::parser::StatementType;
 use crate::proof::ProofStyle;
 use crate::proof::ProofTreeArray;
 use crate::proof::ProofTreePrinter;
 use crate::Database;
+use crate::StatementRef;
+use crate::StatementType;
 use regex::Regex;
 use std::error;
 use std::fmt;

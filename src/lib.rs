@@ -50,6 +50,7 @@
 )]
 
 mod bit_set;
+mod segment;
 mod segment_set;
 mod tree;
 mod util;
@@ -66,6 +67,7 @@ pub mod outline;
 pub mod parser;
 pub mod proof;
 pub mod scopeck;
+pub mod statement;
 pub mod typesetting;
 pub mod verify;
 
@@ -85,3 +87,7 @@ pub use formula::Formula;
 pub use formula::FormulaRef;
 pub use formula::Label;
 pub use formula::Symbol;
+pub use statement::as_str;
+pub use statement::Span;
+pub use statement::StatementRef;
+pub use statement::StatementType;

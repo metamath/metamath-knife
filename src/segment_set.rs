@@ -50,11 +50,10 @@
 
 use crate::database::{DbOptions, Executor, Promise};
 use crate::diag::Diagnostic;
-use crate::parser::{
-    self, Comparer, Segment, SegmentId, SegmentOrder, SegmentRef, Span, StatementAddress,
-    StatementRef,
-};
+use crate::segment::{Comparer, Segment, SegmentOrder, SegmentRef};
+use crate::statement::{SegmentId, StatementAddress};
 use crate::util::{find_chapter_header, HashMap, HashSet};
+use crate::{parser, Span, StatementRef};
 use filetime::FileTime;
 use std::collections::VecDeque;
 use std::fs::{self, File};
