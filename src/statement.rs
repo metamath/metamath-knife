@@ -33,7 +33,11 @@
 
 use std::ops::Deref;
 
-use crate::{comment_parser::CommentParser, parser::HeadingLevel, segment::SegmentRef};
+use crate::{
+    comment_parser::{CommentParser, Discouragements},
+    parser::HeadingLevel,
+    segment::SegmentRef,
+};
 
 /// Semantic type for positions in files.
 ///
@@ -593,6 +597,15 @@ impl<'a> StatementRef<'a> {
     #[must_use]
     pub fn comment_parser(&self) -> CommentParser<'a> {
         CommentParser::new(&self.segment.segment.buffer, self.comment_contents())
+    }
+
+    /// Parse the associated commment to get the discouragements
+    /// (Proof modification / new usage discouraged) for this theorem.
+    pub fn discouragements(&self) -> Discouragements {
+        self.associated_comment()
+            .map_or_else(Discouragements::default, |c| {
+                Discouragements::new(c.comment_contents().as_ref(&self.segment.buffer))
+            })
     }
 }
 

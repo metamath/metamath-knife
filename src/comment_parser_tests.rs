@@ -1,7 +1,9 @@
 use crate::{
     comment_parser::{
         CommentItem::{self, *},
-        CommentParser,
+        CommentParser, Discouragements,
+        Parenthetical::{self, *},
+        ParentheticalIter,
     },
     Span,
 };
@@ -178,6 +180,7 @@ fn test_html() {
         ],
     );
 }
+
 #[test]
 fn test_para() {
     check(
@@ -198,6 +201,81 @@ fn test_para() {
             Text(Span::new(6, 7)),
             LineBreak(7),
             Text(Span::new(7, 12)),
+        ],
+    );
+}
+
+#[test]
+fn test_discouragements() {
+    assert_eq!(
+        Discouragements::new(
+            b"An amazing theorem, but don't touch it.
+            (Proof modification is discouraged.)"
+        ),
+        Discouragements {
+            modification_discouraged: true,
+            usage_discouraged: false,
+        }
+    );
+    assert_eq!(
+        Discouragements::new(
+            b"An internal theorem, don't use it.
+            (New usage   is discouraged.)"
+        ),
+        Discouragements {
+            modification_discouraged: false,
+            usage_discouraged: true,
+        }
+    );
+    assert_eq!(
+        Discouragements::new(
+            b"A false axiom, experimental.  (Proof modification
+            is discouraged.)  (New usage is discouraged.)"
+        ),
+        Discouragements {
+            modification_discouraged: true,
+            usage_discouraged: true,
+        }
+    );
+}
+
+#[track_caller]
+fn check_parenthetical(buf: &[u8], expected: &[(Span, Parenthetical)]) {
+    assert_eq!(
+        ParentheticalIter::new(buf, Span::new(0, buf.len())).collect::<Vec<_>>(),
+        expected
+    )
+}
+
+#[test]
+fn test_parentheticals() {
+    check_parenthetical(
+        b"An amazing theorem, but don't touch it.
+        (Proof modification is discouraged.)",
+        &[(Span::new(48, 84), ProofModificationDiscouraged)],
+    );
+
+    check_parenthetical(
+        b"Sorry, I touched it.
+        (Contributed by Foo Bar, 20-Jun-2020.)  (Revised by
+        Someone Else, 20-Jun-2021.)  (Proof modification
+        is discouraged.)",
+        &[
+            (
+                Span::new(29, 67),
+                ContributedBy {
+                    author: Span::new(45, 52),
+                    date: Span::new(54, 65),
+                },
+            ),
+            (
+                Span::new(69, 116),
+                RevisedBy {
+                    author: Span::new(89, 101),
+                    date: Span::new(103, 114),
+                },
+            ),
+            (Span::new(118, 162), ProofModificationDiscouraged),
         ],
     );
 }
