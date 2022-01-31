@@ -17,14 +17,14 @@
 //      to the same node if a substituted variable appears several times
 //      in the formula to be substituted.
 
+use crate::as_str;
 use crate::bit_set::Bitset;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
-use crate::parser::as_str;
-use crate::parser::SymbolType;
-use crate::parser::TokenIter;
 use crate::scopeck::Hyp;
 use crate::segment_set::SegmentSet;
+use crate::statement::SymbolType;
+use crate::statement::TokenIter;
 use crate::tree::NodeId;
 use crate::tree::SiblingIter;
 use crate::tree::Tree;

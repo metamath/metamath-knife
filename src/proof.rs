@@ -1,14 +1,14 @@
 //! The proof object model for RPN proofs used in Metamath.
 
+use crate::as_str;
 use crate::diag::Diagnostic;
 use crate::nameck::Nameset;
-use crate::parser::as_str;
-use crate::parser::{StatementAddress, StatementRef, StatementType, TokenPtr};
 use crate::scopeck::{Hyp, ScopeResult};
 use crate::segment_set::SegmentSet;
+use crate::statement::{StatementAddress, TokenPtr};
 use crate::util::HashMap;
 use crate::verify::{verify_one, ProofBuilder};
-use crate::Database;
+use crate::{Database, StatementRef, StatementType};
 use std::cmp::{max, Ord, Ordering, PartialOrd};
 use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BinaryHeap, VecDeque};

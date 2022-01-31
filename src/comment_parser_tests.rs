@@ -3,7 +3,7 @@ use crate::{
         CommentItem::{self, *},
         CommentParser,
     },
-    parser::Span,
+    Span,
 };
 
 #[track_caller]

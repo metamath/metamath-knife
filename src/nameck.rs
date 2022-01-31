@@ -18,20 +18,20 @@
 //! The nameset is also responsible for maintaining the `Atom` table.
 
 use crate::database::DbOptions;
-use crate::parser::Comparer;
-use crate::parser::Segment;
-use crate::parser::SegmentId;
-use crate::parser::SegmentOrder;
-use crate::parser::SegmentRef;
-use crate::parser::StatementAddress;
-use crate::parser::StatementRef;
-use crate::parser::SymbolType;
-use crate::parser::Token;
-use crate::parser::TokenAddress;
-use crate::parser::TokenPtr;
+use crate::segment::Comparer;
+use crate::segment::Segment;
+use crate::segment::SegmentOrder;
+use crate::segment::SegmentRef;
 use crate::segment_set::SegmentSet;
+use crate::statement::SegmentId;
+use crate::statement::StatementAddress;
+use crate::statement::SymbolType;
+use crate::statement::Token;
+use crate::statement::TokenAddress;
+use crate::statement::TokenPtr;
 use crate::util::HashMap;
 use crate::util::HashSet;
+use crate::StatementRef;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;

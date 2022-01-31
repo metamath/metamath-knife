@@ -1,9 +1,9 @@
+use crate::as_str;
 use crate::database::Database;
 use crate::database::DbOptions;
 use crate::diag::Diagnostic;
-use crate::parser::as_str;
-use crate::parser::SegmentId;
-use crate::parser::StatementAddress;
+use crate::statement::SegmentId;
+use crate::statement::StatementAddress;
 
 const GRAMMAR_DB: &[u8] = b"
     $c |- wff class ( ) + = $.
