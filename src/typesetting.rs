@@ -9,9 +9,10 @@
 use crate::{
     as_str,
     diag::Diagnostic,
-    statement::{StatementAddress, Token, TokenPtr},
+    statement::{GlobalSpan, StatementAddress, Token, TokenPtr},
+    util::HashMap,
+    Span,
 };
-use std::collections::HashMap;
 
 /// The parsed `$t` comment data.
 #[derive(Debug, Default, Clone)]
@@ -24,7 +25,7 @@ pub struct TypesettingData {
     /// ```text
     /// latexdef "ph" as "\varphi";
     /// ```
-    pub latex_defs: HashMap<Token, Token>,
+    pub latex_defs: HashMap<Token, (Span, GlobalSpan, Token)>,
 
     /// HTML definitions are used to replace a token with a piece of HTML syntax.
     /// This version will generally be used for the GIF rendering version of the web pages.
@@ -32,7 +33,7 @@ pub struct TypesettingData {
     /// ```text
     /// htmldef "ph" as "<IMG SRC='_varphi.gif' WIDTH=11 HEIGHT=19 ALT=' ph' TITLE='ph'>";
     /// ```
-    pub html_defs: HashMap<Token, Token>,
+    pub html_defs: HashMap<Token, (Span, GlobalSpan, Token)>,
 
     /// HTML definitions are used to replace a token with a piece of HTML syntax.
     /// This version will generally be used for the unicode rendering version of the web pages.
@@ -40,7 +41,7 @@ pub struct TypesettingData {
     /// ```text
     /// althtmldef "ph" as "<SPAN CLASS=wff STYLE='color:blue'>&#x1D711;</SPAN>";
     /// ```
-    pub alt_html_defs: HashMap<Token, Token>,
+    pub alt_html_defs: HashMap<Token, (Span, GlobalSpan, Token)>,
 
     /// A piece of HTML to give the variable color key. All `htmlvarcolor` directives are given
     /// separately here, but they are logically concatenated with spaces for rendering.
@@ -49,13 +50,13 @@ pub struct TypesettingData {
     ///   + '<SPAN CLASS=setvar STYLE="color:red;font-style:normal">setvar</SPAN> '
     ///   + '<SPAN CLASS=class STYLE="color:#C3C;font-style:normal">class</SPAN>';
     /// ```
-    pub html_var_color: Vec<Token>,
+    pub html_var_color: Vec<(GlobalSpan, Token)>,
 
     /// The title of the generated HTML page.
     /// ```text
     /// htmltitle "Metamath Proof Explorer";
     /// ```
-    pub html_title: Option<Token>,
+    pub html_title: Option<(GlobalSpan, Token)>,
 
     /// The link to the home page in the generated HTML page.
     /// ```text
@@ -64,27 +65,27 @@ pub struct TypesettingData {
     ///     '"Home" HEIGHT=32 WIDTH=32 ALIGN=MIDDLE STYLE="margin-bottom:0px">' +
     ///     'Home</FONT></A>';
     /// ```
-    pub html_home: Option<Token>,
+    pub html_home: Option<(GlobalSpan, Token)>,
 
     /// The relative path from the unicode version to the GIF version. Used for cross references.
     /// (This is a set.mm specific hack.)
     /// ```text
     /// htmldir "../mpegif/";
     /// ```
-    pub html_dir: Option<Token>,
+    pub html_dir: Option<(GlobalSpan, Token)>,
 
     /// The relative path from the GIF version to the unicode version. Used for cross references.
     /// (This is a set.mm specific hack.)
     /// ```text
     /// althtmldir "../mpeuni/";
     /// ```
-    pub alt_html_dir: Option<Token>,
+    pub alt_html_dir: Option<(GlobalSpan, Token)>,
 
     /// Optional file where bibliographic references are kept.
     /// ```text
     /// htmlbibliography "mmset.html";
     /// ```
-    pub html_bibliography: Option<Token>,
+    pub html_bibliography: Option<(GlobalSpan, Token)>,
 
     /// Custom CSS to be placed in the header of generated files.
     /// Note that any `\n` escapes are not yet replaced by newlines in this `html_css` variable;
@@ -95,13 +96,13 @@ pub struct TypesettingData {
     ///   '<LINK href="mmset.css" title="mmset"\n' +
     ///   '    rel="stylesheet" type="text/css">\n';
     /// ```
-    pub html_css: Option<Token>,
+    pub html_css: Option<(GlobalSpan, Token)>,
 
     /// Tag(s) for the main SPAN surrounding all Unicode math.
     /// ```text
     /// htmlfont 'CLASS=math';
     /// ```
-    pub html_font: Option<Token>,
+    pub html_font: Option<(GlobalSpan, Token)>,
 
     /// A label, such that everything after this label uses the `ext_*` variables instead of the
     /// regular ones.
@@ -109,14 +110,14 @@ pub struct TypesettingData {
     /// ```text
     /// exthtmllabel "chil";
     /// ```
-    pub ext_html_label: Option<Token>,
+    pub ext_html_label: Option<(GlobalSpan, Token)>,
 
     /// The title of the generated HTML page, for the Hilbert Space extension.
     /// (This is a set.mm specific hack.)
     /// ```text
     /// exthtmltitle "Hilbert Space Explorer";
     /// ```
-    pub ext_html_title: Option<Token>,
+    pub ext_html_title: Option<(GlobalSpan, Token)>,
 
     /// The link to the home page in the generated HTML page, for the Hilbert Space extension.
     /// (This is a set.mm specific hack.)
@@ -126,14 +127,14 @@ pub struct TypesettingData {
     ///    '"Home" HEIGHT=32 WIDTH=32 ALIGN=MIDDLE STYLE="margin-bottom:0px">' +
     ///    'Home</FONT></A>';
     /// ```
-    pub ext_html_home: Option<Token>,
+    pub ext_html_home: Option<(GlobalSpan, Token)>,
 
     /// Optional file where bibliographic references are kept, for the Hilbert Space extension.
     /// (This is a set.mm specific hack.)
     /// ```text
     /// exthtmlbibliography "mmhil.html";
     /// ```
-    pub ext_html_bibliography: Option<Token>,
+    pub ext_html_bibliography: Option<(GlobalSpan, Token)>,
 
     /// Optional link(s) to other versions of the theorem page.  A "*" is replaced
     /// with the label of the current theorem.  If you need a literal "*" as part
@@ -145,61 +146,76 @@ pub struct TypesettingData {
     ///     + '<A HREF="https://expln.github.io/metamath/asrt/*.html">'
     ///     + 'Visualization version</A>&nbsp;&nbsp; ';
     /// ```
-    pub html_ext_url: Option<Token>,
+    pub html_ext_url: Option<(GlobalSpan, Token)>,
 }
 
 impl TypesettingData {
     /// Get the unicode rendering for a given symbol
     #[must_use]
     pub fn get_alt_html_def(&self, symbol: TokenPtr<'_>) -> Option<&Token> {
-        self.alt_html_defs.get(symbol)
+        self.alt_html_defs.get(symbol).map(|(_, _, tk)| tk)
     }
 
     /// Dump the content of this outline to the standard output
     pub(crate) fn dump(&self) {
-        for v in &self.html_var_color {
+        for (_, v) in &self.html_var_color {
             println!("html_var_color += {:?};", as_str(v));
         }
-        println!("html_title = {:?};", self.html_title.as_deref().map(as_str));
-        println!("html_home = {:?};", self.html_home.as_deref().map(as_str));
-        println!("html_dir = {:?};", self.html_dir.as_deref().map(as_str));
+        println!(
+            "html_title = {:?};",
+            self.html_title.as_ref().map(|tk| as_str(&tk.1))
+        );
+        println!(
+            "html_home = {:?};",
+            self.html_home.as_ref().map(|tk| as_str(&tk.1))
+        );
+        println!(
+            "html_dir = {:?};",
+            self.html_dir.as_ref().map(|tk| as_str(&tk.1))
+        );
         println!(
             "alt_html_dir = {:?};",
-            self.alt_html_dir.as_deref().map(as_str)
+            self.alt_html_dir.as_ref().map(|tk| as_str(&tk.1))
         );
         println!(
             "html_bibliography = {:?};",
-            self.html_bibliography.as_deref().map(as_str)
+            self.html_bibliography.as_ref().map(|tk| as_str(&tk.1))
         );
-        println!("html_css = {:?};", self.html_css.as_deref().map(as_str));
-        println!("html_font = {:?};", self.html_font.as_deref().map(as_str));
+        println!(
+            "html_css = {:?};",
+            self.html_css.as_ref().map(|tk| as_str(&tk.1))
+        );
+        println!(
+            "html_font = {:?};",
+            self.html_font.as_ref().map(|tk| as_str(&tk.1))
+        );
         println!(
             "ext_html_label = {:?};",
-            self.ext_html_label.as_deref().map(as_str)
+            self.ext_html_label.as_ref().map(|tk| as_str(&tk.1))
         );
         println!(
             "ext_html_title = {:?};",
-            self.ext_html_title.as_deref().map(as_str)
+            self.ext_html_title.as_ref().map(|tk| as_str(&tk.1))
         );
         println!(
             "ext_html_home = {:?};",
-            self.ext_html_home.as_deref().map(as_str)
+            self.ext_html_home.as_ref().map(|tk| as_str(&tk.1))
         );
         println!(
             "ext_html_bibliography = {:?};",
-            self.ext_html_bibliography.as_deref().map(as_str)
+            self.ext_html_bibliography.as_ref().map(|tk| as_str(&tk.1))
         );
         println!(
             "html_ext_url = {:?};",
-            self.html_ext_url.as_deref().map(as_str)
+            self.html_ext_url.as_ref().map(|tk| as_str(&tk.1))
         );
-        for (tk, v) in &self.latex_defs {
+        for (tk, (_, _, v)) in &self.latex_defs {
             println!("latex_defs[{:?}] = {:?};", as_str(tk), as_str(v));
         }
-        for (tk, v) in &self.html_defs {
+        for (tk, (_, _, v)) in &self.html_defs {
             println!("html_defs[{:?}] = {:?};", as_str(tk), as_str(v));
         }
-        for (tk, v) in &self.alt_html_defs {
+        for (tk, (_, _, v)) in &self.alt_html_defs {
             println!("alt_html_defs[{:?}] = {:?};", as_str(tk), as_str(v));
         }
     }

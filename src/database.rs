@@ -119,6 +119,7 @@ use crate::statement::StatementAddress;
 use crate::typesetting::TypesettingData;
 use crate::verify;
 use crate::verify::VerifyResult;
+use crate::verify_markup::VerifyMarkup;
 use crate::StatementRef;
 use annotate_snippets::snippet::Snippet;
 use std::cmp::Ordering;
@@ -906,6 +907,11 @@ impl Database {
         }
         if types.contains(&DiagnosticClass::Typesetting) {
             diags.extend(self.typesetting_pass().diagnostics.iter().cloned());
+        }
+        if types.contains(&DiagnosticClass::VerifyMarkup) {
+            self.scope_pass();
+            self.typesetting_pass();
+            diags.extend(self.verify_markup(VerifyMarkup::default()));
         }
         time(&self.options.clone(), "diag", move || {
             diag::to_annotations(self.parse_result(), &mut lc, diags, f)

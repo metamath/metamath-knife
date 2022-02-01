@@ -209,6 +209,12 @@ impl SegmentSet {
         self.segment(addr.segment_id).statement(addr.index)
     }
 
+    /// Fetches a handle to a statement given a global address,
+    /// or return a dummy statement when the index is `NO_STATEMENT`.
+    pub(crate) fn statement_or_dummy(&self, addr: StatementAddress) -> StatementRef<'_> {
+        self.segment(addr.segment_id).statement_or_dummy(addr.index)
+    }
+
     /// Reports any parse errors associated with loaded segments.
     pub(crate) fn parse_diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut out = Vec::new();

@@ -423,21 +423,24 @@ pub enum Parenthetical {
     ContributedBy {
         /// The span of the author in the parenthetical
         author: Span,
-        /// The date, in the form `DD-MMM-YYYY`
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
     /// A comment like `(Revised by Foo Bar, 12-Mar-2020.)`.
     RevisedBy {
         /// The span of the author in the parenthetical
         author: Span,
-        /// The date, in the form `DD-MMM-YYYY`
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
     /// A comment like `(Proof shortened by Foo Bar, 12-Mar-2020.)`.
     ProofShortenedBy {
         /// The span of the author in the parenthetical
         author: Span,
-        /// The date, in the form `DD-MMM-YYYY`
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
     /// The `(Proof modification is discouraged.)` comment
@@ -503,5 +506,55 @@ impl<'a> Iterator for ParentheticalIter<'a> {
             }
         };
         Some((self.to_span(all), item))
+    }
+}
+
+/// A date, as understood by metamath tools.
+/// This is just a `dd-mmm-yyyy` field after parsing,
+/// so it has weak calendrical restrictions.
+#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
+pub struct Date {
+    /// A year, which must be a 4 digit number (0-9999).
+    pub year: u32,
+    /// A month, parsed from three letter names: `Jan`, `Feb`, etc. (1-12)
+    pub month: u8,
+    /// A day, parsed from a 1 or 2 digit number (0-99).
+    pub day: u8,
+}
+
+impl TryFrom<&[u8]> for Date {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let (day, month, year) = match value.len() {
+            10 => (&value[..1], &value[2..5], &value[6..]),
+            11 => (&value[..2], &value[3..6], &value[7..]),
+            _ => return Err(()),
+        };
+        Ok(Date {
+            year: std::str::from_utf8(year)
+                .map_err(|_| ())?
+                .parse()
+                .map_err(|_| ())?,
+            month: match month {
+                b"Jan" => 1,
+                b"Feb" => 2,
+                b"Mar" => 3,
+                b"Apr" => 4,
+                b"May" => 5,
+                b"Jun" => 6,
+                b"Jul" => 7,
+                b"Aug" => 8,
+                b"Sep" => 9,
+                b"Oct" => 10,
+                b"Nov" => 11,
+                b"Dec" => 12,
+                _ => return Err(()),
+            },
+            day: std::str::from_utf8(day)
+                .map_err(|_| ())?
+                .parse()
+                .map_err(|_| ())?,
+        })
     }
 }

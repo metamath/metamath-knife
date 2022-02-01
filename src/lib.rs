@@ -54,6 +54,7 @@ mod segment;
 mod segment_set;
 mod tree;
 mod util;
+mod verify_markup;
 
 pub mod comment_parser;
 pub mod database;

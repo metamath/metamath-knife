@@ -9,15 +9,19 @@ use crate::line_cache::LineCache;
 use crate::segment::Comparer;
 use crate::segment_set::SegmentSet;
 use crate::segment_set::SourceInfo;
+use crate::statement::GlobalSpan;
 use crate::statement::StatementAddress;
 use crate::statement::StatementIndex;
 use crate::statement::Token;
 use crate::statement::TokenAddress;
 use crate::statement::TokenIndex;
+use crate::statement::NO_STATEMENT;
 use crate::Span;
 use crate::StatementRef;
+use crate::StatementType;
 use annotate_snippets::display_list::FormatOptions;
 use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
+use itertools::Itertools;
 use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::io;
@@ -42,6 +46,29 @@ pub enum DiagnosticClass {
     StmtParse,
     /// $t statement parsing result
     Typesetting,
+    /// Errors while verifying markup
+    VerifyMarkup,
+}
+
+/// The three kinds of markup supported by `$t` typesetting comments.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum MarkupKind {
+    /// The `htmldef` markup style, used in metamath for GIF-based rendering.
+    Html,
+    /// The `althtmldef` markup style, used in metamath for unicode-based rendering.
+    AltHtml,
+    /// The `latexdef` markup style, used in metamath for LaTeX markup rendering.
+    Latex,
+}
+
+impl MarkupKind {
+    const fn def_name(self) -> &'static str {
+        match self {
+            MarkupKind::Html => "htmldef",
+            MarkupKind::AltHtml => "althtmldef",
+            MarkupKind::Latex => "latexdef",
+        }
+    }
 }
 
 /// List of all diagnostic codes.  For a description of each, see the source of
@@ -68,8 +95,13 @@ pub enum Diagnostic {
     DisjointSingle,
     DjNotVariable(TokenIndex),
     DjRepeatedVariable(TokenIndex, TokenIndex),
+    DateOrderError(Span, Span),
+    DateParseError(Span),
+    DefaultAuthor(Span),
+    DuplicateContributor(Span, Span),
     DuplicateExplicitLabel(Token),
     DuplicateLabel(StatementAddress),
+    DuplicateMarkupDef(MarkupKind, GlobalSpan, Span),
     EmptyFilename,
     EmptyMathString,
     EssentialAtTopLevel,
@@ -83,16 +115,24 @@ pub enum Diagnostic {
     GrammarAmbiguous(StatementAddress),
     GrammarCantBuild,
     GrammarProvableFloat,
+    InvalidAxiomRestatement(Span, Span),
     IoError(String),
+    LabelContainsUnderscore(Span),
+    LineLengthExceeded(Span),
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
     MalformedAdditionalInfo(Span),
     MidStatementCommentMarker(Span),
+    MissingContributor,
     MissingLabel,
+    MissingMarkupDef([bool; 3], Span),
     MissingProof(Span),
+    MMReservedLabel(Span),
     NestedComment(Span, Span),
     NotActiveSymbol(TokenIndex),
     NotAProvableStatement,
+    OldAltNotDiscouraged,
+    ParenOrderError(Span, Span),
     ParsedStatementTooShort(Token),
     ParsedStatementNoTypeCode,
     ParsedStatementWrongTypeCode(Token),
@@ -101,12 +141,15 @@ pub enum Diagnostic {
     ProofIncomplete,
     ProofInvalidSave,
     ProofMalformedVarint,
+    ProofModOnAxiom(Span),
     ProofNoSteps,
     ProofUnderflow,
     ProofUnterminatedRoster,
     ProofWrongExprEnd,
     ProofWrongTypeEnd,
     RepeatedLabel(Span, Span),
+    ReservedAtToken(Span),
+    ReservedQToken(Span),
     SpuriousLabel(Span),
     SpuriousProof(Span),
     StepEssenWrong,
@@ -118,6 +161,8 @@ pub enum Diagnostic {
     StepUsedBeforeDefinition(Token),
     SymbolDuplicatesLabel(TokenIndex, StatementAddress),
     SymbolRedeclared(TokenIndex, TokenAddress),
+    TabUsed(Span),
+    TrailingWhitespace(Span),
     UnclosedBeforeEof,
     UnclosedBeforeInclude(StatementIndex),
     UnclosedCommandComment(Span),
@@ -126,12 +171,16 @@ pub enum Diagnostic {
     UnclosedInclude,
     UnclosedMath,
     UnclosedProof,
+    UnconventionalAxiomLabel(Span),
+    UndefinedMarkupDef(MarkupKind, Span),
+    UnknownLabel(Span),
     UnknownKeyword(Span),
     UnknownTypesettingCommand(Span),
     UnmatchedCloseGroup,
     UnparseableStatement(TokenIndex),
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
+    WindowsReservedLabel(Span),
 }
 use self::Diagnostic::*;
 
@@ -153,7 +202,7 @@ pub(crate) fn to_annotations<T>(
     diags
         .iter()
         .map(move |(saddr, diag)| {
-            let stmt = sset.statement(*saddr);
+            let stmt = sset.statement_or_dummy(*saddr);
             diag.to_snippet(sset, stmt, lc, f)
         })
         .collect::<Vec<_>>()
@@ -183,14 +232,14 @@ type AnnInfo<'a> = (
 #[must_use]
 fn make_snippet<T>(
     sset: &SegmentSet,
-    infos: AnnInfo<'_>,
+    (label, infos): AnnInfo<'_>,
+    footer: &[&str],
     lc: &mut LineCache,
     f: impl for<'a> FnOnce(Snippet<'a>) -> T,
 ) -> T {
     let mut slices = vec![];
     let arena: Arena<String> = Arena::new();
-    for info in infos.1 {
-        let (annotation_type, label, stmt, span) = info;
+    for (annotation_type, label, stmt, span) in infos {
         let source: &SourceInfo = sset.source_info(stmt.segment().id).borrow();
         let offs = (span.start + source.span.start) as usize;
         let (line_start, col) = lc.from_offset(&source.text, offs);
@@ -211,11 +260,18 @@ fn make_snippet<T>(
     }
     f(Snippet {
         title: Some(Annotation {
-            label: Some(&infos.0),
+            label: Some(&label),
             id: None,
             annotation_type: slices[0].annotations[0].annotation_type,
         }),
-        footer: vec![],
+        footer: footer
+            .iter()
+            .map(|msg| Annotation {
+                id: None,
+                label: Some(msg),
+                annotation_type: AnnotationType::Note,
+            })
+            .collect(),
         slices,
         opt: FormatOptions {
             color: true,
@@ -235,6 +291,7 @@ impl Diagnostic {
         fn t(v: &Token) -> String {
             as_str(v).to_owned()
         }
+        let mut notes: &[&str] = &[];
         let infos = match self {
             BadCharacter(pos, byte) => ("Invalid character".into(), vec![(
                 AnnotationType::Error,
@@ -337,6 +394,47 @@ impl Diagnostic {
                 stmt,
                 stmt.math_span(*index2),
             )]),
+            &DateOrderError(contrib, later) => {
+                notes = &["It is easiest to read the contribution comments when they come in order"];
+                (format!("at {}: Parentheticals should come in chronological order", as_str(stmt.label())).into(), vec![(
+                    AnnotationType::Warning,
+                    "this date...".into(),
+                    stmt,
+                    contrib,
+                ), (
+                    AnnotationType::Warning,
+                    "comes after this one".into(),
+                    stmt,
+                    later,
+                )])
+            }
+            &DateParseError(span) => ("Failed to parse date".into(), vec![(
+                AnnotationType::Error,
+                "Expected DD-MMM-YYYY format".into(),
+                stmt,
+                span,
+            )]),
+            &DefaultAuthor(span) => ("Use of default author".into(), vec![(
+                AnnotationType::Warning,
+                "There should be a person's name here".into(),
+                stmt,
+                span,
+            )]),
+            &DuplicateContributor(fst, snd) => {
+                notes = &["The 'Contributed by' field indicates the first author of a theorem.\n\
+                    Use 'Revised by' for subsequent contributions to the same theorem."];
+                ("Statement has multiple contributors".into(), vec![(
+                    AnnotationType::Note,
+                    "First contributor here".into(),
+                    stmt,
+                    fst,
+                ), (
+                    AnnotationType::Warning,
+                    "Second contributor here".into(),
+                    stmt,
+                    snd,
+                )])
+            },
             DuplicateExplicitLabel(ref tok) => ("Duplicate explicit label".into(), vec![(
                 AnnotationType::Error,
                 format!("Explicit label {label} is used twice in the same step", label = t(tok)).into(),
@@ -353,6 +451,17 @@ impl Diagnostic {
                 "Label was previously used here".into(),
                 sset.statement(*prevstmt),
                 sset.statement(*prevstmt).span(),
+            )]),
+            &DuplicateMarkupDef(kind, fst, snd) => (format!("Duplicate {}", kind.def_name()).into(), vec![(
+                AnnotationType::Warning,
+                "This token has already been defined".into(),
+                stmt,
+                snd,
+            ), (
+                AnnotationType::Note,
+                "Token was previously defined here".into(),
+                sset.statement_or_dummy(StatementAddress::new(fst.0, NO_STATEMENT)),
+                fst.1,
             )]),
             EmptyFilename => ("Empty filename".into(), vec![(
                 AnnotationType::Error,
@@ -444,11 +553,37 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            InvalidAxiomRestatement(ax_span, th_span) => ("Invalid axiom restatement".into(), vec![(
+                AnnotationType::Warning,
+                "This ax* theorem does not match the corresponding ax-*".into(),
+                stmt,
+                *th_span,
+            ), (
+                AnnotationType::Note,
+                "Axiom ax-* here".into(),
+                stmt,
+                *ax_span,
+            )]),
             IoError(ref err) => (format!("I/O error: {error}", error = err.clone()).into(), vec![(
                 AnnotationType::Error,
                 "Source file could not be read".into(),
                 stmt,
                 stmt.span(),
+            )]),
+            LabelContainsUnderscore(span) => {
+                notes = &["Prefer '-' over '_' in labels"];
+                ("Label contains underscore".into(), vec![(
+                    AnnotationType::Warning,
+                    "this statement has an underscore".into(),
+                    stmt,
+                    *span,
+                )])
+            },
+            LineLengthExceeded(span) => ("Line is too long".into(), vec![(
+                AnnotationType::Warning,
+                "These characters go over the line limit".into(),
+                stmt,
+                *span,
             )]),
             LocalLabelAmbiguous(span) => ("Local label is ambiguous".into(), vec![(
                 AnnotationType::Error,
@@ -474,18 +609,41 @@ impl Diagnostic {
                 stmt,
                 *marker,
             )]),
+            MissingContributor => ("No contribution comment".into(), vec![(
+                AnnotationType::Warning,
+                "No (Contributed by...) provided for this statement".into(),
+                stmt,
+                stmt.label_span(),
+            )]),
             MissingLabel => ("Missing label".into(), vec![(
                 AnnotationType::Error,
                 "This statement type requires a label".into(),
                 stmt,
                 stmt.span(),
             )]),
+            &MissingMarkupDef([html, alt_html, latex], span) => {
+                let msg = html.then(|| "htmldef").into_iter()
+                    .chain(alt_html.then(|| "althtmldef").into_iter())
+                    .chain(latex.then(|| "latexdef").into_iter());
+                (format!("Missing {} for token", msg.format(", ")).into(), vec![(
+                    AnnotationType::Warning,
+                    "This token has not been declared in the $t comment".into(),
+                    stmt,
+                    span,
+                )])
+            },
             MissingProof(math_end) => ("Missing proof".into(), vec![(
                 AnnotationType::Error,
                 "Provable assertion requires a proof introduced with $= here; use $= ? $. \
                         if you do not have a proof yet".into(),
                 stmt,
                 *math_end,
+            )]),
+            MMReservedLabel(span) => ("Reserved label".into(), vec![(
+                AnnotationType::Warning,
+                "Labels beginning with 'mm' are reserved for Metamath file names".into(),
+                stmt,
+                *span,
             )]),
             NestedComment(tok, opener) => ("Nested comment".into(), vec![(
                 AnnotationType::Warning,
@@ -516,6 +674,39 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            OldAltNotDiscouraged if stmt.statement_type() == StatementType::Axiom => {
+                notes = &["Add (New usage is discouraged.) to the comment"];
+                ("OLD/ALT axiom not discouraged".into(), vec![(
+                    AnnotationType::Warning,
+                    "OLD and ALT axioms should be discouraged".into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            OldAltNotDiscouraged => {
+                notes = &["Add (Proof modification is discouraged.) \
+                    and (New usage is discouraged.) to the comment"];
+                ("OLD/ALT theorem not discouraged".into(), vec![(
+                    AnnotationType::Warning,
+                    "OLD and ALT theorems should be discouraged".into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            &ParenOrderError(contrib, later) => {
+                notes = &["The contribution comment should come before any revisions"];
+                ("(Revised by...) precedes (Contributed by...)".into(), vec![(
+                    AnnotationType::Warning,
+                    "contribution comment here".into(),
+                    stmt,
+                    contrib,
+                ), (
+                    AnnotationType::Warning,
+                    "earlier revision comment".into(),
+                    stmt,
+                    later,
+                )])
+            }
             ParsedStatementTooShort(ref tok) => ("Parsed statement too short".into(), vec![(
                 AnnotationType::Error,
                 format!("Statement is too short, expecting for example {expected}", expected = t(tok)).into(),
@@ -558,6 +749,16 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            &ProofModOnAxiom(span) => {
+                notes = &["it doesn't make sense to put this marker on an axiom,\n\
+                    because axioms don't have proofs"];
+                ("Axiom contains (Proof modification is discouraged.)".into(), vec![(
+                    AnnotationType::Warning,
+                    "This doesn't make sense".into(),
+                    stmt,
+                    span,
+                )])
+            },
             ProofNoSteps => ("Empty proof".into(), vec![(
                 AnnotationType::Error,
                 "Proof must have at least one step (use ? if deliberately incomplete)".into(),
@@ -599,6 +800,26 @@ impl Diagnostic {
                 stmt,
                 *f_span,
             )]),
+            ReservedAtToken(span) => {
+                notes = &["The '@' character is discouraged in tokens because it is\n\
+                    traditionally used to replace '$' in commented out database source code."];
+                ("Token contains '@'".into(), vec![(
+                    AnnotationType::Warning,
+                    "Used '@' character here".into(),
+                    stmt,
+                    *span,
+                )])
+            }
+            ReservedQToken(span) => {
+                notes = &["The '?' character is discouraged in tokens because it is\n\
+                    sometimes used as a math token search wildcard."];
+                ("Token contains '?'".into(), vec![(
+                    AnnotationType::Warning,
+                    "Used '?' character here".into(),
+                    stmt,
+                    *span,
+                )])
+            }
             SpuriousLabel(lspan) => ("Spurious label".into(), vec![(
                 AnnotationType::Error,
                 "Labels are only permitted for statements of type $a, $e, $f, or $p".into(),
@@ -677,6 +898,18 @@ impl Diagnostic {
                 stmt,
                 sset.statement(taddr.statement).math_span(taddr.token_index),
             )]),
+            TabUsed(span) => ("Tab character used".into(), vec![(
+                AnnotationType::Warning,
+                "Use spaces instead".into(),
+                stmt,
+                *span,
+            )]),
+            TrailingWhitespace(span) => ("Trailing whitespace".into(), vec![(
+                AnnotationType::Warning,
+                "whitespace here".into(),
+                stmt,
+                *span,
+            )]),
             UnclosedBeforeEof => ("Unclosed before eof".into(), vec![(
                 AnnotationType::Error,
                 "${ group must be closed with a $} before end of file".into(),
@@ -730,6 +963,18 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            UnconventionalAxiomLabel(span) => ("Unconventional axiom label".into(), vec![(
+                AnnotationType::Warning,
+                "Axioms should start with 'ax-' or 'df-'".into(),
+                stmt,
+                *span,
+            )]),
+            UndefinedMarkupDef(kind, span) => (format!("Undeclared {} token", kind.def_name()).into(), vec![(
+                AnnotationType::Warning,
+                "This token was not declared in any $v or $c statement".into(),
+                stmt,
+                *span,
+            )]),
             UnknownKeyword(kwspan) => ("Unknown keyword".into(), vec![(
                 AnnotationType::Error,
                 "Statement-starting keyword must be one of $a $c $d $e $f $p $v".into(),
@@ -744,6 +989,12 @@ impl Diagnostic {
                 htmlbibliography, exthtmlbibliography, htmlcss, htmlfont, htmlexturl".into(),
                 stmt,
                 *kwspan,
+            )]),
+            UnknownLabel(span) => ("Unknown label".into(), vec![(
+                AnnotationType::Warning,
+                "This is not the label of any statement".into(),
+                stmt,
+                *span,
             )]),
             UnmatchedCloseGroup => ("Unmatched close group".into(), vec![(
                 AnnotationType::Error,
@@ -774,8 +1025,18 @@ impl Diagnostic {
                 sset.statement(taddr.statement),
                 sset.statement(taddr.statement).math_span(taddr.token_index),
             )]),
+            WindowsReservedLabel(span) => {
+                notes = &["On windows, it is not legal to name a file any of:\n\
+                    CON, PRN, AUX, CLOCK$, NUL, COM[1-9], LPT[1-9]."];
+                ("Windows reserved label".into(), vec![(
+                    AnnotationType::Warning,
+                    "This label cannot be used as the name of a file on windows".into(),
+                    stmt,
+                    *span,
+                )])
+            },
         };
 
-        make_snippet(sset, infos, lc, f)
+        make_snippet(sset, infos, notes, lc, f)
     }
 }

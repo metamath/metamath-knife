@@ -34,7 +34,7 @@
 use std::ops::Deref;
 
 use crate::{
-    comment_parser::{CommentParser, Discouragements},
+    comment_parser::{CommentParser, Discouragements, ParentheticalIter},
     parser::HeadingLevel,
     segment::SegmentRef,
 };
@@ -205,6 +205,9 @@ pub type TokenPtr<'a> = &'a [u8];
 pub fn as_str(ptr: TokenPtr<'_>) -> &str {
     std::str::from_utf8(ptr).expect("TokenPtr is supposed to be UTF8")
 }
+
+/// Locate a span uniquely in the database by appending a segment ID.
+pub type GlobalSpan = (SegmentId, Span);
 
 /// Extracted data for a top-level `$d` statement in a segment.
 #[derive(Debug)]
@@ -420,6 +423,17 @@ pub(crate) struct Statement {
     pub(crate) proof_end: usize,
 }
 
+pub(crate) const DUMMY_STATEMENT: Statement = Statement {
+    stype: StatementType::Invalid,
+    span: Span::NULL,
+    label: Span::NULL,
+    group: NO_STATEMENT,
+    group_end: NO_STATEMENT,
+    math_start: 0,
+    proof_start: 0,
+    proof_end: 0,
+};
+
 /// A reference to a statement which knows its address and can be used to fetch
 /// statement information.
 #[derive(Copy, Clone, Debug)]
@@ -482,13 +496,19 @@ impl<'a> StatementRef<'a> {
         self.statement.group_end != NO_STATEMENT
     }
 
+    /// Obtain the span corresponding to the statment label.
+    #[must_use]
+    pub const fn label_span(&self) -> Span {
+        self.statement.label
+    }
+
     /// Obtain the statment label.
     ///
     /// This will be non-null iff the type requires a label; missing labels for
     /// types which use them cause an immediate rewrite to `Invalid`.
     #[must_use]
     pub fn label(&self) -> &'a [u8] {
-        self.statement.label.as_ref(&self.segment.segment.buffer)
+        self.label_span().as_ref(&self.segment.segment.buffer)
     }
 
     /// An iterator for the symbols in a statement's math string.
@@ -606,6 +626,13 @@ impl<'a> StatementRef<'a> {
             .map_or_else(Discouragements::default, |c| {
                 Discouragements::new(c.comment_contents().as_ref(&self.segment.buffer))
             })
+    }
+
+    /// Return an iterator over the parentheticals (like `(Contributed by ...)`)
+    /// in this comment statement.
+    #[must_use]
+    pub fn parentheticals(&self) -> ParentheticalIter<'a> {
+        ParentheticalIter::new(&self.segment().segment.buffer, self.comment_contents())
     }
 }
 
