@@ -3,8 +3,9 @@ use std::ops::Range;
 use regex::bytes::Regex;
 
 use crate::{
-    comment_parser::{Date, Parenthetical},
-    diag::{Diagnostic, MarkupKind},
+    comment_parser::{CommentItem, CommentParser, Date, Parenthetical},
+    diag::Diagnostic,
+    parser::HeaderComment,
     scopeck::Hyp,
     segment::SegmentRef,
     statement::{StatementAddress, NO_STATEMENT},
@@ -141,6 +142,16 @@ impl Database {
                         }
                     }
                 }
+                StatementType::HeadingComment(lvl) => {
+                    let buf = &stmt.segment.segment.buffer;
+                    if let Some(header) = HeaderComment::parse(buf, lvl, stmt.comment_contents()) {
+                        verify_markup_comment(self, buf, header.content, |diag| {
+                            diags.push((stmt.address(), diag))
+                        })
+                    } else {
+                        diags.push((stmt.address(), Diagnostic::HeaderCommentParseError(lvl)))
+                    }
+                }
                 _ => {}
             }
             if stmt.is_assertion() {
@@ -151,6 +162,9 @@ impl Database {
                 let mut new_usage_discouraged = false;
                 let mut prev_date = None;
                 if let Some(comment) = stmt.associated_comment() {
+                    verify_markup_comment(self, buf, comment.comment_contents(), |diag| {
+                        diags.push((stmt.address(), diag))
+                    });
                     for (sp, paren) in comment.parentheticals() {
                         let mut check_paren = |author: Span, date_sp: Span| {
                             if author.as_ref(buf) == b"?who?" {
@@ -268,16 +282,12 @@ impl Database {
             eol_check(&mut diags, &seg, line_start, seg.buffer.len());
         }
 
-        for (kind, map) in [
-            (MarkupKind::Html, &tdata.html_defs),
-            (MarkupKind::AltHtml, &tdata.alt_html_defs),
-            (MarkupKind::Latex, &tdata.latex_defs),
-        ] {
+        for map in [&tdata.html_defs, &tdata.alt_html_defs, &tdata.latex_defs] {
             for (tk, (sp, (seg_id, _), _)) in map {
                 if self.name_result().lookup_symbol(tk).is_none() {
                     diags.push((
                         StatementAddress::new(*seg_id, NO_STATEMENT),
-                        Diagnostic::UndefinedMarkupDef(kind, *sp),
+                        Diagnostic::UndefinedToken(*sp),
                     ))
                 }
             }
@@ -297,7 +307,6 @@ impl Database {
         // omitted: check that ext_html_home has HREF="..." and IMG SRC="..."
         // omitted: top date check
 
-        // todo: section header comments
         // todo: bibliographic references
         // todo: mathbox independence
 
@@ -350,5 +359,88 @@ fn eq_statement(db: &Database, stmt1: StatementRef<'_>, stmt2: StatementRef<'_>)
                 _ => false,
             },
         ) && fr1.mandatory_dv == fr2.mandatory_dv
+    }
+}
+
+fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl FnMut(Diagnostic)) {
+    fn ensure_surrounding_space(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
+        if i.checked_sub(1)
+            .map(|j| buf[j])
+            .map_or(false, |c| !c.is_ascii_whitespace())
+            || buf.get(i + 1).map_or(false, |c| !c.is_ascii_whitespace())
+        {
+            diag(Diagnostic::MarkupNeedsWhitespace(i as u32))
+        }
+    }
+
+    fn check_uninterpreted_escapes(buf: &[u8], sp: Span, diag: &mut impl FnMut(Diagnostic)) {
+        let mut i = sp.start as usize;
+        while i < sp.end as usize {
+            let c = buf[i];
+            if matches!(c, b'`' | b'[' | b'~') {
+                if buf.get(i + 1) == Some(&c) {
+                    i += 1;
+                } else {
+                    diag(Diagnostic::UninterpretedEscape(i as u32))
+                }
+            }
+            i += 1;
+        }
+    }
+
+    let mut temp_buffer = vec![];
+    let mut in_math = None;
+    let mut in_html = None;
+    for item in CommentParser::new(buf, span) {
+        match item {
+            CommentItem::Text(sp) => {
+                lazy_static::lazy_static! {
+                    static ref HTML: Regex = Regex::new("(?i)</?HTML>").unwrap();
+                }
+                check_uninterpreted_escapes(buf, sp, &mut diag);
+                let text = sp.as_ref(buf);
+                if HTML.is_match(text) {
+                    if let Some(m) = HTML.find(text) {
+                        diag(Diagnostic::UninterpretedHtml(Span::new2(
+                            sp.start + m.start() as u32,
+                            sp.start + m.end() as u32,
+                        )))
+                    }
+                }
+            }
+            CommentItem::StartMathMode(i) | CommentItem::EndMathMode(i) => {
+                in_math = match in_math {
+                    Some(_) => None,
+                    None => Some(i),
+                };
+                ensure_surrounding_space(buf, i, &mut diag)
+            }
+            CommentItem::MathToken(sp) => {
+                temp_buffer.clear();
+                CommentItem::unescape_math(sp.as_ref(buf), &mut temp_buffer);
+                if db.name_result().lookup_symbol(&temp_buffer).is_none() {
+                    diag(Diagnostic::UndefinedToken(sp))
+                }
+            }
+            CommentItem::Label(i, sp) | CommentItem::Url(i, sp) => {
+                ensure_surrounding_space(buf, i, &mut diag);
+                check_uninterpreted_escapes(buf, sp, &mut diag);
+            }
+            CommentItem::StartHtml(i) => in_html = Some(i),
+            CommentItem::EndHtml(_) => in_html = None,
+            CommentItem::LineBreak(_)
+            | CommentItem::StartSubscript(_)
+            | CommentItem::EndSubscript(_)
+            | CommentItem::StartItalic(_)
+            | CommentItem::EndItalic(_)
+            // todo: check bib tag
+            | CommentItem::BibTag(_) => {}
+        }
+    }
+    if let Some(i) = in_math {
+        diag(Diagnostic::UnclosedMathMarkup(i as u32, span.end))
+    }
+    if let Some(i) = in_html {
+        diag(Diagnostic::UnclosedHtml(i as u32, span.end))
     }
 }

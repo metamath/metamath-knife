@@ -24,6 +24,7 @@ use crate::statement::{
 };
 use crate::typesetting::TypesettingData;
 use crate::StatementType::{self, *};
+use regex::bytes::Regex;
 use std::cmp;
 use std::collections::hash_map::Entry;
 use std::fmt::Debug;
@@ -224,14 +225,14 @@ impl<'a> Scanner<'a> {
                 if tok_str.contains("$(") {
                     self.diag(Diagnostic::NestedComment(tok, opener));
                 }
-            } else if tok_ref.len() >= 4 {
-                if tok_ref[0..4] == b"####"[0..4] {
+            } else if first && tok_ref.len() >= 4 {
+                if tok_ref[..4] == *b"####" {
                     ctype = CommentType::Heading(HeadingLevel::MajorPart);
-                } else if tok_ref[0..4] == b"#*#*"[0..4] {
+                } else if tok_ref[..4] == *b"#*#*" {
                     ctype = CommentType::Heading(HeadingLevel::Section);
-                } else if tok_ref[0..4] == b"=-=-"[0..4] {
+                } else if tok_ref[..4] == *b"=-=-" {
                     ctype = CommentType::Heading(HeadingLevel::SubSection);
-                } else if tok_ref[0..4] == b"-.-."[0..4] {
+                } else if tok_ref[..4] == *b"-.-." {
                     ctype = CommentType::Heading(HeadingLevel::SubSubSection);
                 }
             }
@@ -1091,5 +1092,38 @@ impl SegmentSet {
             }
         }
         data
+    }
+}
+
+pub(crate) struct HeaderComment {
+    pub(crate) _header: Span,
+    pub(crate) content: Span,
+}
+
+impl HeaderComment {
+    pub(crate) fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
+        lazy_static::lazy_static! {
+            static ref MAJOR_PART: Regex =
+                Regex::new(r"^[ \n]+#{4,}\n([^\n]*)\n#{4,}\n").unwrap();
+            static ref SECTION: Regex =
+                Regex::new(r"^[ \n]+(:?#\*){2,}#?\n([^\n]*)\n(:?#\*){2,}#?\n").unwrap();
+            static ref SUBSECTION: Regex =
+                Regex::new(r"^[ \n]+(:?=-){2,}=?\n([^\n]*)\n(:?=-){2,}=?\n").unwrap();
+            static ref SUBSUBSECTION: Regex =
+                Regex::new(r"^[ \n]+(:?-\.){2,}-?\n([^\n]*)\n(:?-\.){2,}-?\n").unwrap();
+        }
+        let regex = match lvl {
+            HeadingLevel::MajorPart => &*MAJOR_PART,
+            HeadingLevel::Section => &*SECTION,
+            HeadingLevel::SubSection => &*SUBSECTION,
+            HeadingLevel::SubSubSection => &*SUBSUBSECTION,
+            _ => unreachable!(),
+        };
+        let groups = regex.captures(sp.as_ref(buf))?;
+        let m = groups.get(1)?;
+        Some(Self {
+            _header: Span::new2(sp.start + m.start() as u32, sp.start + m.end() as u32),
+            content: Span::new2(sp.start + groups.get(0)?.end() as u32, sp.end),
+        })
     }
 }

@@ -601,19 +601,13 @@ impl<'a> StatementRef<'a> {
         }
     }
 
-    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters,
-    /// and trimming an extra space from the trailing delimiter.
-    /// (We can't trim both sides without extra checks, because it would double count
-    /// the middle space in `$( $)`.)
+    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters.
     #[must_use]
     pub const fn comment_contents(&self) -> Span {
-        Span::new2(self.statement.label.start + 2, self.span_full().end - 3)
+        Span::new2(self.statement.label.start + 2, self.span_full().end - 2)
     }
 
-    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters,
-    /// and trimming an extra space from the trailing delimiter.
-    /// (We can't trim both sides without extra checks, because it would double count
-    /// the middle space in `$( $)`.)
+    /// Get an iterator over the markup items in this comment.
     #[must_use]
     pub fn comment_parser(&self) -> CommentParser<'a> {
         CommentParser::new(&self.segment.segment.buffer, self.comment_contents())

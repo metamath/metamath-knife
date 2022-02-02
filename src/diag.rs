@@ -6,6 +6,7 @@
 
 use crate::as_str;
 use crate::line_cache::LineCache;
+use crate::parser::HeadingLevel;
 use crate::segment::Comparer;
 use crate::segment_set::SegmentSet;
 use crate::segment_set::SourceInfo;
@@ -71,6 +72,38 @@ impl MarkupKind {
     }
 }
 
+impl HeadingLevel {
+    fn diagnostic_note(self) -> &'static [&'static str] {
+        #[rustfmt::skip]
+        macro_rules! diag { ($type:expr, $header:expr, $decoration:expr) => { &[
+            concat!("A ", $type, " header comment has the form: \
+                \n$(\
+                \n", $decoration, "\
+                \n  ", $header, "\
+                \n", $decoration, "\
+                \nMarkup text here\
+                \n$)"),
+            "section titles may not be longer than one line",
+        ]}}
+        match self {
+            HeadingLevel::MajorPart => {
+                diag!("major part", "MY HEADER", "###############################")
+            }
+            HeadingLevel::Section => {
+                diag!("section", "My Header", "#*#*#*#*#*#*#*#*#*#*#*#*#*#*#*#")
+            }
+            HeadingLevel::SubSection => {
+                diag!("subsection", "My Header", "=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=")
+            }
+            HeadingLevel::SubSubSection => diag!(
+                "subsubsection",
+                "My Header",
+                "-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-"
+            ),
+            _ => unreachable!(),
+        }
+    }
+}
 /// List of all diagnostic codes.  For a description of each, see the source of
 /// `to_annotations`.
 ///
@@ -115,12 +148,14 @@ pub enum Diagnostic {
     GrammarAmbiguous(StatementAddress),
     GrammarCantBuild,
     GrammarProvableFloat,
+    HeaderCommentParseError(HeadingLevel),
     InvalidAxiomRestatement(Span, Span),
     IoError(String),
     LabelContainsUnderscore(Span),
     LineLengthExceeded(Span),
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
+    MarkupNeedsWhitespace(u32),
     MalformedAdditionalInfo(Span),
     MidStatementCommentMarker(Span),
     MissingContributor,
@@ -168,11 +203,15 @@ pub enum Diagnostic {
     UnclosedCommandComment(Span),
     UnclosedCommandString(Span),
     UnclosedComment(Span),
+    UnclosedHtml(u32, u32),
     UnclosedInclude,
     UnclosedMath,
+    UnclosedMathMarkup(u32, u32),
     UnclosedProof,
     UnconventionalAxiomLabel(Span),
-    UndefinedMarkupDef(MarkupKind, Span),
+    UndefinedToken(Span),
+    UninterpretedEscape(u32),
+    UninterpretedHtml(Span),
     UnknownLabel(Span),
     UnknownKeyword(Span),
     UnknownTypesettingCommand(Span),
@@ -553,6 +592,15 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            HeaderCommentParseError(lvl) => {
+                notes = lvl.diagnostic_note();
+                ("Invalid header comment".into(), vec![(
+                    AnnotationType::Warning,
+                    "Could not parse this as a header".into(),
+                    stmt,
+                    stmt.span(),
+                )])
+            },
             InvalidAxiomRestatement(ax_span, th_span) => ("Invalid axiom restatement".into(), vec![(
                 AnnotationType::Warning,
                 "This ax* theorem does not match the corresponding ax-*".into(),
@@ -596,6 +644,12 @@ impl Diagnostic {
                 "Local label duplicates another label in the same proof".into(),
                 stmt,
                 *span,
+            )]),
+            &MarkupNeedsWhitespace(index) => ("Markup character requires surrounding whitespace".into(), vec![(
+                AnnotationType::Warning,
+                "Put spaces around this character".into(),
+                stmt,
+                Span::new2(index, index + 1),
             )]),
             MalformedAdditionalInfo(span) => ("Malformed additional info".into(), vec![(
                 AnnotationType::Error,
@@ -945,6 +999,17 @@ impl Diagnostic {
                 stmt,
                 *comment,
             )]),
+            &UnclosedHtml(start, end) => ("Unclosed <HTML>".into(), vec![(
+                AnnotationType::Error,
+                "HTML blocks must be closed".into(),
+                stmt,
+                Span::new2(end, end + 2), // the $)
+            ), (
+                AnnotationType::Note,
+                "HTML block started here".into(),
+                stmt,
+                Span::new2(start, start + 6), // the <HTML>
+            )]),
             UnclosedInclude => ("Unclosed include".into(), vec![(
                 AnnotationType::Error,
                 "$[ requires a matching $]".into(),
@@ -956,6 +1021,17 @@ impl Diagnostic {
                 "A math string must be closed with $= or $.".into(),
                 stmt,
                 stmt.span(),
+            )]),
+            &UnclosedMathMarkup(start, end) => ("Unclosed math".into(), vec![(
+                AnnotationType::Error,
+                "A math string must be closed with `".into(),
+                stmt,
+                Span::new2(end, end + 2), // the $)
+            ), (
+                AnnotationType::Note,
+                "Math string started here".into(),
+                stmt,
+                Span::new2(start, start + 1), // the `
             )]),
             UnclosedProof => ("Unclosed proof".into(), vec![(
                 AnnotationType::Error,
@@ -969,7 +1045,7 @@ impl Diagnostic {
                 stmt,
                 *span,
             )]),
-            UndefinedMarkupDef(kind, span) => (format!("Undeclared {} token", kind.def_name()).into(), vec![(
+            UndefinedToken(span) => ("Undeclared token".into(), vec![(
                 AnnotationType::Warning,
                 "This token was not declared in any $v or $c statement".into(),
                 stmt,
@@ -989,6 +1065,25 @@ impl Diagnostic {
                 htmlbibliography, exthtmlbibliography, htmlcss, htmlfont, htmlexturl".into(),
                 stmt,
                 *kwspan,
+            )]),
+            &UninterpretedEscape(index) => {
+                notes = &[
+                    "This character has special meaning in this position, \
+                    but it was not interpretable here.",
+                    "Use ~~ or [[ or `` if you mean to include the character literally"
+                ];
+                ("Invalid escape character".into(), vec![(
+                    AnnotationType::Warning,
+                    "This escape character should be doubled".into(),
+                    stmt,
+                    Span::new2(index, index + 1),
+                )])
+            }
+            UninterpretedHtml(tok) => ("incorrect use of <HTML>".into(), vec![(
+                AnnotationType::Warning,
+                "This <HTML> was not interpreted".into(),
+                stmt,
+                *tok,
             )]),
             UnknownLabel(span) => ("Unknown label".into(), vec![(
                 AnnotationType::Warning,
