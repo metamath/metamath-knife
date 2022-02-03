@@ -211,6 +211,7 @@ pub enum Diagnostic {
     UnclosedMathMarkup(u32, u32),
     UnclosedProof,
     UnconventionalAxiomLabel(Span),
+    UndefinedBibTag(Span),
     UndefinedToken(Span, Token),
     UninterpretedEscape(u32),
     UninterpretedHtml(Span),
@@ -1070,6 +1071,12 @@ impl Diagnostic {
             UnconventionalAxiomLabel(span) => ("Unconventional axiom label".into(), vec![(
                 AnnotationType::Warning,
                 "Axioms should start with 'ax-' or 'df-'".into(),
+                stmt,
+                *span,
+            )]),
+            UndefinedBibTag(span) => ("Missing bibliography tag".into(), vec![(
+                AnnotationType::Warning,
+                "This tag was not found in the bibliography file".into(),
                 stmt,
                 *span,
             )]),

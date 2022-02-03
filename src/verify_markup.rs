@@ -1,16 +1,13 @@
-use std::ops::Range;
-
+use crate::comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical};
+use crate::diag::Diagnostic;
+use crate::parser::HeaderComment;
+use crate::scopeck::Hyp;
+use crate::segment::SegmentRef;
+use crate::statement::{StatementAddress, NO_STATEMENT};
+use crate::util::{HashMap, HashSet};
+use crate::{Database, Span, StatementRef, StatementType};
 use regex::bytes::Regex;
-
-use crate::{
-    comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical},
-    diag::Diagnostic,
-    parser::HeaderComment,
-    scopeck::Hyp,
-    segment::SegmentRef,
-    statement::{StatementAddress, NO_STATEMENT},
-    Database, Span, StatementRef, StatementType,
-};
+use std::ops::Range;
 
 #[derive(Copy, Clone, Debug)]
 pub struct VerifyMarkup {
@@ -57,8 +54,12 @@ impl VerifyMarkup {
     }
 
     /// Run the verify markup pass on the given database.
-    pub fn run(self, db: &Database) -> Vec<(StatementAddress, Diagnostic)> {
-        db.verify_markup(self)
+    pub fn run(
+        self,
+        db: &Database,
+        bib: Option<&Bibliography2>,
+    ) -> Vec<(StatementAddress, Diagnostic)> {
+        db.verify_markup(self, bib)
     }
 }
 
@@ -72,9 +73,26 @@ impl Database {
     /// Requires: [`Database::scope_pass`], [`Database::typesetting_pass`]
     #[allow(clippy::cognitive_complexity)]
     #[must_use]
-    pub fn verify_markup(&self, opts: VerifyMarkup) -> Vec<(StatementAddress, Diagnostic)> {
+    pub fn verify_markup(
+        &self,
+        opts: VerifyMarkup,
+        bib2: Option<&Bibliography2>,
+    ) -> Vec<(StatementAddress, Diagnostic)> {
         let mut diags = vec![];
         let tdata = &**self.typesetting_result();
+
+        let ext_start = tdata.ext_html_label.as_ref().and_then(|(sp, tk)| {
+            if let Some(stmt) = self.name_result().lookup_label(tk) {
+                Some(stmt.address)
+            } else {
+                diags.push((
+                    StatementAddress::new(sp.0, NO_STATEMENT),
+                    Diagnostic::UnknownLabel(sp.1),
+                ));
+                None
+            }
+        });
+        let mut bib = bib2.map(|bib| &bib.base);
 
         for stmt in self.statements() {
             if opts.check_underscores && stmt.label().contains(&b'_') {
@@ -88,12 +106,13 @@ impl Database {
                     stmt.address(),
                     Diagnostic::MMReservedLabel(stmt.label_span()),
                 ))
-            }
-            if WINDOWS_RESERVED_NAMES.is_match(stmt.label()) {
+            } else if WINDOWS_RESERVED_NAMES.is_match(stmt.label()) {
                 diags.push((
                     stmt.address(),
                     Diagnostic::WindowsReservedLabel(stmt.label_span()),
                 ))
+            } else if stmt.label() == b"mathbox" {
+                bib = bib2.map(|bib| &bib.base);
             }
             match stmt.statement_type() {
                 StatementType::Axiom => {
@@ -145,7 +164,7 @@ impl Database {
                 StatementType::HeadingComment(lvl) => {
                     let buf = &stmt.segment.segment.buffer;
                     if let Some(header) = HeaderComment::parse(buf, lvl, stmt.comment_contents()) {
-                        verify_markup_comment(self, buf, header.content, |diag| {
+                        verify_markup_comment(self, bib, buf, header.content, |diag| {
                             diags.push((stmt.address(), diag))
                         })
                     } else {
@@ -155,6 +174,9 @@ impl Database {
                 _ => {}
             }
             if stmt.is_assertion() {
+                if matches!(ext_start, Some(a) if a == stmt.address()) {
+                    bib = bib2.and_then(|bib| bib.ext.as_ref());
+                }
                 let buf = &stmt.segment.segment.buffer;
                 let mut contributor = None;
                 let mut laters = vec![];
@@ -162,7 +184,7 @@ impl Database {
                 let mut new_usage_discouraged = false;
                 let mut prev_date = None;
                 if let Some(comment) = stmt.associated_comment() {
-                    verify_markup_comment(self, buf, comment.comment_contents(), |diag| {
+                    verify_markup_comment(self, bib, buf, comment.comment_contents(), |diag| {
                         diags.push((stmt.address(), diag))
                     });
                     for (sp, paren) in comment.parentheticals() {
@@ -293,21 +315,11 @@ impl Database {
             }
         }
 
-        if let Some((sp, tk)) = &tdata.ext_html_label {
-            if self.name_result().lookup_label(tk).is_none() {
-                diags.push((
-                    StatementAddress::new(sp.0, NO_STATEMENT),
-                    Diagnostic::UnknownLabel(sp.1),
-                ))
-            }
-        }
-
         // omitted: check that files in IMG SRC="..." of html_defs exist
         // omitted: check that html_home has HREF="..." and IMG SRC="..."
         // omitted: check that ext_html_home has HREF="..." and IMG SRC="..."
         // omitted: top date check
 
-        // todo: bibliographic references
         // todo: mathbox independence
 
         diags
@@ -362,7 +374,13 @@ fn eq_statement(db: &Database, stmt1: StatementRef<'_>, stmt2: StatementRef<'_>)
     }
 }
 
-fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl FnMut(Diagnostic)) {
+fn verify_markup_comment(
+    db: &Database,
+    bib: Option<&Bibliography>,
+    buf: &[u8],
+    span: Span,
+    mut diag: impl FnMut(Diagnostic),
+) {
     fn ensure_surrounding_space(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
         if i.checked_sub(1)
             .map(|j| buf[j])
@@ -455,7 +473,11 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
                         diag(Diagnostic::BibEscape(i as u32, sp))
                     }
                 }
-                // todo: check bib tag
+                if let Some(bib) = bib {
+                    if !bib.contains(sp.as_ref(buf)) {
+                        diag(Diagnostic::UndefinedBibTag(sp))
+                    }
+                }
             }
         }
     }
@@ -464,5 +486,47 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
     }
     if let Some(i) = in_html {
         diag(Diagnostic::UnclosedHtml(i as u32, span.end))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Bibliography(HashSet<Box<[u8]>>);
+
+#[derive(Debug, Default)]
+pub struct Bibliography2 {
+    pub base: Bibliography,
+    pub ext: Option<Bibliography>,
+}
+
+impl From<Bibliography> for Bibliography2 {
+    fn from(base: Bibliography) -> Self {
+        Self { base, ext: None }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BibError {
+    DuplicateBib(Span, Span),
+}
+
+impl Bibliography {
+    pub fn parse(text: &[u8], diags: &mut Vec<BibError>) -> Self {
+        lazy_static::lazy_static! {
+            static ref A_NAME: Regex =
+                Regex::new("(?i-u)<a[[:space:]]name=['\"]?([^&>]*?)['\"]?>").unwrap();
+        }
+        let mut bib = HashMap::default();
+        for captures in A_NAME.captures_iter(text) {
+            let m = captures.get(0).unwrap();
+            let sp = Span::new(m.start(), m.end());
+            if let Some(sp2) = bib.insert(captures.get(1).unwrap().as_bytes().into(), sp) {
+                diags.push(BibError::DuplicateBib(sp2, sp))
+            }
+        }
+        Self(bib.into_iter().map(|x| x.0).collect())
+    }
+
+    pub fn contains(&self, tag: &[u8]) -> bool {
+        self.0.contains(tag)
     }
 }

@@ -911,7 +911,14 @@ impl Database {
         if types.contains(&DiagnosticClass::VerifyMarkup) {
             self.scope_pass();
             self.typesetting_pass();
-            diags.extend(self.verify_markup(VerifyMarkup::default()));
+            // let file1 = std::fs::read("../mm/mmset.raw.html").unwrap();
+            // let file2 = std::fs::read("../mm/mmhil.html").unwrap();
+            // let bib = Bibliography2 {
+            //     base: Bibliography::parse(&file1, &mut vec![]),
+            //     ext: Some(Bibliography::parse(&file2, &mut vec![])),
+            // };
+            // diags.extend(self.verify_markup(VerifyMarkup::default(), Some(&bib)));
+            diags.extend(self.verify_markup(VerifyMarkup::default(), None));
         }
         time(&self.options.clone(), "diag", move || {
             diag::to_annotations(self.parse_result(), &mut lc, diags, f)
