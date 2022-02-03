@@ -25,7 +25,8 @@ use crate::Span;
 pub enum CommentItem {
     /// A piece of regular text. The characters in the buffer at the given
     /// span should be interpreted literally, except for the escapes.
-    /// Use `unescape_text` to strip the text escapes.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Note that `[` can also appear unescaped.
     Text(Span),
     /// A paragraph break, caused by two or more consecutive newlines in the input.
     /// This is a zero-length item (all characters will be present in `Text` nodes
@@ -41,13 +42,15 @@ pub enum CommentItem {
     EndMathMode(usize),
     /// A single math token. After unescaping this should correspond to a `$c` or `$v` statement
     /// in the database.
-    /// Use `unescape_math` to strip the escapes.
+    /// Use `unescape_math` to strip the escape character `` ` ``.
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Note that `[` and `~` can also appear unescaped.
     Label(usize, Span),
     /// A link to a web site URL. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Note that `[` and `~` can also appear unescaped.
     Url(usize, Span),
     /// The `<HTML>` keyword, which starts HTML mode
     /// (it doesn't actually put `<HTML>` in the output).
@@ -68,37 +71,50 @@ pub enum CommentItem {
     BibTag(Span),
 }
 
+#[inline]
+fn unescape(mut buf: &[u8], out: &mut Vec<u8>, is_escape: impl FnOnce(u8) -> bool + Copy) {
+    while let Some(n) = buf.iter().position(|&c| is_escape(c)) {
+        out.extend_from_slice(&buf[..=n]);
+        if buf.get(n + 1) == Some(&buf[n]) {
+            buf = &buf[n + 2..];
+        } else {
+            // this will not normally happen, but in some cases unescaped escapes
+            // are left uninterpreted because they appear in invalid position,
+            // and in that case they should be left as is
+            buf = &buf[n + 1..];
+        }
+    }
+    out.extend_from_slice(buf);
+}
+
+/// Returns true if this is a character that is escaped in [`CommentItem::Text`],
+/// [`CommentItem::Label`] and [`CommentItem::Url`] fields,
+/// meaning that doubled occurrences are turned into single occurrences.
+#[inline]
+#[must_use]
+pub const fn is_text_escape(c: u8) -> bool {
+    matches!(c, b'`' | b'[' | b'~')
+}
+
+/// Returns true if this is a character that is escaped in [`CommentItem::MathToken`] fields,
+/// meaning that doubled occurrences are turned into single occurrences.
+#[inline]
+#[must_use]
+pub const fn is_math_escape(c: u8) -> bool {
+    c == b'`'
+}
+
 impl CommentItem {
     /// Remove text escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
-    pub fn unescape_text(mut buf: &[u8], out: &mut Vec<u8>) {
-        while let Some(n) = buf.iter().position(|&c| matches!(c, b'`' | b'[' | b'~')) {
-            out.extend_from_slice(&buf[..=n]);
-            if buf.get(n + 1) == Some(&buf[n]) {
-                buf = &buf[n + 2..];
-            } else {
-                // this will not normally happen, but in some cases unescaped escapes
-                // are left uninterpreted because they appear in invalid position,
-                // and in that case they should be left as is
-                buf = &buf[n + 1..];
-            }
-        }
-        out.extend_from_slice(buf);
+    pub fn unescape_text(buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, is_text_escape)
     }
 
     /// Remove math escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::MathToken`] field.
-    pub fn unescape_math(mut buf: &[u8], out: &mut Vec<u8>) {
-        while let Some(n) = buf.iter().position(|&c| c == b'`') {
-            out.extend_from_slice(&buf[..=n]);
-            if buf.get(n + 1) == Some(&buf[n]) {
-                buf = &buf[n + 2..];
-            } else {
-                // This should never happen if we are given `MathToken` text
-                buf = &buf[n + 1..];
-            }
-        }
-        out.extend_from_slice(buf);
+    pub fn unescape_math(buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, is_math_escape)
     }
 
     const fn token(math: bool, span: Span) -> Self {
@@ -276,8 +292,19 @@ impl<'a> CommentParser<'a> {
             self.pos += 1;
         }
         let label_start = self.pos;
-        while matches!(self.buf.get(self.pos), Some(c) if !c.is_ascii_whitespace()) {
-            self.pos += 1;
+        while let Some(&c) = self.buf.get(self.pos) {
+            match c {
+                b' ' | b'\n' => break,
+                b'[' | b'`' if self.buf.get(self.pos + 1) == Some(&c) => self.pos += 2,
+                b'`' => break,
+                b'[' if self.parse_bib().is_some() => break,
+                b'<' if self.buf[self.pos..].starts_with(b"<HTML>")
+                    || self.buf[self.pos..].starts_with(b"</HTML>") =>
+                {
+                    break
+                }
+                _ => self.pos += 1,
+            }
         }
         let label = &self.buf[label_start..self.pos];
         if label.starts_with(b"http://")

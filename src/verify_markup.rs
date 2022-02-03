@@ -3,7 +3,7 @@ use std::ops::Range;
 use regex::bytes::Regex;
 
 use crate::{
-    comment_parser::{CommentItem, CommentParser, Date, Parenthetical},
+    comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical},
     diag::Diagnostic,
     parser::HeaderComment,
     scopeck::Hyp,
@@ -287,7 +287,7 @@ impl Database {
                 if self.name_result().lookup_symbol(tk).is_none() {
                     diags.push((
                         StatementAddress::new(*seg_id, NO_STATEMENT),
-                        Diagnostic::UndefinedToken(*sp),
+                        Diagnostic::UndefinedToken(*sp, tk.clone()),
                     ))
                 }
             }
@@ -377,7 +377,7 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
         let mut i = sp.start as usize;
         while i < sp.end as usize {
             let c = buf[i];
-            if matches!(c, b'`' | b'[' | b'~') {
+            if is_text_escape(c) {
                 if buf.get(i + 1) == Some(&c) {
                     i += 1;
                 } else {
@@ -388,25 +388,29 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
         }
     }
 
+    fn check_uninterpreted_html(buf: &[u8], sp: Span, diag: &mut impl FnMut(Diagnostic)) {
+        lazy_static::lazy_static! {
+            static ref HTML: Regex = Regex::new("(?i-u)</?HTML>").unwrap();
+        }
+        let text = sp.as_ref(buf);
+        if HTML.is_match(text) {
+            if let Some(m) = HTML.find(text) {
+                diag(Diagnostic::UninterpretedHtml(Span::new2(
+                    sp.start + m.start() as u32,
+                    sp.start + m.end() as u32,
+                )))
+            }
+        }
+    }
+
     let mut temp_buffer = vec![];
     let mut in_math = None;
     let mut in_html = None;
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
-                lazy_static::lazy_static! {
-                    static ref HTML: Regex = Regex::new("(?i-u)</?HTML>").unwrap();
-                }
                 check_uninterpreted_escapes(buf, sp, &mut diag);
-                let text = sp.as_ref(buf);
-                if HTML.is_match(text) {
-                    if let Some(m) = HTML.find(text) {
-                        diag(Diagnostic::UninterpretedHtml(Span::new2(
-                            sp.start + m.start() as u32,
-                            sp.start + m.end() as u32,
-                        )))
-                    }
-                }
+                check_uninterpreted_html(buf, sp, &mut diag);
             }
             CommentItem::StartMathMode(i) | CommentItem::EndMathMode(i) => {
                 in_math = match in_math {
@@ -419,12 +423,22 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
                 temp_buffer.clear();
                 CommentItem::unescape_math(sp.as_ref(buf), &mut temp_buffer);
                 if db.name_result().lookup_symbol(&temp_buffer).is_none() {
-                    diag(Diagnostic::UndefinedToken(sp))
+                    diag(Diagnostic::UndefinedToken(sp, (&*temp_buffer).into()))
                 }
             }
             CommentItem::Label(i, sp) | CommentItem::Url(i, sp) => {
                 ensure_surrounding_space(buf, i, &mut diag);
                 check_uninterpreted_escapes(buf, sp, &mut diag);
+                check_uninterpreted_html(buf, sp, &mut diag);
+                if matches!(item, CommentItem::Label(..)) {
+                    temp_buffer.clear();
+                    CommentItem::unescape_text(sp.as_ref(buf), &mut temp_buffer);
+                    if temp_buffer.is_empty() {
+                        diag(Diagnostic::EmptyLabel(i as u32))
+                    } else if db.name_result().lookup_label(&temp_buffer).is_none() {
+                        diag(Diagnostic::UndefinedToken(sp, (&*temp_buffer).into()))
+                    }
+                }
             }
             CommentItem::StartHtml(i) => in_html = Some(i),
             CommentItem::EndHtml(_) => in_html = None,
@@ -432,9 +446,17 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
             | CommentItem::StartSubscript(_)
             | CommentItem::EndSubscript(_)
             | CommentItem::StartItalic(_)
-            | CommentItem::EndItalic(_)
-            // todo: check bib tag
-            | CommentItem::BibTag(_) => {}
+            | CommentItem::EndItalic(_) => {}
+            CommentItem::BibTag(sp) => {
+                // Escapes in this position don't work properly in metamath.exe,
+                // so warn on any use, not just unescaped
+                for i in sp.start as usize..sp.end as usize {
+                    if matches!(buf[i], b'`' | b'~') {
+                        diag(Diagnostic::BibEscape(i as u32, sp))
+                    }
+                }
+                // todo: check bib tag
+            }
         }
     }
     if let Some(i) = in_math {

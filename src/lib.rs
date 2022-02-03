@@ -37,6 +37,7 @@
     clippy::inline_always,
     clippy::missing_errors_doc,
     clippy::module_name_repetitions,
+    clippy::needless_range_loop,
     clippy::option_if_let_else,
     clippy::redundant_pub_crate,
     clippy::semicolon_if_nothing_returned,

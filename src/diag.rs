@@ -119,6 +119,7 @@ pub enum Diagnostic {
     BadExplicitLabel(Token),
     BadFloating,
     BadLabel(Span),
+    BibEscape(u32, Span),
     ChainBackref(Span),
     CommandExpectedAs(Span),
     CommandExpectedString(Span),
@@ -137,6 +138,7 @@ pub enum Diagnostic {
     DuplicateMarkupDef(MarkupKind, GlobalSpan, Span),
     EmptyFilename,
     EmptyMathString,
+    EmptyLabel(u32),
     EssentialAtTopLevel,
     ExprNotConstantPrefix(TokenIndex),
     FilenameDollar,
@@ -209,7 +211,7 @@ pub enum Diagnostic {
     UnclosedMathMarkup(u32, u32),
     UnclosedProof,
     UnconventionalAxiomLabel(Span),
-    UndefinedToken(Span),
+    UndefinedToken(Span, Token),
     UninterpretedEscape(u32),
     UninterpretedHtml(Span),
     UnknownLabel(Span),
@@ -374,6 +376,21 @@ impl Diagnostic {
                 stmt,
                 *lbl,
             )]),
+            &BibEscape(index, span) => {
+                notes = &["Avoid uses of escape characters in bibliography tags \
+                    since they break regex-based implementations"];
+                ("Invalid escape character".into(), vec![(
+                    AnnotationType::Warning,
+                    "Use of ~ or ` in a bibliography tag".into(),
+                    stmt,
+                    Span::new2(index, index + 1),
+                ), (
+                    AnnotationType::Note,
+                    "computed bibliography span".into(),
+                    stmt,
+                    span,
+                )])
+            }
             ChainBackref(span) => ("Chain backref".into(), vec![(
                 AnnotationType::Error,
                 "Backreference steps are not permitted to have local labels".into(),
@@ -514,6 +531,17 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            &EmptyLabel(index) => {
+                notes = &["empty label references can happen because '~' \
+                    was used at the end of a comment,",
+                    "or before <HTML>, a math string, or a bibliography tag"];
+                ("Empty label reference".into(), vec![(
+                    AnnotationType::Error,
+                    "This references nothing".into(),
+                    stmt,
+                    Span::new2(index, index + 1),
+                )])
+            },
             EssentialAtTopLevel => ("Essential at top level".into(), vec![(
                 AnnotationType::Error,
                 "$e statements must be inside scope brackets, not at the top level".into(),
@@ -1045,7 +1073,7 @@ impl Diagnostic {
                 stmt,
                 *span,
             )]),
-            UndefinedToken(span) => ("Undeclared token".into(), vec![(
+            UndefinedToken(span, tk) => (format!("Undeclared token '{}'", as_str(tk)).into(), vec![(
                 AnnotationType::Warning,
                 "This token was not declared in any $v or $c statement".into(),
                 stmt,

@@ -146,6 +146,32 @@ fn test_math() {
 }
 
 #[test]
+fn edge_cases() {
+    check(b"[", &[Text(Span::new(0, 1))]);
+    check(b"~", &[Label(0, Span::new(1, 1))]);
+    check(b"`", &[StartMathMode(0)]);
+    check(b"~[x", &[Label(0, Span::new(1, 3))]);
+    check(b"~[[x]", &[Label(0, Span::new(1, 5))]);
+    check(
+        b"~[x]",
+        &[Label(0, Span::new(1, 1)), BibTag(Span::new(2, 3))],
+    );
+    check(
+        b"~`x",
+        &[
+            Label(0, Span::new(1, 1)),
+            StartMathMode(1),
+            MathToken(Span::new(2, 3)),
+        ],
+    );
+    check(b"~<HTML>", &[Label(0, Span::new(1, 1)), StartHtml(1)]);
+    check(
+        b"~</HTML>",
+        &[Label(0, Span::new(1, 1)), Text(Span::new(1, 8))],
+    );
+}
+
+#[test]
 fn test_label() {
     check(
         b"See ~ my_thm",
