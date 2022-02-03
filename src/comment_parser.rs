@@ -170,18 +170,16 @@ impl<'a> CommentParser<'a> {
     fn parse_bib(&self) -> Option<Span> {
         let start = self.pos + 1;
         let mut end = start;
-        loop {
-            if let Some(&c) = self.buf.get(end) {
-                if c == b']' {
-                    return Some(Span::new(start, end));
-                }
-                if !c.is_ascii_whitespace() {
-                    end += 1;
-                    continue;
-                }
+        while let Some(&c) = self.buf.get(end) {
+            match c {
+                b']' => return Some(Span::new(start, end)),
+                b'`' if self.buf.get(end + 1) == Some(&c) => end += 2,
+                b'`' => break,
+                _ if c.is_ascii_whitespace() => break,
+                _ => end += 1,
             }
-            return None;
         }
+        None
     }
 
     fn is_subscript(&self) -> Option<()> {
