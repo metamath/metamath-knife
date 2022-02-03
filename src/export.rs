@@ -76,10 +76,13 @@ impl Database {
             as_str(thm_label)
         )?;
         if let Some(comment) = stmt.associated_comment() {
+            lazy_static::lazy_static! {
+                static ref WHITESPACE: Regex = Regex::new(r"\n +").unwrap();
+            }
             let mut span = comment.span();
             span.start += 2;
             span.end -= 3;
-            let cstr = Regex::new(r"\n +").unwrap().replace_all(
+            let cstr = WHITESPACE.replace_all(
                 as_str(span.as_ref(&comment.segment().segment.buffer)),
                 "\n  ",
             );

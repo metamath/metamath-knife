@@ -64,7 +64,7 @@ impl VerifyMarkup {
 
 lazy_static::lazy_static! {
     static ref WINDOWS_RESERVED_NAMES: Regex =
-        Regex::new("(?i)^(?:CON|PRN|AUX|NUL|(?:COM|LPT)[1-9])$").unwrap();
+        Regex::new("(?i-u)^(?:CON|PRN|AUX|NUL|(?:COM|LPT)[1-9])$").unwrap();
 }
 
 impl Database {
@@ -395,7 +395,7 @@ fn verify_markup_comment(db: &Database, buf: &[u8], span: Span, mut diag: impl F
         match item {
             CommentItem::Text(sp) => {
                 lazy_static::lazy_static! {
-                    static ref HTML: Regex = Regex::new("(?i)</?HTML>").unwrap();
+                    static ref HTML: Regex = Regex::new("(?i-u)</?HTML>").unwrap();
                 }
                 check_uninterpreted_escapes(buf, sp, &mut diag);
                 let text = sp.as_ref(buf);
