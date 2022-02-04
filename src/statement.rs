@@ -94,6 +94,18 @@ impl Span {
         self.end == 0
     }
 
+    /// Get the length of the span.
+    #[must_use]
+    pub const fn len(self) -> usize {
+        self.end as usize - self.start as usize
+    }
+
+    /// Is this an empty span?
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.start == self.end
+    }
+
     /// Given a position span, extract the corresponding characters from a
     /// buffer.
     #[must_use]
@@ -567,6 +579,26 @@ impl<'a> StatementRef<'a> {
         self.segment.span_pool[self.statement.proof_start + ix as usize]
     }
 
+    /// Get the list of spans of tokens in the proof.
+    #[must_use]
+    pub fn proof_spans(&self) -> &'a [Span] {
+        &self.segment.segment.span_pool[self.statement.proof_start..self.statement.proof_end]
+    }
+
+    /// Returns an iterator over the statements referenced in the proof.
+    #[must_use]
+    pub fn use_iter(&self) -> UseIter<'a> {
+        let spans = self.proof_spans();
+        let mut iter = spans.iter();
+        if spans.get(0).map(|sp| sp.as_ref(&self.segment.buffer)) == Some(b"(") {
+            iter.next();
+        }
+        UseIter {
+            iter,
+            buf: &self.segment.segment.buffer,
+        }
+    }
+
     /// Given an index into this statement's math string, get a reference to the
     /// math token.
     #[must_use]
@@ -729,5 +761,27 @@ impl<'a> Iterator for TokenIter<'a> {
                 },
             }
         })
+    }
+}
+
+/// An iterator over the statements referenced in a proof.
+/// (Supports normal and compressed proofs; for packed/explicit proofs the
+/// returned tokens must be parsed to remove the extra fields.)
+#[derive(Debug, Clone)]
+pub struct UseIter<'a> {
+    buf: &'a [u8],
+    iter: std::slice::Iter<'a, Span>,
+}
+
+impl<'a> Iterator for UseIter<'a> {
+    type Item = (Span, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let sp = *self.iter.next()?;
+        let tk = sp.as_ref(self.buf);
+        if tk == b")" {
+            return None;
+        }
+        Some((sp, tk))
     }
 }
