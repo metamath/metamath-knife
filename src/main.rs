@@ -5,11 +5,14 @@
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
-use metamath_knife::diag::DiagnosticClass;
+use metamath_knife::diag::{BibError, DiagnosticClass};
+use metamath_knife::verify_markup::{Bibliography, Bibliography2};
+use metamath_knife::SourceInfo;
 use simple_logger::SimpleLogger;
 use std::io;
 use std::mem;
 use std::str::FromStr;
+use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val)
@@ -46,6 +49,7 @@ fn main() {
         (@arg jobs: -j --jobs +takes_value validator(positive_integer)
             "Number of threads to use for verification")
         (@arg export: -e --export [LABEL] ... "Output a proof file")
+        (@arg biblio: --biblio [FILE] ... "Supply a bibliography file for verify-markup")
     );
 
     #[cfg(feature = "dot")]
@@ -109,20 +113,52 @@ fn main() {
             types.push(DiagnosticClass::Typesetting);
         }
 
-        if matches.is_present("verify_markup") {
-            types.push(DiagnosticClass::VerifyMarkup);
-        }
-
         if matches.is_present("verify_parse_stmt") {
             db.stmt_parse_pass();
             db.verify_parse_stmt();
         }
 
-        let count = db
-            .diag_notations(&types, |snippet| {
+        let diags = db.diag_notations(&types);
+        let mut count = db
+            .render_diags(diags, |snippet| {
                 println!("{}", DisplayList::from(snippet));
             })
             .len();
+
+        if matches.is_present("verify_markup") {
+            db.scope_pass();
+            db.typesetting_pass();
+
+            let sources = matches.values_of("biblio").map_or_else(Vec::new, |vals| {
+                assert!(vals.len() <= 2, "expected at most 2 bibliography files");
+                vals.map(|val| {
+                    let file = std::fs::read(val).unwrap();
+                    SourceInfo::new(val.to_owned(), Arc::new(file))
+                })
+                .collect()
+            });
+            let mut bib_diags = vec![];
+            let mut bibs = sources
+                .iter()
+                .map(|source| Bibliography::parse(source, &mut bib_diags));
+            let bib = bibs.next().map(|base| Bibliography2 {
+                base,
+                ext: bibs.next(),
+            });
+
+            count += BibError::render_list(&bib_diags, |snippet| {
+                println!("{}", DisplayList::from(snippet));
+            })
+            .len();
+
+            let diags = db.verify_markup(bib.as_ref());
+            count += db
+                .render_diags(diags, |snippet| {
+                    println!("{}", DisplayList::from(snippet));
+                })
+                .len();
+        }
+
         println!("{} diagnostics issued.", count);
 
         if matches.is_present("print_grammar") {

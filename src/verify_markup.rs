@@ -1,67 +1,25 @@
+//! Verification of comment markup and other niceties for HTML generation.
+//!
+//! This is a clone of metamath.exe's `VERIFY MARKUP` command, although the
+//! implementation is somewhat more robust. The intention is to use these
+//! checks for checking the main databases that appear on the Metamath website,
+//! such as [set.mm](https://github.com/metamath/set.mm/). As such, they are
+//! rather more opinionated than the usual checks (for example, labels should
+//! not use underscores), and they also include a number of set.mm-specific
+//! references, because this is what metamath.exe did. (Ideally, most or all of
+//! these hardcoded references can be replaced by `$j` commands in the future.)
+
 use crate::comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical};
-use crate::diag::Diagnostic;
+use crate::diag::{BibError, Diagnostic};
 use crate::parser::{HeadingComment, HeadingLevel};
 use crate::scopeck::Hyp;
 use crate::segment::{Comparer, SegmentRef};
+use crate::segment_set::SourceInfo;
 use crate::statement::{StatementAddress, NO_STATEMENT};
 use crate::util::{HashMap, HashSet};
 use crate::{Database, Span, StatementRef, StatementType};
 use regex::bytes::Regex;
 use std::ops::Range;
-
-#[derive(Copy, Clone, Debug)]
-pub struct VerifyMarkup {
-    pub check_dates: bool,
-    pub check_external_files: bool,
-    pub check_underscores: bool,
-    pub check_mathbox_ref: bool,
-}
-
-impl Default for VerifyMarkup {
-    fn default() -> Self {
-        Self {
-            check_dates: false,
-            check_external_files: false,
-            check_underscores: true,
-            check_mathbox_ref: true,
-        }
-    }
-}
-
-impl VerifyMarkup {
-    /// Check dates for consistency with the current date (default: false)
-    pub fn check_dates(&mut self, check: bool) -> &mut Self {
-        self.check_dates = check;
-        self
-    }
-
-    /// Check that external files exist (default: false)
-    pub fn check_external_files(&mut self, check: bool) -> &mut Self {
-        self.check_external_files = check;
-        self
-    }
-
-    /// Check labels for underscores (default: true)
-    pub fn check_underscores(&mut self, check: bool) -> &mut Self {
-        self.check_underscores = check;
-        self
-    }
-
-    /// Check for mathbox cross-references (default: true)
-    pub fn check_mathbox_ref(&mut self, check: bool) -> &mut Self {
-        self.check_mathbox_ref = check;
-        self
-    }
-
-    /// Run the verify markup pass on the given database.
-    pub fn run(
-        self,
-        db: &Database,
-        bib: Option<&Bibliography2>,
-    ) -> Vec<(StatementAddress, Diagnostic)> {
-        db.verify_markup(self, bib)
-    }
-}
 
 lazy_static::lazy_static! {
     static ref WINDOWS_RESERVED_NAMES: Regex =
@@ -75,7 +33,6 @@ impl Database {
     #[must_use]
     pub fn verify_markup(
         &self,
-        opts: VerifyMarkup,
         bib2: Option<&Bibliography2>,
     ) -> Vec<(StatementAddress, Diagnostic)> {
         let mut diags = vec![];
@@ -99,7 +56,7 @@ impl Database {
         let mut cur_mbox = None;
         let mut mbox_map = HashMap::default();
         for stmt in self.statements() {
-            if opts.check_underscores && stmt.label().contains(&b'_') {
+            if stmt.label().contains(&b'_') {
                 diags.push((
                     stmt.address(),
                     Diagnostic::LabelContainsUnderscore(stmt.label_span()),
@@ -537,12 +494,24 @@ fn verify_markup_comment(
     }
 }
 
-#[derive(Debug, Default)]
+/// A parsed bibliography file. A bibliography file is nothing more than an HTML
+/// file with some anchors (`<A NAME="foo">`) in it; the anchor names are
+/// scraped so that we can cross reference them against bibliography tags
+/// `[foo]` appearing in comments.
+#[derive(Debug)]
 pub struct Bibliography(HashSet<Box<[u8]>>);
 
-#[derive(Debug, Default)]
+/// A pair of bibliography files. This is used to support `set.mm`, which
+/// contains two separate-ish databases inside one metamath file. Bibliography
+/// references in the first part of the file refer to the
+/// [`TypesettingData::html_bibliography`],
+/// while references after the [`TypesettingData::ext_html_label`] go to the
+/// [`TypesettingData::ext_html_bibliography`].
+#[derive(Debug)]
 pub struct Bibliography2 {
+    /// The main bibliography file.
     pub base: Bibliography,
+    /// The "extended" bibliography file.
     pub ext: Option<Bibliography>,
 }
 
@@ -552,28 +521,27 @@ impl From<Bibliography> for Bibliography2 {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum BibError {
-    DuplicateBib(Span, Span),
-}
-
 impl Bibliography {
-    pub fn parse(text: &[u8], diags: &mut Vec<BibError>) -> Self {
+    /// Parse bibliography file data out of the given [`SourceInfo`], and put
+    /// any parse errors in `diags`.
+    pub fn parse<'a>(source: &'a SourceInfo, diags: &mut Vec<(&'a SourceInfo, BibError)>) -> Self {
         lazy_static::lazy_static! {
             static ref A_NAME: Regex =
                 Regex::new("(?i-u)<a[[:space:]]name=['\"]?([^&>]*?)['\"]?>").unwrap();
         }
         let mut bib = HashMap::default();
-        for captures in A_NAME.captures_iter(text) {
+        for captures in A_NAME.captures_iter(&source.text) {
             let m = captures.get(0).unwrap();
             let sp = Span::new(m.start(), m.end());
             if let Some(sp2) = bib.insert(captures.get(1).unwrap().as_bytes().into(), sp) {
-                diags.push(BibError::DuplicateBib(sp2, sp))
+                diags.push((source, BibError::DuplicateBib(sp2, sp)))
             }
         }
         Self(bib.into_iter().map(|x| x.0).collect())
     }
 
+    /// Does this bibliography contain a definition for the given tag?
+    #[must_use]
     pub fn contains(&self, tag: &[u8]) -> bool {
         self.0.contains(tag)
     }

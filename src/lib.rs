@@ -55,7 +55,6 @@ mod segment;
 mod segment_set;
 mod tree;
 mod util;
-mod verify_markup;
 
 pub mod comment_parser;
 pub mod database;
@@ -72,6 +71,7 @@ pub mod scopeck;
 pub mod statement;
 pub mod typesetting;
 pub mod verify;
+pub mod verify_markup;
 
 #[cfg(test)]
 mod comment_parser_tests;
@@ -89,6 +89,7 @@ pub use formula::Formula;
 pub use formula::FormulaRef;
 pub use formula::Label;
 pub use formula::Symbol;
+pub use segment_set::SourceInfo;
 pub use statement::as_str;
 pub use statement::Span;
 pub use statement::StatementRef;

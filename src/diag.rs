@@ -47,8 +47,6 @@ pub enum DiagnosticClass {
     StmtParse,
     /// $t statement parsing result
     Typesetting,
-    /// Errors while verifying markup
-    VerifyMarkup,
 }
 
 /// The three kinds of markup supported by `$t` typesetting comments.
@@ -269,22 +267,20 @@ type AnnInfo<'a> = (
 ///
 /// # Arguments
 ///
-/// * `sset` - Reference to the segment set.
-/// * `infos` - Diagnostic information to display.
+/// * `label`, `infos` - Diagnostic information to display.
 /// * `lc` - A helper struct for keeping track of line numbers in the source file
 /// * `f` - A function for continuation passing style (CPS)
 #[must_use]
-fn make_snippet<T>(
-    sset: &SegmentSet,
-    (label, infos): AnnInfo<'_>,
+fn make_snippet_from<'b, T>(
+    label: &str,
+    infos: impl Iterator<Item = (AnnotationType, Cow<'b, str>, Span, &'b SourceInfo)>,
     footer: &[&str],
     lc: &mut LineCache,
     f: impl for<'a> FnOnce(Snippet<'a>) -> T,
 ) -> T {
     let mut slices = vec![];
     let arena: Arena<String> = Arena::new();
-    for (annotation_type, label, stmt, span) in infos {
-        let source: &SourceInfo = sset.source_info(stmt.segment().id).borrow();
+    for (annotation_type, label, span, source) in infos {
         let offs = (span.start + source.span.start) as usize;
         let (line_start, col) = lc.from_offset(&source.text, offs);
         let end_offs = (span.end + source.span.start) as usize;
@@ -304,7 +300,7 @@ fn make_snippet<T>(
     }
     f(Snippet {
         title: Some(Annotation {
-            label: Some(&label),
+            label: Some(label),
             id: None,
             annotation_type: slices[0].annotations[0].annotation_type,
         }),
@@ -322,6 +318,29 @@ fn make_snippet<T>(
             ..FormatOptions::default()
         },
     })
+}
+
+/// Creates a `Snippet` containing a diagnostic annotation.
+///
+/// # Arguments
+///
+/// * `sset` - Reference to the segment set.
+/// * `infos` - Diagnostic information to display.
+/// * `lc` - A helper struct for keeping track of line numbers in the source file
+/// * `f` - A function for continuation passing style (CPS)
+#[must_use]
+fn make_snippet<T>(
+    sset: &SegmentSet,
+    (label, infos): AnnInfo<'_>,
+    footer: &[&str],
+    lc: &mut LineCache,
+    f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+) -> T {
+    let iter = (infos.into_iter()).map(|(annotation_type, label, stmt, span)| {
+        let source = sset.source_info(stmt.segment().id).borrow();
+        (annotation_type, label, span, source)
+    });
+    make_snippet_from(&label, iter, footer, lc, f)
 }
 
 impl Diagnostic {
@@ -1190,5 +1209,51 @@ impl Diagnostic {
         };
 
         make_snippet(sset, infos, notes, lc, f)
+    }
+}
+
+/// An error during bibliography parsing.
+#[derive(Debug, Clone, Copy)]
+#[allow(missing_docs)]
+pub enum BibError {
+    DuplicateBib(Span, Span),
+}
+
+impl BibError {
+    #[allow(clippy::wrong_self_convention)]
+    fn to_snippet<T>(
+        &self,
+        source: &SourceInfo,
+        lc: &mut LineCache,
+        f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+    ) -> T {
+        let (label, infos): (Cow<'_, str>, Vec<_>) = match self {
+            &BibError::DuplicateBib(span, other) => (
+                "duplicate bibliography anchor".into(),
+                vec![
+                    (
+                        AnnotationType::Warning,
+                        "this anchor has already appeared".into(),
+                        span,
+                    ),
+                    (AnnotationType::Note, "previous occurrence".into(), other),
+                ],
+            ),
+        };
+        let iter = (infos.into_iter())
+            .map(|(annotation_type, label, span)| (annotation_type, label, span, source));
+        make_snippet_from(&label, iter, &[], lc, f)
+    }
+
+    /// Convert a list of diagnostics collected by `diag_notations` to a list of snippets.
+    pub fn render_list<T>(
+        diags: &[(&SourceInfo, BibError)],
+        f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+    ) -> Vec<T> {
+        let mut lc = LineCache::default();
+        diags
+            .iter()
+            .map(move |&(source, ref diag)| diag.to_snippet(source, &mut lc, f))
+            .collect::<Vec<_>>()
     }
 }
