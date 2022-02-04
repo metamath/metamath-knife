@@ -41,7 +41,6 @@ use crate::util::{fast_extend, HashMap, HashSet};
 use crate::{parser, Label};
 use crate::{Database, StatementType};
 use crate::{Formula, StatementRef};
-use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
@@ -301,7 +300,7 @@ fn check_math_symbol(
 ) -> Option<(SymbolType, Atom)> {
     // active global definition?
     if let Some(sdef) = state.gnames.lookup_symbol(&t_ref) {
-        if state.order.cmp(&sdef.address, &t_ref.address) == Ordering::Less {
+        if state.order.lt(&sdef.address, &t_ref.address) {
             return Some((sdef.stype, sdef.atom));
         }
     }
@@ -333,7 +332,7 @@ fn lookup_float<'a>(
 ) -> Option<LocalFloatInfo> {
     // active global definition?
     if let Some(fdef) = state.gnames.lookup_float(&t_ref) {
-        if state.order.cmp(&fdef.address, &s_ref.address()) == Ordering::Less {
+        if state.order.lt(&fdef.address, &s_ref.address()) {
             return Some(LocalFloatInfo {
                 valid: fdef.address.unbounded_range(),
                 typecode: fdef.typecode_atom,
@@ -845,7 +844,7 @@ fn scope_check_variable(state: &mut ScopeState<'_>, sref: StatementRef<'_>) {
             // nested $v, may conflict with an outer scope $v, top level $v/$c,
             // or a _later_ $c
             if let Some(cdef) = state.gnames.lookup_symbol(&tref) {
-                if state.order.cmp(&cdef.address, &tref.address) == Ordering::Less {
+                if state.order.lt(&cdef.address, &tref.address) {
                     push_diagnostic(
                         state,
                         sref.index(),

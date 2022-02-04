@@ -131,6 +131,16 @@ pub(crate) trait Comparer<T> {
     /// Compares two objects, like `Ord::cmp`, but with additional state data
     /// from the comparer that can be used for the ordering.
     fn cmp(&self, left: &T, right: &T) -> Ordering;
+
+    #[inline]
+    fn lt(&self, left: &T, right: &T) -> bool {
+        self.cmp(left, right) == Ordering::Less
+    }
+
+    #[inline]
+    fn le(&self, left: &T, right: &T) -> bool {
+        self.cmp(left, right) != Ordering::Greater
+    }
 }
 
 impl Comparer<SegmentId> for SegmentOrder {
