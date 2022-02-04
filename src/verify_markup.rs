@@ -1,8 +1,8 @@
 use crate::comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical};
 use crate::diag::Diagnostic;
-use crate::parser::HeaderComment;
+use crate::parser::{HeadingComment, HeadingLevel};
 use crate::scopeck::Hyp;
-use crate::segment::SegmentRef;
+use crate::segment::{Comparer, SegmentRef};
 use crate::statement::{StatementAddress, NO_STATEMENT};
 use crate::util::{HashMap, HashSet};
 use crate::{Database, Span, StatementRef, StatementType};
@@ -80,6 +80,7 @@ impl Database {
     ) -> Vec<(StatementAddress, Diagnostic)> {
         let mut diags = vec![];
         let tdata = &**self.typesetting_result();
+        let order = &*self.parse_result().order;
 
         let ext_start = tdata.ext_html_label.as_ref().and_then(|(sp, tk)| {
             if let Some(stmt) = self.name_result().lookup_label(tk) {
@@ -92,8 +93,11 @@ impl Database {
                 None
             }
         });
-        let mut bib = bib2.map(|bib| &bib.base);
 
+        let mut bib = bib2.map(|bib| &bib.base);
+        let mut mbox_start = None;
+        let mut cur_mbox = None;
+        let mut mbox_map = HashMap::default();
         for stmt in self.statements() {
             if opts.check_underscores && stmt.label().contains(&b'_') {
                 diags.push((
@@ -113,6 +117,7 @@ impl Database {
                 ))
             } else if stmt.label() == b"mathbox" {
                 bib = bib2.map(|bib| &bib.base);
+                mbox_start = Some(stmt.address());
             }
             match stmt.statement_type() {
                 StatementType::Axiom => {
@@ -163,7 +168,17 @@ impl Database {
                 }
                 StatementType::HeadingComment(lvl) => {
                     let buf = &stmt.segment.segment.buffer;
-                    if let Some(header) = HeaderComment::parse(buf, lvl, stmt.comment_contents()) {
+                    if let Some(header) = HeadingComment::parse(buf, lvl, stmt.comment_contents()) {
+                        if mbox_start.is_some() && lvl == HeadingLevel::Section {
+                            let span = header.parse_mathbox_header(buf).unwrap_or_else(|| {
+                                diags.push((
+                                    stmt.address(),
+                                    Diagnostic::MathboxHeaderFormat(header.header),
+                                ));
+                                Span::NULL
+                            });
+                            cur_mbox = Some((stmt.address(), span.as_ref(buf)));
+                        }
                         verify_markup_comment(self, bib, buf, header.content, |diag| {
                             diags.push((stmt.address(), diag))
                         })
@@ -171,9 +186,33 @@ impl Database {
                         diags.push((stmt.address(), Diagnostic::HeaderCommentParseError(lvl)))
                     }
                 }
+                StatementType::Provable => {
+                    if let (Some(mbox_start), Some(cur_mbox)) = (mbox_start, cur_mbox) {
+                        for (sp, tk) in stmt.use_iter() {
+                            if let Some(stmt2) = self.name_result().lookup_label(tk) {
+                                let tgt = stmt2.address;
+                                if order.le(&mbox_start, &tgt) && order.lt(&tgt, &cur_mbox.0) {
+                                    diags.push((
+                                        stmt.address(),
+                                        Diagnostic::MathboxCrossReference(Box::new((
+                                            sp,
+                                            stmt.label_span(),
+                                            self.statement_by_address(stmt2.address).label_span(),
+                                            cur_mbox.1.into(),
+                                            <&[_]>::into(mbox_map.get(&tgt).map_or(&[], |x| *x)),
+                                        ))),
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
             if stmt.is_assertion() {
+                if let Some(mbox) = cur_mbox {
+                    mbox_map.insert(stmt.address(), mbox.1);
+                }
                 if matches!(ext_start, Some(a) if a == stmt.address()) {
                     bib = bib2.and_then(|bib| bib.ext.as_ref());
                 }
@@ -319,8 +358,6 @@ impl Database {
         // omitted: check that html_home has HREF="..." and IMG SRC="..."
         // omitted: check that ext_html_home has HREF="..." and IMG SRC="..."
         // omitted: top date check
-
-        // todo: mathbox independence
 
         diags
     }

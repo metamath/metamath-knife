@@ -158,6 +158,8 @@ pub enum Diagnostic {
     LocalLabelAmbiguous(Span),
     LocalLabelDuplicate(Span),
     MarkupNeedsWhitespace(u32),
+    MathboxCrossReference(Box<(Span, Span, Span, Token, Token)>),
+    MathboxHeaderFormat(Span),
     MalformedAdditionalInfo(Span),
     MidStatementCommentMarker(Span),
     MissingContributor,
@@ -679,6 +681,26 @@ impl Diagnostic {
                 "Put spaces around this character".into(),
                 stmt,
                 Span::new2(index, index + 1),
+            )]),
+            MathboxCrossReference(args) => {
+                let (span, this, that, ref this_name, ref that_name) = **args;
+                let ann1 =
+                    if this_name.is_empty() { "theorem defined here".into() }
+                    else { format!("this theorem is in {}'s mathbox", as_str(this_name)).into() };
+                let ann2 =
+                    if that_name.is_empty() { "defined in a different mathbox".into() }
+                    else { format!("defined in {}'s mathbox", as_str(that_name)).into() };
+                ("Mathbox uses a theorem from another mathbox".into(), vec![
+                    (AnnotationType::Warning, ann1, stmt, this),
+                    (AnnotationType::Note, "it refers to a theorem here...".into(), stmt, span),
+                    (AnnotationType::Note, ann2, stmt, that)
+                ])
+            }
+            MathboxHeaderFormat(span) => ("Malformed mathbox header".into(), vec![(
+                AnnotationType::Warning,
+                "Expected 'Mathbox for <name>'".into(),
+                stmt,
+                *span,
             )]),
             MalformedAdditionalInfo(span) => ("Malformed additional info".into(), vec![(
                 AnnotationType::Error,
