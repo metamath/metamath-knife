@@ -381,17 +381,21 @@ fn verify_markup_comment(
     span: Span,
     mut diag: impl FnMut(Diagnostic),
 ) {
-    fn ensure_surrounding_space(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
+    fn ensure_space_before(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
         if i.checked_sub(1)
             .map(|j| buf[j])
             .map_or(false, |c| !c.is_ascii_whitespace())
-            || buf.get(i + 1).map_or(false, |c| !c.is_ascii_whitespace())
         {
             diag(Diagnostic::MarkupNeedsWhitespace(i as u32))
         }
     }
+    fn ensure_space_after(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
+        if buf.get(i + 1).map_or(false, |c| !c.is_ascii_whitespace()) {
+            diag(Diagnostic::MarkupNeedsWhitespace(i as u32))
+        }
+    }
 
-    fn check_uninterpreted_escapes(buf: &[u8], sp: Span, diag: &mut impl FnMut(Diagnostic)) {
+    fn check_uninterpreted_escapes(buf: &[u8], sp: Span, mut diag: impl FnMut(u8, Diagnostic)) {
         let mut i = sp.start as usize;
         while i < sp.end as usize {
             let c = buf[i];
@@ -399,7 +403,7 @@ fn verify_markup_comment(
                 if buf.get(i + 1) == Some(&c) {
                     i += 1;
                 } else {
-                    diag(Diagnostic::UninterpretedEscape(i as u32))
+                    diag(c, Diagnostic::UninterpretedEscape(i as u32))
                 }
             }
             i += 1;
@@ -427,15 +431,21 @@ fn verify_markup_comment(
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
-                check_uninterpreted_escapes(buf, sp, &mut diag);
+                check_uninterpreted_escapes(buf, sp, |c, d| {
+                    // Don't report on unescaped [ in regular text
+                    if c != b'[' {
+                        diag(d)
+                    }
+                });
                 check_uninterpreted_html(buf, sp, &mut diag);
             }
-            CommentItem::StartMathMode(i) | CommentItem::EndMathMode(i) => {
-                in_math = match in_math {
-                    Some(_) => None,
-                    None => Some(i),
-                };
-                ensure_surrounding_space(buf, i, &mut diag)
+            CommentItem::StartMathMode(i) => {
+                in_math = Some(i);
+                ensure_space_after(buf, i, &mut diag)
+            }
+            CommentItem::EndMathMode(i) => {
+                in_math = None;
+                ensure_space_before(buf, i, &mut diag)
             }
             CommentItem::MathToken(sp) => {
                 temp_buffer.clear();
@@ -445,8 +455,9 @@ fn verify_markup_comment(
                 }
             }
             CommentItem::Label(i, sp) | CommentItem::Url(i, sp) => {
-                ensure_surrounding_space(buf, i, &mut diag);
-                check_uninterpreted_escapes(buf, sp, &mut diag);
+                ensure_space_before(buf, i, &mut diag);
+                ensure_space_after(buf, i, &mut diag);
+                check_uninterpreted_escapes(buf, sp, |_, d| diag(d));
                 check_uninterpreted_html(buf, sp, &mut diag);
                 if matches!(item, CommentItem::Label(..)) {
                     temp_buffer.clear();
