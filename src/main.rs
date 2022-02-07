@@ -49,7 +49,8 @@ fn main() {
         (@arg jobs: -j --jobs +takes_value validator(positive_integer)
             "Number of threads to use for verification")
         (@arg export: -e --export [LABEL] ... "Output a proof file")
-        (@arg biblio: --biblio [FILE] ... "Supply a bibliography file for verify-markup")
+        (@arg biblio: --biblio [FILE] ... "Supply a bibliography file for verify-markup\n\
+            Can be used one or two times; the second is for exthtml processing")
     );
 
     #[cfg(feature = "dot")]
