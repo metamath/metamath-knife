@@ -14,6 +14,8 @@
 //! corresponding byte string in the file has to be unescaped before
 //! interpretation, using the [`CommentParser::unescape_text`] and
 //! [`CommentParser::unescape_math`] functions.
+use std::fmt::Display;
+
 use lazy_static::lazy_static;
 use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
 
@@ -540,11 +542,26 @@ impl<'a> Iterator for ParentheticalIter<'a> {
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Date {
     /// A year, which must be a 4 digit number (0-9999).
-    pub year: u32,
+    pub year: u16,
     /// A month, parsed from three letter names: `Jan`, `Feb`, etc. (1-12)
     pub month: u8,
     /// A day, parsed from a 1 or 2 digit number (0-99).
     pub day: u8,
+}
+
+impl Display for Date {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        write!(
+            f,
+            "{day}-{month}-{year:04}",
+            day = self.day,
+            month = MONTHS[(self.month - 1) as usize],
+            year = self.year
+        )
+    }
 }
 
 impl TryFrom<&[u8]> for Date {
