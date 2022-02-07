@@ -71,6 +71,7 @@ pub struct Span {
 
 impl Span {
     /// Coercion from array index pairs.
+    #[inline]
     #[must_use]
     pub const fn new(start: usize, end: usize) -> Span {
         Span {
@@ -80,6 +81,7 @@ impl Span {
     }
 
     /// Variant on `new` taking [`FilePos`] values.
+    #[inline]
     #[must_use]
     pub const fn new2(start: FilePos, end: FilePos) -> Span {
         Span { start, end }
@@ -89,18 +91,21 @@ impl Span {
     pub const NULL: Span = Span::new(0, 0);
 
     /// Checks for the null span, i.e. zero length at offset zero.
+    #[inline]
     #[must_use]
     pub const fn is_null(self) -> bool {
         self.end == 0
     }
 
     /// Get the length of the span.
+    #[inline]
     #[must_use]
     pub const fn len(self) -> usize {
         self.end as usize - self.start as usize
     }
 
     /// Is this an empty span?
+    #[inline]
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.start == self.end
@@ -108,6 +113,7 @@ impl Span {
 
     /// Given a position span, extract the corresponding characters from a
     /// buffer.
+    #[inline]
     #[must_use]
     pub fn as_ref(self, buf: &[u8]) -> &[u8] {
         &buf[self.start as usize..self.end as usize]
@@ -142,6 +148,7 @@ pub struct StatementAddress {
 
 impl StatementAddress {
     /// Constructs a statement address from its parts.
+    #[inline]
     #[must_use]
     pub const fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
         StatementAddress { segment_id, index }
@@ -151,6 +158,7 @@ impl StatementAddress {
 impl StatementAddress {
     /// Convert a statement address into a statement range from here to the
     /// logical end of the database.
+    #[inline]
     #[must_use]
     pub const fn unbounded_range(self) -> GlobalRange {
         GlobalRange {
@@ -175,6 +183,7 @@ pub struct TokenAddress {
 
 impl TokenAddress {
     /// Constructs a token address from parts.
+    #[inline]
     #[must_use]
     pub const fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
         TokenAddress {
@@ -380,18 +389,21 @@ impl Default for StatementType {
 
 impl StatementType {
     /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.
+    #[inline]
     #[must_use]
     pub const fn is_assertion(self) -> bool {
         matches!(self, Axiom | Provable)
     }
 
     /// Returns true if this statement has a label before the keyword: `$a $p $e $f`.
+    #[inline]
     #[must_use]
     pub const fn takes_label(self) -> bool {
         matches!(self, Axiom | Provable | Essential | Floating)
     }
 
     /// Returns true if this statement is followed by math tokens: `$a $p $e $f $d $c $v`.
+    #[inline]
     #[must_use]
     pub const fn takes_math(self) -> bool {
         matches!(
@@ -457,30 +469,35 @@ pub struct StatementRef<'a> {
 
 impl<'a> StatementRef<'a> {
     /// Fetch the segment-local index of this statement.
+    #[inline]
     #[must_use]
     pub const fn index(self) -> StatementIndex {
         self.index
     }
 
     /// Back up from a statement reference to a segment reference.
+    #[inline]
     #[must_use]
     pub const fn segment(self) -> SegmentRef<'a> {
         self.segment
     }
 
     /// Gets the type of this statement.  May be a pseudo-type.
+    #[inline]
     #[must_use]
     pub const fn statement_type(self) -> StatementType {
         self.statement.stype
     }
 
     /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.
+    #[inline]
     #[must_use]
     pub const fn is_assertion(self) -> bool {
         self.statement.stype.is_assertion()
     }
 
     /// Obtain a globally-meaningful address for this statement.
+    #[inline]
     #[must_use]
     pub const fn address(self) -> StatementAddress {
         StatementAddress {
@@ -494,6 +511,7 @@ impl<'a> StatementRef<'a> {
     ///
     /// This is the end range of a hypothesis or variable defined in this
     /// statement.
+    #[inline]
     #[must_use]
     pub const fn scope_range(self) -> GlobalRange {
         GlobalRange {
@@ -503,12 +521,14 @@ impl<'a> StatementRef<'a> {
     }
 
     /// True if there is a `${ $}` group wrapping this statement.
+    #[inline]
     #[must_use]
     pub const fn in_group(self) -> bool {
         self.statement.group_end != NO_STATEMENT
     }
 
     /// Obtain the span corresponding to the statment label.
+    #[inline]
     #[must_use]
     pub const fn label_span(&self) -> Span {
         self.statement.label
@@ -518,6 +538,7 @@ impl<'a> StatementRef<'a> {
     ///
     /// This will be non-null iff the type requires a label; missing labels for
     /// types which use them cause an immediate rewrite to `Invalid`.
+    #[inline]
     #[must_use]
     pub fn label(&self) -> &'a [u8] {
         self.label_span().as_ref(&self.segment.segment.buffer)
@@ -540,6 +561,7 @@ impl<'a> StatementRef<'a> {
     /// Does not include trailing white space or surrounding comments; will
     /// include leading white space, so a concatenation of spans for all
     /// statements will reconstruct the segment source.
+    #[inline]
     #[must_use]
     pub const fn span_full(&self) -> Span {
         self.statement.span
@@ -548,18 +570,21 @@ impl<'a> StatementRef<'a> {
     /// The textual span of this statement within the segment's buffer.
     ///
     /// Does not include surrounding white space or comments, unlike `span_full()`.
+    #[inline]
     #[must_use]
     pub const fn span(&self) -> Span {
         Span::new2(self.statement.label.start, self.span_full().end)
     }
 
     /// Count of symbols in this statement's math string.
+    #[inline]
     #[must_use]
     pub const fn math_len(&self) -> TokenIndex {
         (self.statement.proof_start - self.statement.math_start) as TokenIndex
     }
 
     /// Count of tokens in this statement's proof string.
+    #[inline]
     #[must_use]
     pub const fn proof_len(&self) -> TokenIndex {
         (self.statement.proof_end - self.statement.proof_start) as TokenIndex
@@ -567,6 +592,7 @@ impl<'a> StatementRef<'a> {
 
     /// Given an index into this statement's math string, find a textual span
     /// into the segment buffer.
+    #[inline]
     #[must_use]
     pub fn math_span(&self, ix: TokenIndex) -> Span {
         self.segment.span_pool[self.statement.math_start + ix as usize]
@@ -574,12 +600,14 @@ impl<'a> StatementRef<'a> {
 
     /// Given an index into this statement's proof string, find a textual span
     /// into the segment buffer.
+    #[inline]
     #[must_use]
     pub fn proof_span(&self, ix: TokenIndex) -> Span {
         self.segment.span_pool[self.statement.proof_start + ix as usize]
     }
 
     /// Get the list of spans of tokens in the proof.
+    #[inline]
     #[must_use]
     pub fn proof_spans(&self) -> &'a [Span] {
         &self.segment.segment.span_pool[self.statement.proof_start..self.statement.proof_end]
@@ -613,6 +641,7 @@ impl<'a> StatementRef<'a> {
     }
 
     /// Obtains textual proof data by token index.
+    #[inline]
     #[must_use]
     pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
         self.proof_span(ix).as_ref(&self.segment.segment.buffer)
