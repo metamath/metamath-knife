@@ -93,7 +93,7 @@ impl PartialEq for LongBuf {
 ///
 /// _This is likely to change when line number calculation is added._
 #[derive(Debug)]
-pub(crate) struct SourceInfo {
+pub struct SourceInfo {
     /// Name of the source file as loaded.
     pub(crate) name: String,
     /// Reference to the full unsliced source buffer.
@@ -101,6 +101,18 @@ pub(crate) struct SourceInfo {
     /// Span of the parser input within the file; all spans reported by the
     /// parser are relative to this.
     pub(crate) span: Span,
+}
+
+impl SourceInfo {
+    /// Build a new `SourceInfo` from a text buffer.
+    #[must_use]
+    pub fn new(name: String, text: Arc<Vec<u8>>) -> Self {
+        Self {
+            span: Span::new(0, text.len()),
+            name,
+            text,
+        }
+    }
 }
 
 /// The result of parsing one or more segments from a single slice of a source
@@ -207,6 +219,12 @@ impl SegmentSet {
     /// Fetches a handle to a statement given a global address.
     pub(crate) fn statement(&self, addr: StatementAddress) -> StatementRef<'_> {
         self.segment(addr.segment_id).statement(addr.index)
+    }
+
+    /// Fetches a handle to a statement given a global address,
+    /// or return a dummy statement when the index is `NO_STATEMENT`.
+    pub(crate) fn statement_or_dummy(&self, addr: StatementAddress) -> StatementRef<'_> {
+        self.segment(addr.segment_id).statement_or_dummy(addr.index)
     }
 
     /// Reports any parse errors associated with loaded segments.

@@ -19,7 +19,6 @@ use crate::tree::Tree;
 use crate::Database;
 use crate::StatementRef;
 use crate::StatementType;
-use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -430,7 +429,7 @@ impl Outline {
             let mut last_node_id = node_id;
             for this_node_id in self.tree.children_iter(node_id) {
                 let node = &self.tree[this_node_id];
-                if order.cmp(&stmt_address, &node.stmt_address) == Ordering::Less {
+                if order.lt(&stmt_address, &node.stmt_address) {
                     if last_node_id == node_id {
                         return node_id;
                     }
