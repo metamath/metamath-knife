@@ -716,6 +716,15 @@ impl Database {
         self.parse_result().statement(addr)
     }
 
+    /// Get the name of the source file for a given statement.
+    #[must_use]
+    pub fn statement_source_name(&self, addr: StatementAddress) -> String {
+        self.parse_result()
+            .source_info(addr.segment_id)
+            .name
+            .clone()
+    }
+
     /// Iterates over all the statements
     #[must_use]
     pub fn statements(&self) -> impl DoubleEndedIterator<Item = StatementRef<'_>> + Clone + '_ {
