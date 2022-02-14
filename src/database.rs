@@ -718,11 +718,10 @@ impl Database {
 
     /// Get the name of the source file for a given statement.
     #[must_use]
-    pub fn statement_source_name(&self, addr: StatementAddress) -> String {
-        self.parse_result()
+    pub fn statement_source_name(&self, addr: StatementAddress) -> &'_ str {
+        &self.parse_result()
             .source_info(addr.segment_id)
             .name
-            .clone()
     }
 
     /// Iterates over all the statements
