@@ -719,7 +719,7 @@ impl Database {
     /// Get the name of the source file for a given statement.
     #[inline]
     #[must_use]
-    pub fn statement_source_name(&self, addr: StatementAddress) -> &'_ str {
+    pub fn statement_source_name(&self, addr: StatementAddress) -> &str {
         &self.parse_result().source_info(addr.segment_id).name
     }
 
