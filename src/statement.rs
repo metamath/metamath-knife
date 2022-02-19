@@ -34,7 +34,7 @@
 use std::ops::Deref;
 
 use crate::{
-    comment_parser::{CommentParser, Discouragements},
+    comment_parser::{CommentParser, Discouragements, ParentheticalIter},
     parser::HeadingLevel,
     segment::SegmentRef,
 };
@@ -71,6 +71,7 @@ pub struct Span {
 
 impl Span {
     /// Coercion from array index pairs.
+    #[inline]
     #[must_use]
     pub const fn new(start: usize, end: usize) -> Span {
         Span {
@@ -80,6 +81,7 @@ impl Span {
     }
 
     /// Variant on `new` taking [`FilePos`] values.
+    #[inline]
     #[must_use]
     pub const fn new2(start: FilePos, end: FilePos) -> Span {
         Span { start, end }
@@ -89,13 +91,29 @@ impl Span {
     pub const NULL: Span = Span::new(0, 0);
 
     /// Checks for the null span, i.e. zero length at offset zero.
+    #[inline]
     #[must_use]
     pub const fn is_null(self) -> bool {
         self.end == 0
     }
 
+    /// Get the length of the span.
+    #[inline]
+    #[must_use]
+    pub const fn len(self) -> usize {
+        self.end as usize - self.start as usize
+    }
+
+    /// Is this an empty span?
+    #[inline]
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.start == self.end
+    }
+
     /// Given a position span, extract the corresponding characters from a
     /// buffer.
+    #[inline]
     #[must_use]
     pub fn as_ref(self, buf: &[u8]) -> &[u8] {
         &buf[self.start as usize..self.end as usize]
@@ -130,6 +148,7 @@ pub struct StatementAddress {
 
 impl StatementAddress {
     /// Constructs a statement address from its parts.
+    #[inline]
     #[must_use]
     pub const fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
         StatementAddress { segment_id, index }
@@ -139,6 +158,7 @@ impl StatementAddress {
 impl StatementAddress {
     /// Convert a statement address into a statement range from here to the
     /// logical end of the database.
+    #[inline]
     #[must_use]
     pub const fn unbounded_range(self) -> GlobalRange {
         GlobalRange {
@@ -163,6 +183,7 @@ pub struct TokenAddress {
 
 impl TokenAddress {
     /// Constructs a token address from parts.
+    #[inline]
     #[must_use]
     pub const fn new3(segment_id: SegmentId, index: StatementIndex, token: TokenIndex) -> Self {
         TokenAddress {
@@ -205,6 +226,9 @@ pub type TokenPtr<'a> = &'a [u8];
 pub fn as_str(ptr: TokenPtr<'_>) -> &str {
     std::str::from_utf8(ptr).expect("TokenPtr is supposed to be UTF8")
 }
+
+/// Locate a span uniquely in the database by appending a segment ID.
+pub type GlobalSpan = (SegmentId, Span);
 
 /// Extracted data for a top-level `$d` statement in a segment.
 #[derive(Debug)]
@@ -365,18 +389,21 @@ impl Default for StatementType {
 
 impl StatementType {
     /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.
+    #[inline]
     #[must_use]
     pub const fn is_assertion(self) -> bool {
         matches!(self, Axiom | Provable)
     }
 
     /// Returns true if this statement has a label before the keyword: `$a $p $e $f`.
+    #[inline]
     #[must_use]
     pub const fn takes_label(self) -> bool {
         matches!(self, Axiom | Provable | Essential | Floating)
     }
 
     /// Returns true if this statement is followed by math tokens: `$a $p $e $f $d $c $v`.
+    #[inline]
     #[must_use]
     pub const fn takes_math(self) -> bool {
         matches!(
@@ -420,6 +447,17 @@ pub(crate) struct Statement {
     pub(crate) proof_end: usize,
 }
 
+pub(crate) const DUMMY_STATEMENT: Statement = Statement {
+    stype: StatementType::Invalid,
+    span: Span::NULL,
+    label: Span::NULL,
+    group: NO_STATEMENT,
+    group_end: NO_STATEMENT,
+    math_start: 0,
+    proof_start: 0,
+    proof_end: 0,
+};
+
 /// A reference to a statement which knows its address and can be used to fetch
 /// statement information.
 #[derive(Copy, Clone, Debug)]
@@ -431,30 +469,35 @@ pub struct StatementRef<'a> {
 
 impl<'a> StatementRef<'a> {
     /// Fetch the segment-local index of this statement.
+    #[inline]
     #[must_use]
     pub const fn index(self) -> StatementIndex {
         self.index
     }
 
     /// Back up from a statement reference to a segment reference.
+    #[inline]
     #[must_use]
     pub const fn segment(self) -> SegmentRef<'a> {
         self.segment
     }
 
     /// Gets the type of this statement.  May be a pseudo-type.
+    #[inline]
     #[must_use]
     pub const fn statement_type(self) -> StatementType {
         self.statement.stype
     }
 
     /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.
+    #[inline]
     #[must_use]
     pub const fn is_assertion(self) -> bool {
         self.statement.stype.is_assertion()
     }
 
     /// Obtain a globally-meaningful address for this statement.
+    #[inline]
     #[must_use]
     pub const fn address(self) -> StatementAddress {
         StatementAddress {
@@ -468,6 +511,7 @@ impl<'a> StatementRef<'a> {
     ///
     /// This is the end range of a hypothesis or variable defined in this
     /// statement.
+    #[inline]
     #[must_use]
     pub const fn scope_range(self) -> GlobalRange {
         GlobalRange {
@@ -477,18 +521,27 @@ impl<'a> StatementRef<'a> {
     }
 
     /// True if there is a `${ $}` group wrapping this statement.
+    #[inline]
     #[must_use]
     pub const fn in_group(self) -> bool {
         self.statement.group_end != NO_STATEMENT
+    }
+
+    /// Obtain the span corresponding to the statment label.
+    #[inline]
+    #[must_use]
+    pub const fn label_span(&self) -> Span {
+        self.statement.label
     }
 
     /// Obtain the statment label.
     ///
     /// This will be non-null iff the type requires a label; missing labels for
     /// types which use them cause an immediate rewrite to `Invalid`.
+    #[inline]
     #[must_use]
     pub fn label(&self) -> &'a [u8] {
-        self.statement.label.as_ref(&self.segment.segment.buffer)
+        self.label_span().as_ref(&self.segment.segment.buffer)
     }
 
     /// An iterator for the symbols in a statement's math string.
@@ -508,6 +561,7 @@ impl<'a> StatementRef<'a> {
     /// Does not include trailing white space or surrounding comments; will
     /// include leading white space, so a concatenation of spans for all
     /// statements will reconstruct the segment source.
+    #[inline]
     #[must_use]
     pub const fn span_full(&self) -> Span {
         self.statement.span
@@ -516,18 +570,21 @@ impl<'a> StatementRef<'a> {
     /// The textual span of this statement within the segment's buffer.
     ///
     /// Does not include surrounding white space or comments, unlike `span_full()`.
+    #[inline]
     #[must_use]
     pub const fn span(&self) -> Span {
         Span::new2(self.statement.label.start, self.span_full().end)
     }
 
     /// Count of symbols in this statement's math string.
+    #[inline]
     #[must_use]
     pub const fn math_len(&self) -> TokenIndex {
         (self.statement.proof_start - self.statement.math_start) as TokenIndex
     }
 
     /// Count of tokens in this statement's proof string.
+    #[inline]
     #[must_use]
     pub const fn proof_len(&self) -> TokenIndex {
         (self.statement.proof_end - self.statement.proof_start) as TokenIndex
@@ -535,6 +592,7 @@ impl<'a> StatementRef<'a> {
 
     /// Given an index into this statement's math string, find a textual span
     /// into the segment buffer.
+    #[inline]
     #[must_use]
     pub fn math_span(&self, ix: TokenIndex) -> Span {
         self.segment.span_pool[self.statement.math_start + ix as usize]
@@ -542,9 +600,31 @@ impl<'a> StatementRef<'a> {
 
     /// Given an index into this statement's proof string, find a textual span
     /// into the segment buffer.
+    #[inline]
     #[must_use]
     pub fn proof_span(&self, ix: TokenIndex) -> Span {
         self.segment.span_pool[self.statement.proof_start + ix as usize]
+    }
+
+    /// Get the list of spans of tokens in the proof.
+    #[inline]
+    #[must_use]
+    pub fn proof_spans(&self) -> &'a [Span] {
+        &self.segment.segment.span_pool[self.statement.proof_start..self.statement.proof_end]
+    }
+
+    /// Returns an iterator over the statements referenced in the proof.
+    #[must_use]
+    pub fn use_iter(&self) -> UseIter<'a> {
+        let spans = self.proof_spans();
+        let mut iter = spans.iter();
+        if spans.get(0).map(|sp| sp.as_ref(&self.segment.buffer)) == Some(b"(") {
+            iter.next();
+        }
+        UseIter {
+            iter,
+            buf: &self.segment.segment.buffer,
+        }
     }
 
     /// Given an index into this statement's math string, get a reference to the
@@ -561,6 +641,7 @@ impl<'a> StatementRef<'a> {
     }
 
     /// Obtains textual proof data by token index.
+    #[inline]
     #[must_use]
     pub fn proof_slice_at(&self, ix: TokenIndex) -> TokenPtr<'a> {
         self.proof_span(ix).as_ref(&self.segment.segment.buffer)
@@ -581,19 +662,13 @@ impl<'a> StatementRef<'a> {
         }
     }
 
-    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters,
-    /// and trimming an extra space from the trailing delimiter.
-    /// (We can't trim both sides without extra checks, because it would double count
-    /// the middle space in `$( $)`.)
+    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters.
     #[must_use]
     pub const fn comment_contents(&self) -> Span {
-        Span::new2(self.statement.label.start + 2, self.span_full().end - 3)
+        Span::new2(self.statement.label.start + 2, self.span_full().end - 2)
     }
 
-    /// The contents of a comment statement, excluding the `$(` and `$)` delimiters,
-    /// and trimming an extra space from the trailing delimiter.
-    /// (We can't trim both sides without extra checks, because it would double count
-    /// the middle space in `$( $)`.)
+    /// Get an iterator over the markup items in this comment.
     #[must_use]
     pub fn comment_parser(&self) -> CommentParser<'a> {
         CommentParser::new(&self.segment.segment.buffer, self.comment_contents())
@@ -606,6 +681,13 @@ impl<'a> StatementRef<'a> {
             .map_or_else(Discouragements::default, |c| {
                 Discouragements::new(c.comment_contents().as_ref(&self.segment.buffer))
             })
+    }
+
+    /// Return an iterator over the parentheticals (like `(Contributed by ...)`)
+    /// in this comment statement.
+    #[must_use]
+    pub fn parentheticals(&self) -> ParentheticalIter<'a> {
+        ParentheticalIter::new(&self.segment().segment.buffer, self.comment_contents())
     }
 }
 
@@ -708,5 +790,27 @@ impl<'a> Iterator for TokenIter<'a> {
                 },
             }
         })
+    }
+}
+
+/// An iterator over the statements referenced in a proof.
+/// (Supports normal and compressed proofs; for packed/explicit proofs the
+/// returned tokens must be parsed to remove the extra fields.)
+#[derive(Debug, Clone)]
+pub struct UseIter<'a> {
+    buf: &'a [u8],
+    iter: std::slice::Iter<'a, Span>,
+}
+
+impl<'a> Iterator for UseIter<'a> {
+    type Item = (Span, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let sp = *self.iter.next()?;
+        let tk = sp.as_ref(self.buf);
+        if tk == b")" {
+            return None;
+        }
+        Some((sp, tk))
     }
 }

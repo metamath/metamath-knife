@@ -14,6 +14,8 @@
 //! corresponding byte string in the file has to be unescaped before
 //! interpretation, using the [`CommentParser::unescape_text`] and
 //! [`CommentParser::unescape_math`] functions.
+use std::fmt::Display;
+
 use lazy_static::lazy_static;
 use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
 
@@ -25,7 +27,8 @@ use crate::Span;
 pub enum CommentItem {
     /// A piece of regular text. The characters in the buffer at the given
     /// span should be interpreted literally, except for the escapes.
-    /// Use `unescape_text` to strip the text escapes.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Note that `[` can also appear unescaped.
     Text(Span),
     /// A paragraph break, caused by two or more consecutive newlines in the input.
     /// This is a zero-length item (all characters will be present in `Text` nodes
@@ -41,13 +44,15 @@ pub enum CommentItem {
     EndMathMode(usize),
     /// A single math token. After unescaping this should correspond to a `$c` or `$v` statement
     /// in the database.
-    /// Use `unescape_math` to strip the escapes.
+    /// Use `unescape_math` to strip the escape character `` ` ``.
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Note that `[` and `~` can also appear unescaped.
     Label(usize, Span),
     /// A link to a web site URL. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Note that `[` and `~` can also appear unescaped.
     Url(usize, Span),
     /// The `<HTML>` keyword, which starts HTML mode
     /// (it doesn't actually put `<HTML>` in the output).
@@ -68,37 +73,50 @@ pub enum CommentItem {
     BibTag(Span),
 }
 
+#[inline]
+fn unescape(mut buf: &[u8], out: &mut Vec<u8>, is_escape: impl FnOnce(u8) -> bool + Copy) {
+    while let Some(n) = buf.iter().position(|&c| is_escape(c)) {
+        out.extend_from_slice(&buf[..=n]);
+        if buf.get(n + 1) == Some(&buf[n]) {
+            buf = &buf[n + 2..];
+        } else {
+            // this will not normally happen, but in some cases unescaped escapes
+            // are left uninterpreted because they appear in invalid position,
+            // and in that case they should be left as is
+            buf = &buf[n + 1..];
+        }
+    }
+    out.extend_from_slice(buf);
+}
+
+/// Returns true if this is a character that is escaped in [`CommentItem::Text`],
+/// [`CommentItem::Label`] and [`CommentItem::Url`] fields,
+/// meaning that doubled occurrences are turned into single occurrences.
+#[inline]
+#[must_use]
+pub const fn is_text_escape(c: u8) -> bool {
+    matches!(c, b'`' | b'[' | b'~')
+}
+
+/// Returns true if this is a character that is escaped in [`CommentItem::MathToken`] fields,
+/// meaning that doubled occurrences are turned into single occurrences.
+#[inline]
+#[must_use]
+pub const fn is_math_escape(c: u8) -> bool {
+    c == b'`'
+}
+
 impl CommentItem {
     /// Remove text escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
-    pub fn unescape_text(mut buf: &[u8], out: &mut Vec<u8>) {
-        while let Some(n) = buf.iter().position(|&c| matches!(c, b'`' | b'[' | b'~')) {
-            out.extend_from_slice(&buf[..=n]);
-            if buf.get(n + 1) == Some(&buf[n]) {
-                buf = &buf[n + 2..];
-            } else {
-                // this will not normally happen, but in some cases unescaped escapes
-                // are left uninterpreted because they appear in invalid position,
-                // and in that case they should be left as is
-                buf = &buf[n + 1..];
-            }
-        }
-        out.extend_from_slice(buf);
+    pub fn unescape_text(buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, is_text_escape)
     }
 
     /// Remove math escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::MathToken`] field.
-    pub fn unescape_math(mut buf: &[u8], out: &mut Vec<u8>) {
-        while let Some(n) = buf.iter().position(|&c| c == b'`') {
-            out.extend_from_slice(&buf[..=n]);
-            if buf.get(n + 1) == Some(&buf[n]) {
-                buf = &buf[n + 2..];
-            } else {
-                // This should never happen if we are given `MathToken` text
-                buf = &buf[n + 1..];
-            }
-        }
-        out.extend_from_slice(buf);
+    pub fn unescape_math(buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, is_math_escape)
     }
 
     const fn token(math: bool, span: Span) -> Self {
@@ -154,18 +172,16 @@ impl<'a> CommentParser<'a> {
     fn parse_bib(&self) -> Option<Span> {
         let start = self.pos + 1;
         let mut end = start;
-        loop {
-            if let Some(&c) = self.buf.get(end) {
-                if c == b']' {
-                    return Some(Span::new(start, end));
-                }
-                if !c.is_ascii_whitespace() {
-                    end += 1;
-                    continue;
-                }
+        while let Some(&c) = self.buf.get(end) {
+            match c {
+                b']' => return Some(Span::new(start, end)),
+                b'`' if self.buf.get(end + 1) == Some(&c) => end += 2,
+                b'`' => break,
+                _ if c.is_ascii_whitespace() => break,
+                _ => end += 1,
             }
-            return None;
         }
+        None
     }
 
     fn is_subscript(&self) -> Option<()> {
@@ -276,8 +292,19 @@ impl<'a> CommentParser<'a> {
             self.pos += 1;
         }
         let label_start = self.pos;
-        while matches!(self.buf.get(self.pos), Some(c) if !c.is_ascii_whitespace()) {
-            self.pos += 1;
+        while let Some(&c) = self.buf.get(self.pos) {
+            match c {
+                b' ' | b'\n' => break,
+                b'[' | b'`' if self.buf.get(self.pos + 1) == Some(&c) => self.pos += 2,
+                b'`' => break,
+                b'[' if self.parse_bib().is_some() => break,
+                b'<' if self.buf[self.pos..].starts_with(b"<HTML>")
+                    || self.buf[self.pos..].starts_with(b"</HTML>") =>
+                {
+                    break
+                }
+                _ => self.pos += 1,
+            }
         }
         let label = &self.buf[label_start..self.pos];
         if label.starts_with(b"http://")
@@ -423,21 +450,24 @@ pub enum Parenthetical {
     ContributedBy {
         /// The span of the author in the parenthetical
         author: Span,
-        /// The date, in the form `DD-MMM-YYYY`
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
     /// A comment like `(Revised by Foo Bar, 12-Mar-2020.)`.
     RevisedBy {
         /// The span of the author in the parenthetical
         author: Span,
-        /// The date, in the form `DD-MMM-YYYY`
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
     /// A comment like `(Proof shortened by Foo Bar, 12-Mar-2020.)`.
     ProofShortenedBy {
         /// The span of the author in the parenthetical
         author: Span,
-        /// The date, in the form `DD-MMM-YYYY`
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
     /// The `(Proof modification is discouraged.)` comment
@@ -503,5 +533,70 @@ impl<'a> Iterator for ParentheticalIter<'a> {
             }
         };
         Some((self.to_span(all), item))
+    }
+}
+
+/// A date, as understood by metamath tools.
+/// This is just a `dd-mmm-yyyy` field after parsing,
+/// so it has weak calendrical restrictions.
+#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
+pub struct Date {
+    /// A year, which must be a 4 digit number (0-9999).
+    pub year: u16,
+    /// A month, parsed from three letter names: `Jan`, `Feb`, etc. (1-12)
+    pub month: u8,
+    /// A day, parsed from a 1 or 2 digit number (0-99).
+    pub day: u8,
+}
+
+impl Display for Date {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        write!(
+            f,
+            "{day}-{month}-{year:04}",
+            day = self.day,
+            month = MONTHS[(self.month - 1) as usize],
+            year = self.year
+        )
+    }
+}
+
+impl TryFrom<&[u8]> for Date {
+    type Error = ();
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let (day, month, year) = match value.len() {
+            10 => (&value[..1], &value[2..5], &value[6..]),
+            11 => (&value[..2], &value[3..6], &value[7..]),
+            _ => return Err(()),
+        };
+        Ok(Date {
+            year: std::str::from_utf8(year)
+                .map_err(|_| ())?
+                .parse()
+                .map_err(|_| ())?,
+            month: match month {
+                b"Jan" => 1,
+                b"Feb" => 2,
+                b"Mar" => 3,
+                b"Apr" => 4,
+                b"May" => 5,
+                b"Jun" => 6,
+                b"Jul" => 7,
+                b"Aug" => 8,
+                b"Sep" => 9,
+                b"Oct" => 10,
+                b"Nov" => 11,
+                b"Dec" => 12,
+                _ => return Err(()),
+            },
+            day: std::str::from_utf8(day)
+                .map_err(|_| ())?
+                .parse()
+                .map_err(|_| ())?,
+        })
     }
 }

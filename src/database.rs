@@ -99,6 +99,7 @@
 
 use crate::as_str;
 use crate::diag;
+use crate::diag::Diagnostic;
 use crate::diag::DiagnosticClass;
 use crate::export;
 use crate::formula::Formula;
@@ -889,13 +890,11 @@ impl Database {
     ///
     /// Currently there is no way to incrementally fetch diagnostics, so this
     /// will be a bit slow if there are thousands of errors.
-    pub fn diag_notations<T>(
+    pub fn diag_notations(
         &mut self,
         types: &[DiagnosticClass],
-        f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
-    ) -> Vec<T> {
+    ) -> Vec<(StatementAddress, Diagnostic)> {
         let mut diags = Vec::new();
-        let mut lc = LineCache::default();
         if types.contains(&DiagnosticClass::Parse) {
             diags.extend(self.parse_result().parse_diagnostics());
         }
@@ -914,6 +913,16 @@ impl Database {
         if types.contains(&DiagnosticClass::Typesetting) {
             diags.extend(self.typesetting_pass().diagnostics.iter().cloned());
         }
+        diags
+    }
+
+    /// Convert a list of diagnostics collected by `diag_notations` to a list of snippets.
+    pub fn render_diags<T>(
+        &self,
+        diags: Vec<(StatementAddress, Diagnostic)>,
+        f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+    ) -> Vec<T> {
+        let mut lc = LineCache::default();
         time(&self.options.clone(), "diag", move || {
             diag::to_annotations(self.parse_result(), &mut lc, diags, f)
         })

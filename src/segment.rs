@@ -10,7 +10,8 @@ use crate::{
     diag::Diagnostic,
     statement::{
         Command, FloatDef, GlobalDv, HeadingDef, LabelDef, LocalVarDef, SegmentId, Span, Statement,
-        StatementAddress, StatementIndex, StatementIter, SymbolDef, TokenAddress,
+        StatementAddress, StatementIndex, StatementIter, SymbolDef, TokenAddress, DUMMY_STATEMENT,
+        NO_STATEMENT,
     },
     StatementRef,
 };
@@ -130,6 +131,16 @@ pub(crate) trait Comparer<T> {
     /// Compares two objects, like `Ord::cmp`, but with additional state data
     /// from the comparer that can be used for the ordering.
     fn cmp(&self, left: &T, right: &T) -> Ordering;
+
+    #[inline]
+    fn lt(&self, left: &T, right: &T) -> bool {
+        self.cmp(left, right) == Ordering::Less
+    }
+
+    #[inline]
+    fn le(&self, left: &T, right: &T) -> bool {
+        self.cmp(left, right) != Ordering::Greater
+    }
 }
 
 impl Comparer<SegmentId> for SegmentOrder {
@@ -239,6 +250,21 @@ impl<'a> SegmentRef<'a> {
         StatementRef {
             segment: self,
             statement: &self.segment.statements[index as usize],
+            index,
+        }
+    }
+
+    /// Fetch a single statement from this segment by its local index,
+    /// or return a dummy statement when the index is `NO_STATEMENT`.
+    #[must_use]
+    pub(crate) fn statement_or_dummy(self, index: StatementIndex) -> StatementRef<'a> {
+        StatementRef {
+            segment: self,
+            statement: if index == NO_STATEMENT {
+                &DUMMY_STATEMENT
+            } else {
+                &self.segment.statements[index as usize]
+            },
             index,
         }
     }
