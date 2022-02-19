@@ -35,7 +35,6 @@ use crate::segment_set::SegmentSet;
 use crate::statement::{SegmentId, Span, StatementAddress, TokenPtr, NO_STATEMENT};
 use crate::util::{fast_clear, fast_extend, HashMap};
 use crate::{parser, Database, StatementRef, StatementType};
-use std::cmp::Ordering;
 use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
@@ -310,7 +309,7 @@ fn prepare_step<'a, P: ProofBuilder>(
     let valid = frame.valid;
     let pos = state.cur_frame.valid.start;
     try_assert!(
-        state.order.cmp(&pos, &valid.start) == Ordering::Greater,
+        state.order.lt(&valid.start, &pos),
         Diagnostic::StepUsedBeforeDefinition(label.into())
     );
 

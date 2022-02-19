@@ -14,17 +14,19 @@
 //! responsible for detecting includes and splitting statements appropriately,
 //! although responsibility for following includes rests on the `segment_set`.
 
-use crate::diag::Diagnostic;
+use crate::diag::{Diagnostic, MarkupKind};
 use crate::segment::{BufferRef, Segment};
 use crate::segment_set::SegmentSet;
 use crate::statement::{
-    Command, CommandToken, FilePos, FloatDef, GlobalDv, HeadingDef, LabelDef, LocalVarDef, Span,
-    Statement, StatementAddress, StatementIndex, SymbolDef, SymbolType, TokenIndex, TokenPtr,
-    NO_STATEMENT,
+    Command, CommandToken, FilePos, FloatDef, GlobalDv, GlobalSpan, HeadingDef, LabelDef,
+    LocalVarDef, Span, Statement, StatementAddress, StatementIndex, SymbolDef, SymbolType, Token,
+    TokenIndex, TokenPtr, NO_STATEMENT,
 };
 use crate::typesetting::TypesettingData;
 use crate::StatementType::{self, *};
+use regex::bytes::Regex;
 use std::cmp;
+use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::mem;
 use std::str;
@@ -223,14 +225,14 @@ impl<'a> Scanner<'a> {
                 if tok_str.contains("$(") {
                     self.diag(Diagnostic::NestedComment(tok, opener));
                 }
-            } else if tok_ref.len() >= 4 {
-                if tok_ref[0..4] == b"####"[0..4] {
+            } else if first && tok_ref.len() >= 4 {
+                if tok_ref[..4] == *b"####" {
                     ctype = CommentType::Heading(HeadingLevel::MajorPart);
-                } else if tok_ref[0..4] == b"#*#*"[0..4] {
+                } else if tok_ref[..4] == *b"#*#*" {
                     ctype = CommentType::Heading(HeadingLevel::Section);
-                } else if tok_ref[0..4] == b"=-=-"[0..4] {
+                } else if tok_ref[..4] == *b"=-=-" {
                     ctype = CommentType::Heading(HeadingLevel::SubSection);
-                } else if tok_ref[0..4] == b"-.-."[0..4] {
+                } else if tok_ref[..4] == *b"-.-." {
                     ctype = CommentType::Heading(HeadingLevel::SubSubSection);
                 }
             }
@@ -997,16 +999,13 @@ impl SegmentSet {
         fn parse_one(
             data: &mut TypesettingData,
             buf: &[u8],
+            addr: StatementAddress,
             span: Span,
             command: &[CommandToken],
         ) -> Result<(), Diagnostic> {
-            fn as_string<'a>(
-                buf: &'a [u8],
-                span: Span,
-                tok: Option<&CommandToken>,
-            ) -> Result<&'a [u8], Diagnostic> {
+            const fn as_string(span: Span, tok: Option<&CommandToken>) -> Result<Span, Diagnostic> {
                 match tok {
-                    Some(&CommandToken::String(s)) => Ok(s.as_ref(buf)),
+                    Some(&CommandToken::String(s)) => Ok(s),
                     None => Err(Diagnostic::CommandIncomplete(span)),
                     Some(&CommandToken::Keyword(s)) => Err(Diagnostic::CommandExpectedString(s)),
                 }
@@ -1018,37 +1017,53 @@ impl SegmentSet {
             };
 
             let sum = |mut rest: std::slice::Iter<'_, CommandToken>| {
-                let mut accum: Vec<u8> = as_string(buf, span, rest.next())?.into();
+                let mut span_out = as_string(span, rest.next())?;
+                let mut accum: Vec<u8> = span_out.as_ref(buf).into();
+                span_out.start -= 1;
                 loop {
                     match rest.next() {
-                        None => return Ok(accum.into()),
+                        None => {
+                            span_out.end += 1;
+                            return Ok(((addr.segment_id, span_out), accum.into()));
+                        }
                         Some(CommandToken::Keyword(plus)) if plus.as_ref(buf) == b"+" => {}
                         _ => return Err(Diagnostic::CommandIncomplete(span)),
                     }
-                    accum.extend_from_slice(as_string(buf, span, rest.next())?)
+                    let span2 = as_string(span, rest.next())?;
+                    accum.extend_from_slice(span2.as_ref(buf));
+                    span_out.end = span2.end
                 }
             };
 
             let as_ = |rest: &mut std::slice::Iter<'_, CommandToken>| {
-                let s = as_string(buf, span, rest.next())?;
+                let s = as_string(span, rest.next())?;
                 match rest.next() {
-                    Some(CommandToken::Keyword(as_)) if as_.as_ref(buf) == b"as" => {}
-                    None => return Err(Diagnostic::CommandIncomplete(span)),
-                    Some(tk) => return Err(Diagnostic::CommandExpectedAs(tk.full_span())),
+                    Some(CommandToken::Keyword(as_)) if as_.as_ref(buf) == b"as" => Ok(s),
+                    None => Err(Diagnostic::CommandIncomplete(span)),
+                    Some(tk) => Err(Diagnostic::CommandExpectedAs(tk.full_span())),
                 }
-                Ok(s.into())
             };
-
+            let mut insert = |kind: MarkupKind, sp: Span, (sp2, val): (GlobalSpan, Token)| {
+                let map = match kind {
+                    MarkupKind::Html => &mut data.html_defs,
+                    MarkupKind::AltHtml => &mut data.alt_html_defs,
+                    MarkupKind::Latex => &mut data.latex_defs,
+                };
+                match map.entry(sp.as_ref(buf).into()) {
+                    Entry::Occupied(e) => {
+                        let (sp2, (id2, _), _) = *e.get();
+                        data.diagnostics
+                            .push((addr, Diagnostic::DuplicateMarkupDef(kind, (id2, sp2), sp)))
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert((sp, sp2, val));
+                    }
+                }
+            };
             match cmd.as_ref(buf) {
-                b"latexdef" => {
-                    data.latex_defs.insert(as_(&mut rest)?, sum(rest)?);
-                }
-                b"htmldef" => {
-                    data.html_defs.insert(as_(&mut rest)?, sum(rest)?);
-                }
-                b"althtmldef" => {
-                    data.alt_html_defs.insert(as_(&mut rest)?, sum(rest)?);
-                }
+                b"latexdef" => insert(MarkupKind::Latex, as_(&mut rest)?, sum(rest)?),
+                b"htmldef" => insert(MarkupKind::Html, as_(&mut rest)?, sum(rest)?),
+                b"althtmldef" => insert(MarkupKind::AltHtml, as_(&mut rest)?, sum(rest)?),
                 b"htmlvarcolor" => data.html_var_color.push(sum(rest)?),
                 b"htmltitle" => data.html_title = Some(sum(rest)?),
                 b"htmlhome" => data.html_home = Some(sum(rest)?),
@@ -1070,12 +1085,56 @@ impl SegmentSet {
         let mut data = TypesettingData::default();
         for seg in self.segments(..) {
             for &(ix, (span, ref command)) in &seg.t_commands {
-                if let Err(diag) = parse_one(&mut data, &seg.buffer, span, command) {
-                    let address = StatementAddress::new(seg.id, ix);
+                let address = StatementAddress::new(seg.id, ix);
+                if let Err(diag) = parse_one(&mut data, &seg.buffer, address, span, command) {
                     data.diagnostics.push((address, diag))
                 }
             }
         }
         data
+    }
+}
+
+pub(crate) struct HeadingComment {
+    pub(crate) header: Span,
+    pub(crate) content: Span,
+}
+
+impl HeadingComment {
+    pub(crate) fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
+        lazy_static::lazy_static! {
+            static ref MAJOR_PART: Regex =
+                Regex::new(r"^[ \n]+#{4,}\n *([^\n]*)\n#{4,}\n").unwrap();
+            static ref SECTION: Regex =
+                Regex::new(r"^[ \n]+(?:#\*){2,}#?\n *([^\n]*)\n(?:#\*){2,}#?\n").unwrap();
+            static ref SUBSECTION: Regex =
+                Regex::new(r"^[ \n]+(?:=-){2,}=?\n *([^\n]*)\n(?:=-){2,}=?\n").unwrap();
+            static ref SUBSUBSECTION: Regex =
+                Regex::new(r"^[ \n]+(?:-\.){2,}-?\n *([^\n]*)\n(?:-\.){2,}-?\n").unwrap();
+        }
+        let regex = match lvl {
+            HeadingLevel::MajorPart => &*MAJOR_PART,
+            HeadingLevel::Section => &*SECTION,
+            HeadingLevel::SubSection => &*SUBSECTION,
+            HeadingLevel::SubSubSection => &*SUBSUBSECTION,
+            _ => unreachable!(),
+        };
+        let groups = regex.captures(sp.as_ref(buf))?;
+        let m = groups.get(1)?;
+        Some(Self {
+            header: Span::new2(sp.start + m.start() as u32, sp.start + m.end() as u32),
+            content: Span::new2(sp.start + groups.get(0)?.end() as u32, sp.end),
+        })
+    }
+
+    pub(crate) fn parse_mathbox_header(&self, buf: &[u8]) -> Option<Span> {
+        lazy_static::lazy_static! {
+            static ref MATHBOX_FOR: Regex = Regex::new(r"^Mathbox for (.*)$").unwrap();
+        }
+        let m = MATHBOX_FOR.captures(self.header.as_ref(buf))?.get(1)?;
+        Some(Span::new2(
+            self.header.start + m.start() as u32,
+            self.header.start + m.end() as u32,
+        ))
     }
 }
