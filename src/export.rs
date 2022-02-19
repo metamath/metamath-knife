@@ -86,8 +86,11 @@ impl Database {
             writeln!(out, "*{}\n", cstr)?;
         }
 
-        let arr = ProofTreeArray::new(self, stmt)?;
-        self.export_mmp_proof_tree(thm_label, &arr, out)
+        match ProofTreeArray::new(self, stmt) {
+            Ok(arr) => self.export_mmp_proof_tree(thm_label, &arr, out),
+            Err(Diagnostic::ProofIncomplete) => self.export_incomplete_proof(stmt, out),
+            Err(diag) => Err(diag.into()),
+        }
     }
 }
 
@@ -235,6 +238,39 @@ impl Database {
         )?;
 
         writeln!(out, "\n$)")?;
+        Ok(())
+    }
+
+    fn export_incomplete_proof<W: Write>(
+        &self,
+        stmt: StatementRef<'_>,
+        out: &mut W,
+    ) -> Result<(), ExportError> {
+        let mut hyp = 1;
+
+        // Hypotheses
+        for (label, _) in self
+            .scope_result()
+            .get(stmt.label())
+            .expect("Statement without scope")
+            .as_ref(self)
+            .essentials()
+        {
+            let hyp_stmt = self.statement_by_label(label).unwrap();
+            write!(out, "h{}::{} ", hyp, as_str(hyp_stmt.label()))?;
+            for token in hyp_stmt.math_iter() {
+                write!(out, "{} ", as_str(&token))?;
+            }
+            writeln!(out)?;
+            hyp += 1;
+        }
+
+        // Statement assertion
+        write!(out, "!qed:: ")?;
+        for token in stmt.math_iter() {
+            write!(out, "{} ", as_str(&token))?;
+        }
+        writeln!(out, "\n\n$)")?;
         Ok(())
     }
 }
