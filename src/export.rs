@@ -269,9 +269,9 @@ impl Database {
         }
 
         // Statement assertion
-        write!(out, "!qed:: ")?;
+        write!(out, "!qed::")?;
         for token in stmt.math_iter() {
-            write!(out, "{} ", as_str(&token))?;
+            write!(out, " {}", as_str(&token))?;
         }
         writeln!(out, "\n\n$)")?;
         Ok(())
