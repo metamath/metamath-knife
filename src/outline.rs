@@ -11,6 +11,7 @@ use crate::segment::SegmentRef;
 use crate::segment_set::SegmentSet;
 use crate::statement::HeadingDef;
 use crate::statement::SegmentId;
+use crate::statement::Span;
 use crate::statement::StatementAddress;
 use crate::statement::StatementIndex;
 use crate::statement::Token;
@@ -319,6 +320,42 @@ impl<'a> OutlineNodeRef<'a> {
         match self {
             OutlineNodeRef::Chapter { node_id, .. } => *node_id,
             OutlineNodeRef::Statement { .. } => panic!("No ref is provided for Statement nodes."),
+        }
+    }
+
+    /// Returns the statement for this node
+    #[must_use]
+    pub fn get_statement(&self) -> StatementRef<'_> {
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => {
+                let address = database.outline_result().tree[*node_id].stmt_address;
+                database.statement_by_address(address)
+            }
+            OutlineNodeRef::Statement { sref, .. } => *sref,
+        }
+    }
+
+    /// Returns the span for this node.
+    /// For statements, this is the statement span.
+    /// For chapters, this covers the whole chaper, until the next one.
+    #[must_use]
+    pub fn get_span(&self) -> Span {
+        match self {
+            OutlineNodeRef::Chapter { database, .. } => {
+                let stmt = self.get_statement();
+                let start = stmt.span().start;
+                let end = if let Some(next_stmt) = self.next_up() {
+                    next_stmt.get_statement().span().start - 1
+                } else {
+                    database
+                        .parse_result()
+                        .source_info(stmt.segment.id)
+                        .span
+                        .end
+                };
+                Span { start, end }
+            }
+            OutlineNodeRef::Statement { sref, .. } => sref.span_full(),
         }
     }
 
