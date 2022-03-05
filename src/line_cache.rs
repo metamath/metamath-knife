@@ -41,7 +41,7 @@ fn make_index(mut buf: &[u8]) -> Vec<u32> {
         while page.len() >= 128 {
             let mut inner = 0i8;
             for &ch in &page[0..128] {
-                inner += -((ch == b'\n') as i8);
+                inner += -i8::from(ch == b'\n');
             }
             page = &page[128..];
             count += u32::from((inner as u8).wrapping_neg());
