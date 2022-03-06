@@ -11,6 +11,7 @@ use crate::segment::SegmentRef;
 use crate::segment_set::SegmentSet;
 use crate::statement::HeadingDef;
 use crate::statement::SegmentId;
+use crate::statement::Span;
 use crate::statement::StatementAddress;
 use crate::statement::StatementIndex;
 use crate::statement::Token;
@@ -159,12 +160,12 @@ impl<'a> OutlineNodeRef<'a> {
     #[must_use]
     pub fn next(self) -> Option<OutlineNodeRef<'a>> {
         // First attempt to find a child, since we are depth-first
-        self.first_child().or_else(|| self.next_up())
+        self.first_child().or_else(|| self.next_after_children())
     }
 
     /// Returns the next statement or chapter, in depth-first traversal order
     /// but never diving into this node's children
-    fn next_up(self) -> Option<OutlineNodeRef<'a>> {
+    fn next_after_children(self) -> Option<OutlineNodeRef<'a>> {
         match self {
             // In a chapter, the next node is the next chapter
             OutlineNodeRef::Chapter { database, node_id } => database
@@ -172,7 +173,7 @@ impl<'a> OutlineNodeRef<'a> {
                 .tree
                 .next_sibling(node_id)
                 .map_or_else(
-                    || self.parent()?.next_up(),
+                    || self.parent()?.next_after_children(),
                     |node_id| Some(OutlineNodeRef::Chapter { database, node_id }),
                 ),
             // In a statement,
@@ -190,7 +191,7 @@ impl<'a> OutlineNodeRef<'a> {
                         // Return the first chapter child if any
                         Some(node_id) => Some(OutlineNodeRef::Chapter { database, node_id }),
                         // Else return the parent's next sibling
-                        None => self.parent()?.next_up(),
+                        None => self.parent()?.next_after_children(),
                     }
                 }
             }
@@ -319,6 +320,42 @@ impl<'a> OutlineNodeRef<'a> {
         match self {
             OutlineNodeRef::Chapter { node_id, .. } => *node_id,
             OutlineNodeRef::Statement { .. } => panic!("No ref is provided for Statement nodes."),
+        }
+    }
+
+    /// Returns the statement for this node
+    #[must_use]
+    pub fn get_statement(&self) -> StatementRef<'_> {
+        match self {
+            OutlineNodeRef::Chapter { database, node_id } => {
+                let address = database.outline_result().tree[*node_id].stmt_address;
+                database.statement_by_address(address)
+            }
+            OutlineNodeRef::Statement { sref, .. } => *sref,
+        }
+    }
+
+    /// Returns the span for this node.
+    /// For statements, this is the statement span.
+    /// For chapters, this covers the whole chaper, until the next one.
+    #[must_use]
+    pub fn get_span(&self) -> Span {
+        match self {
+            OutlineNodeRef::Chapter { database, .. } => {
+                let stmt = self.get_statement();
+                let start = stmt.span().start;
+                let end = if let Some(next_stmt) = self.next_after_children() {
+                    next_stmt.get_statement().span().start - 1
+                } else {
+                    database
+                        .parse_result()
+                        .source_info(stmt.segment.id)
+                        .span
+                        .end
+                };
+                Span { start, end }
+            }
+            OutlineNodeRef::Statement { sref, .. } => sref.span_full(),
         }
     }
 
