@@ -160,12 +160,12 @@ impl<'a> OutlineNodeRef<'a> {
     #[must_use]
     pub fn next(self) -> Option<OutlineNodeRef<'a>> {
         // First attempt to find a child, since we are depth-first
-        self.first_child().or_else(|| self.next_up())
+        self.first_child().or_else(|| self.next_after_children())
     }
 
     /// Returns the next statement or chapter, in depth-first traversal order
     /// but never diving into this node's children
-    fn next_up(self) -> Option<OutlineNodeRef<'a>> {
+    fn next_after_children(self) -> Option<OutlineNodeRef<'a>> {
         match self {
             // In a chapter, the next node is the next chapter
             OutlineNodeRef::Chapter { database, node_id } => database
@@ -173,7 +173,7 @@ impl<'a> OutlineNodeRef<'a> {
                 .tree
                 .next_sibling(node_id)
                 .map_or_else(
-                    || self.parent()?.next_up(),
+                    || self.parent()?.next_after_children(),
                     |node_id| Some(OutlineNodeRef::Chapter { database, node_id }),
                 ),
             // In a statement,
@@ -191,7 +191,7 @@ impl<'a> OutlineNodeRef<'a> {
                         // Return the first chapter child if any
                         Some(node_id) => Some(OutlineNodeRef::Chapter { database, node_id }),
                         // Else return the parent's next sibling
-                        None => self.parent()?.next_up(),
+                        None => self.parent()?.next_after_children(),
                     }
                 }
             }
@@ -344,7 +344,7 @@ impl<'a> OutlineNodeRef<'a> {
             OutlineNodeRef::Chapter { database, .. } => {
                 let stmt = self.get_statement();
                 let start = stmt.span().start;
-                let end = if let Some(next_stmt) = self.next_up() {
+                let end = if let Some(next_stmt) = self.next_after_children() {
                     next_stmt.get_statement().span().start - 1
                 } else {
                     database
