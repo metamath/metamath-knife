@@ -170,7 +170,7 @@ pub enum Diagnostic {
     NotAProvableStatement,
     OldAltNotDiscouraged,
     ParenOrderError(Span, Span),
-    ParsedStatementTooShort(Token),
+    ParsedStatementTooShort(Option<Token>),
     ParsedStatementNoTypeCode,
     ParsedStatementWrongTypeCode(Token),
     ProofDvViolation,
@@ -831,9 +831,12 @@ impl Diagnostic {
                     later,
                 )])
             }
-            ParsedStatementTooShort(ref tok) => ("Parsed statement too short".into(), vec![(
+            ParsedStatementTooShort(ref opt_tok) => ("Parsed statement too short".into(), vec![(
                 AnnotationType::Error,
-                format!("Statement is too short, expecting for example {expected}", expected = t(tok)).into(),
+                match opt_tok {
+                    Some(tok) => format!("Statement is too short, expecting for example {expected}", expected = t(tok)).into(),
+                    None => "Statement is too short, and does not correspond to any valid prefix".into(),
+                },
                 stmt,
                 stmt.span(),
             )]),

@@ -459,9 +459,11 @@ impl Grammar {
     }
 
     fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Nameset) -> Diagnostic {
-        let expected_symbol = map.keys().find(|k| k.0 == SymbolType::Constant).unwrap().1;
-        let expected_token = nset.atom_name(expected_symbol).into();
-        Diagnostic::ParsedStatementTooShort(expected_token)
+        Diagnostic::ParsedStatementTooShort(
+            map.keys()
+                .find(|k| k.0 == SymbolType::Constant)
+                .map(|(_, expected_symbol)| nset.atom_name(*expected_symbol).into()),
+        )
     }
 
     /// Gets the map of a branch
