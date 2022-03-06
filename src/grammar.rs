@@ -39,7 +39,7 @@ fn as_string(node_id: NodeId) -> String {
 /// For the labels in DOT format
 #[cfg(feature = "dot")]
 fn escape(str: &str) -> String {
-    str.replace("\\", "\\\\ ").replace("\"", "\\\"")
+    str.replace('\\', "\\\\ ").replace('\"', "\\\"")
 }
 
 /// The grammar tree represents a Moore/Mealy Machine, where each node is a state of the automaton,
@@ -1136,11 +1136,7 @@ impl Grammar {
         let mut ix;
         let mut e = StackElement {
             node_id: self.root,
-            expected_typecodes: expected_typecodes
-                .iter()
-                .copied()
-                .collect::<Vec<TypeCode>>()
-                .into_boxed_slice(),
+            expected_typecodes: expected_typecodes.to_vec().into_boxed_slice(),
         };
         let mut stack = vec![];
         loop {
