@@ -401,7 +401,7 @@ impl Default for Grammar {
     }
 }
 
-fn undefined(token: TokenRef<'_>) -> Diagnostic {
+const fn undefined(token: TokenRef<'_>) -> Diagnostic {
     Diagnostic::UnknownToken(token.address.token_index)
 }
 
