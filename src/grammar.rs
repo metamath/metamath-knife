@@ -8,7 +8,7 @@ use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
 use crate::nameck::{Atom, NameReader, Nameset};
 use crate::segment::Segment;
 use crate::segment_set::SegmentSet;
-use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenPtr};
+use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenPtr, TokenRef};
 use crate::util::HashMap;
 use crate::{as_str, Database, StatementRef, StatementType};
 use log::{debug, warn};
@@ -401,6 +401,10 @@ impl Default for Grammar {
     }
 }
 
+fn undefined(token: TokenRef<'_>) -> Diagnostic {
+    Diagnostic::UnknownToken(token.address.token_index)
+}
+
 impl Grammar {
     /// Initializes the grammar using the parser commands
     fn initialize(&mut self, sset: &SegmentSet, nset: &Nameset) {
@@ -544,7 +548,6 @@ impl Grammar {
 
         // Atom for this axiom's label.
         let this_label = names.lookup_label(sref.label()).unwrap().atom;
-        // Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
         let this_typecode = nset.get_atom(tokens.next().unwrap().slice);
 
         // In case of a non-syntax axiom, skip it.
@@ -555,7 +558,9 @@ impl Grammar {
         // Detect "type conversion" syntax axioms: ~cv for set.mm
         if sref.math_len() == 2 {
             let token_ptr = sref.math_at(1).slice;
-            let symbol = names.lookup_symbol(token_ptr).unwrap();
+            let symbol = names
+                .lookup_symbol(token_ptr)
+                .ok_or(Diagnostic::UnknownToken(1))?;
             if symbol.stype == SymbolType::Variable {
                 let from_typecode = match names.lookup_float(token_ptr) {
                     Some(lookup_float) => lookup_float.typecode_atom,
@@ -573,14 +578,17 @@ impl Grammar {
         let mut node = self.root;
         let mut var_count = 0;
         while let Some(token) = tokens.next() {
-            let symbol = names.lookup_symbol(token.slice).unwrap();
+            let symbol = names.lookup_symbol(token.slice).ok_or(undefined(token))?;
             let atom = match symbol.stype {
                 SymbolType::Constant => symbol.atom,
                 SymbolType::Variable => {
                     var_count += 1;
                     // We need a second lookup to find out the typecode of a floating variable...
                     // Ideally this information would be included in the LookupSymbol
-                    names.lookup_float(token.slice).unwrap().typecode_atom
+                    names
+                        .lookup_float(token.slice)
+                        .ok_or(undefined(token))?
+                        .typecode_atom
                 }
             };
             match match &tokens.peek() {
@@ -615,7 +623,8 @@ impl Grammar {
         // Atom for this float's label.
         let this_label = names.lookup_label(sref.label()).unwrap().atom;
         // Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
-        let this_typecode = nset.get_atom(tokens.next().unwrap().slice);
+        let this_typecode =
+            nset.get_atom(tokens.next().ok_or(Diagnostic::NotActiveSymbol(0))?.slice);
 
         // Float shall not be of the provable typecode.
         if this_typecode == self.provable_type {
@@ -1289,11 +1298,19 @@ impl Grammar {
             as_str(nset.statement_name(sref))
         );
 
-        let mut symbol_iter = sref
+        let math_string: Result<Vec<_>, _> = sref
             .math_iter()
             .skip(1)
-            .map(|token| names.lookup_symbol(token.slice).unwrap().atom);
-        let formula = self.parse_formula(&mut symbol_iter, &[expected_typecode], nset)?;
+            .map(|token| {
+                if let Some(lookup) = names.lookup_symbol(token.slice) {
+                    Ok(lookup.atom)
+                } else {
+                    Err(undefined(token))
+                }
+            })
+            .collect();
+        let formula =
+            self.parse_formula(&mut math_string?.into_iter(), &[expected_typecode], nset)?;
         Ok(Some(formula))
     }
 

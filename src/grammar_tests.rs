@@ -5,6 +5,15 @@ use crate::diag::Diagnostic;
 use crate::statement::SegmentId;
 use crate::statement::StatementAddress;
 
+macro_rules! sa {
+    ($id: expr, $index:expr) => {
+        StatementAddress {
+            segment_id: SegmentId($id),
+            index: $index,
+        }
+    };
+}
+
 const GRAMMAR_DB: &[u8] = b"
     $c |- wff class ( ) + = $.
     $( $j syntax 'class'; syntax 'wff'; syntax '|-' as 'wff'; $)
@@ -258,15 +267,6 @@ fn test_garden_path_3() {
     );
 }
 
-macro_rules! sa {
-    ($id: expr, $index:expr) => {
-        StatementAddress {
-            segment_id: SegmentId($id),
-            index: $index,
-        }
-    };
-}
-
 macro_rules! grammar_test {
     ($name:ident, $text:expr, $id: expr, $index:expr, $diag:expr) => {
         #[test]
@@ -300,4 +300,18 @@ grammar_test!(
     2,
     1,
     Diagnostic::FloatNotVariable(1)
+);
+grammar_test!(
+    test_unknown_token_1,
+    b"$c |- $. err $a |- unknown $.",
+    2,
+    1,
+    Diagnostic::UnknownToken(1)
+);
+grammar_test!(
+    test_unknown_token_2,
+    b"$c |- ( $. err $a |- ( unknown $.",
+    2,
+    1,
+    Diagnostic::UnknownToken(2)
 );

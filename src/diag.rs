@@ -217,6 +217,7 @@ pub enum Diagnostic {
     UninterpretedHtml(Span),
     UnknownLabel(Span),
     UnknownKeyword(Span),
+    UnknownToken(TokenIndex),
     UnknownTypesettingCommand(Span),
     UnmatchedCloseGroup,
     UnparseableStatement(TokenIndex),
@@ -1169,6 +1170,12 @@ impl Diagnostic {
                 "This is not the label of any statement".into(),
                 stmt,
                 *span,
+            )]),
+            UnknownToken(index) => ("Unknown token".into(), vec![(
+                AnnotationType::Error,
+                "This token was not declared in any $v or $c statement".into(),
+                stmt,
+                stmt.math_span(*index),
             )]),
             UnmatchedCloseGroup => ("Unmatched close group".into(), vec![(
                 AnnotationType::Error,
