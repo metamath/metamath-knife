@@ -624,7 +624,6 @@ impl Grammar {
 
         // Atom for this float's label.
         let this_label = names.lookup_label(sref.label()).unwrap().atom;
-        // Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
         let this_typecode =
             nset.get_atom(tokens.next().ok_or(Diagnostic::NotActiveSymbol(0))?.slice);
 
