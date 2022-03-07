@@ -544,7 +544,14 @@ impl SegmentSet {
             sibling_stack.push(node_id);
             last_sibling_idx = sibling_idx;
         }
-        let root = current_node.add_to_tree(&mut tree, &sibling_stack[..=last_sibling_idx]);
+        let root = current_node.add_to_tree(
+            &mut tree,
+            if sibling_stack.len() > last_sibling_idx {
+                &sibling_stack[..=last_sibling_idx]
+            } else {
+                &[]
+            },
+        );
         tree[root].parent = root;
 
         Outline {
