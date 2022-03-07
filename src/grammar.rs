@@ -578,7 +578,9 @@ impl Grammar {
         let mut node = self.root;
         let mut var_count = 0;
         while let Some(token) = tokens.next() {
-            let symbol = names.lookup_symbol(token.slice).ok_or(undefined(token))?;
+            let symbol = names
+                .lookup_symbol(token.slice)
+                .ok_or_else(|| undefined(token))?;
             let atom = match symbol.stype {
                 SymbolType::Constant => symbol.atom,
                 SymbolType::Variable => {
@@ -587,7 +589,7 @@ impl Grammar {
                     // Ideally this information would be included in the LookupSymbol
                     names
                         .lookup_float(token.slice)
-                        .ok_or(undefined(token))?
+                        .ok_or_else(|| undefined(token))?
                         .typecode_atom
                 }
             };
