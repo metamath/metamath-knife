@@ -1322,9 +1322,17 @@ impl Grammar {
     }
 
     /// Returns the provable typecode for this grammar
+    /// (for set.mm, that is `|-`)
     #[must_use]
     pub const fn provable_typecode(&self) -> TypeCode {
         self.provable_type
+    }
+
+    /// Returns the logic typecode for this grammar
+    /// (for set.mm, that is `wff`)
+    #[must_use]
+    pub const fn logic_typecode(&self) -> TypeCode {
+        self.logic_type
     }
 
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
