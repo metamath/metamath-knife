@@ -1083,14 +1083,20 @@ impl Grammar {
                                     .lookup_symbol(ty.value(buf))
                                     .ok_or((
                                         address,
-                                        Diagnostic::UnknownCommandToken(ty.full_span()),
+                                        Diagnostic::UndefinedToken(
+                                            ty.full_span(),
+                                            ty.value(buf).into(),
+                                        ),
                                     ))?
                                     .atom;
                                 self.typecodes.push(
                                     nset.lookup_symbol(code.value(buf))
                                         .ok_or((
                                             address,
-                                            Diagnostic::UnknownCommandToken(code.full_span()),
+                                            Diagnostic::UndefinedToken(
+                                                code.full_span(),
+                                                code.value(buf).into(),
+                                            ),
                                         ))?
                                         .atom,
                                 );
@@ -1101,7 +1107,10 @@ impl Grammar {
                                     nset.lookup_symbol(ty.value(buf))
                                         .ok_or((
                                             address,
-                                            Diagnostic::UnknownCommandToken(ty.full_span()),
+                                            Diagnostic::UndefinedToken(
+                                                ty.full_span(),
+                                                ty.value(buf).into(),
+                                            ),
                                         ))?
                                         .atom,
                                 );

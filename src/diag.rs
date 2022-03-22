@@ -215,7 +215,6 @@ pub enum Diagnostic {
     UndefinedToken(Span, Token),
     UninterpretedEscape(u32),
     UninterpretedHtml(Span),
-    UnknownCommandToken(Span),
     UnknownLabel(Span),
     UnknownKeyword(Span),
     UnknownToken(TokenIndex),
@@ -1165,12 +1164,6 @@ impl Diagnostic {
                 "This <HTML> was not interpreted".into(),
                 stmt,
                 *tok,
-            )]),
-            UnknownCommandToken(span) => ("Unknown token".into(), vec![(
-                AnnotationType::Error,
-                "This token was not declared in any $v or $c statement".into(),
-                stmt,
-                *span,
             )]),
             UnknownLabel(span) => ("Unknown label".into(), vec![(
                 AnnotationType::Warning,
