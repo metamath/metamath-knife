@@ -1166,8 +1166,8 @@ impl Diagnostic {
                 stmt,
                 *tok,
             )]),
-            UnknownCommandToken(span) => ("Unknown command token".into(), vec![(
-                AnnotationType::Warning,
+            UnknownCommandToken(span) => ("Unknown token".into(), vec![(
+                AnnotationType::Error,
                 "This token was not declared in any $v or $c statement".into(),
                 stmt,
                 *span,
