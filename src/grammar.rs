@@ -3,12 +3,12 @@
 
 // Possibly: Remove branch/leaf and keep only the optional leaf? (then final leaf = no next node id)
 
-use crate::diag::Diagnostic;
+use crate::diag::{Diagnostic, StmtParseError};
 use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
 use crate::nameck::{Atom, NameReader, Nameset};
 use crate::segment::Segment;
 use crate::segment_set::SegmentSet;
-use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenPtr, TokenRef};
+use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenRef};
 use crate::util::HashMap;
 use crate::{as_str, Database, StatementRef, StatementType};
 use log::{debug, warn};
@@ -401,8 +401,12 @@ impl Default for Grammar {
     }
 }
 
-const fn undefined(token: TokenRef<'_>) -> Diagnostic {
-    Diagnostic::UnknownToken(token.address.token_index)
+const fn undefined(token: TokenRef<'_>) -> StmtParseError {
+    StmtParseError::UnknownToken(token.address.token_index)
+}
+
+fn undefined_cmd(token: &CommandToken, buf: &[u8]) -> Diagnostic {
+    Diagnostic::UndefinedToken(token.full_span(), token.value(buf).into())
 }
 
 impl Grammar {
@@ -462,8 +466,8 @@ impl Grammar {
         }
     }
 
-    fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Nameset) -> Diagnostic {
-        Diagnostic::ParsedStatementTooShort(
+    fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Nameset) -> StmtParseError {
+        StmtParseError::ParsedStatementTooShort(
             map.keys()
                 .find(|k| k.0 == SymbolType::Constant)
                 .map(|(_, expected_symbol)| nset.atom_name(*expected_symbol).into()),
@@ -551,7 +555,7 @@ impl Grammar {
             .lookup_label(sref.label())
             .ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?
             .atom;
-        let this_typecode = nset.get_atom(tokens.next().ok_or(Diagnostic::UnknownToken(0))?.slice);
+        let this_typecode = nset.get_atom(tokens.next().ok_or(Diagnostic::EmptyMathString)?.slice);
 
         // In case of a non-syntax axiom, skip it.
         if this_typecode == self.provable_type {
@@ -563,7 +567,7 @@ impl Grammar {
             let token_ptr = sref.math_at(1).slice;
             let symbol = names
                 .lookup_symbol(token_ptr)
-                .ok_or(Diagnostic::UnknownToken(1))?;
+                .ok_or_else(|| Diagnostic::UndefinedToken(sref.math_span(1), token_ptr.into()))?;
             if symbol.stype == SymbolType::Variable {
                 let from_typecode = match names.lookup_float(token_ptr) {
                     Some(lookup_float) => lookup_float.typecode_atom,
@@ -920,8 +924,9 @@ impl Grammar {
     #[allow(clippy::unnecessary_wraps)]
     fn handle_common_prefixes(
         &mut self,
-        prefix: &[TokenPtr<'_>],
-        shadows: &[TokenPtr<'_>],
+        prefix: &[CommandToken],
+        shadows: &[CommandToken],
+        buf: &[u8],
         db: &Database,
         names: &mut NameReader<'_>,
     ) -> Result<(), Diagnostic> {
@@ -930,15 +935,15 @@ impl Grammar {
 
         // First we follow the tree to the common prefix
         loop {
-            if prefix[index] != shadows[index] {
+            if prefix[index].value(buf) != shadows[index].value(buf) {
                 break;
             }
             // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
             if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
                 let prefix_symbol = db
                     .name_result()
-                    .lookup_symbol(prefix[index])
-                    .ok_or(Diagnostic::UnknownToken(index as i32))?
+                    .lookup_symbol(prefix[index].value(buf))
+                    .ok_or_else(|| undefined_cmd(&prefix[index], buf))?
                     .atom;
                 let next_node = map
                     .get(&(SymbolType::Constant, prefix_symbol))
@@ -952,8 +957,8 @@ impl Grammar {
 
         // We note the typecode and next branch of the "shadowed" prefix
         let shadowed_typecode = names
-            .lookup_float(shadows[index])
-            .ok_or(Diagnostic::UnknownToken(index as i32))?
+            .lookup_float(shadows[index].value(buf))
+            .ok_or_else(|| undefined_cmd(&shadows[index], buf))?
             .typecode_atom;
         let (shadowed_next_node, _) = self
             .next_var_node(node_id, shadowed_typecode)
@@ -966,11 +971,11 @@ impl Grammar {
         let mut missing_reduce = ReduceVec::new();
         for token in &prefix[index..] {
             let lookup_symbol = names
-                .lookup_symbol(token)
-                .ok_or(Diagnostic::UnknownToken(index as i32))?;
+                .lookup_symbol(token.value(buf))
+                .ok_or_else(|| undefined_cmd(&*token, buf))?;
             debug!(
                 "Following prefix {}, at {} / {}",
-                as_str(token),
+                as_str(token.value(buf)),
                 node_id,
                 add_from_node_id
             );
@@ -980,8 +985,8 @@ impl Grammar {
                 SymbolType::Variable => {
                     increment_offsets(&mut missing_reduce);
                     names
-                        .lookup_float(token)
-                        .ok_or(Diagnostic::UnknownToken(index as i32))?
+                        .lookup_float(token.value(buf))
+                        .ok_or_else(|| undefined_cmd(token, buf))?
                         .typecode_atom
                 }
             };
@@ -1008,7 +1013,7 @@ impl Grammar {
             }
         }
 
-        debug!("Shadowed token: {}", as_str(shadows[index]));
+        debug!("Shadowed token: {}", as_str(shadows[index].value(buf)));
         debug!("Missing reduces: {}", missing_reduce.len());
         debug!(
             "Handle shadowed next node {}, typecode {:?}",
@@ -1081,23 +1086,11 @@ impl Grammar {
                                 // syntax '|-' as 'wff';
                                 self.provable_type = nset
                                     .lookup_symbol(ty.value(buf))
-                                    .ok_or((
-                                        address,
-                                        Diagnostic::UndefinedToken(
-                                            ty.full_span(),
-                                            ty.value(buf).into(),
-                                        ),
-                                    ))?
+                                    .ok_or((address, undefined_cmd(ty, buf)))?
                                     .atom;
                                 self.typecodes.push(
                                     nset.lookup_symbol(code.value(buf))
-                                        .ok_or((
-                                            address,
-                                            Diagnostic::UndefinedToken(
-                                                code.full_span(),
-                                                code.value(buf).into(),
-                                            ),
-                                        ))?
+                                        .ok_or((address, undefined_cmd(code, buf)))?
                                         .atom,
                                 );
                             }
@@ -1105,13 +1098,7 @@ impl Grammar {
                                 // syntax 'setvar';
                                 self.typecodes.push(
                                     nset.lookup_symbol(ty.value(buf))
-                                        .ok_or((
-                                            address,
-                                            Diagnostic::UndefinedToken(
-                                                ty.full_span(),
-                                                ty.value(buf).into(),
-                                            ),
-                                        ))?
+                                        .ok_or((address, undefined_cmd(ty, buf)))?
                                         .atom,
                                 );
                             }
@@ -1124,14 +1111,8 @@ impl Grammar {
                                 .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
                                 .ok_or((address, Diagnostic::BadCommand(*k)))?; // '=>' not present in 'garden_path' command
                             let (prefix, shadows) = rest.split_at(split_index);
-                            let prefix =
-                                prefix.iter().map(|tk| tk.value(buf)).collect::<Box<[_]>>();
-                            let shadows = shadows[1..]
-                                .iter()
-                                .map(|tk| tk.value(buf))
-                                .collect::<Box<[_]>>();
                             if let Err(diag) =
-                                self.handle_common_prefixes(&prefix, &shadows, db, names)
+                                self.handle_common_prefixes(prefix, &shadows[1..], buf, db, names)
                             {
                                 return Err((address, diag));
                             }
@@ -1190,7 +1171,7 @@ impl Grammar {
         symbol_iter: &mut impl Iterator<Item = Symbol>,
         expected_typecodes: &[TypeCode],
         nset: &Nameset,
-    ) -> Result<Formula, Diagnostic> {
+    ) -> Result<Formula, StmtParseError> {
         struct StackElement {
             node_id: NodeId,
             expected_typecodes: Box<[TypeCode]>,
@@ -1244,7 +1225,7 @@ impl Grammar {
                             // There are still symbols to parse, continue from root
                             let (next_node_id, leaf_label) = self
                                 .next_var_node(self.root, typecode)
-                                .ok_or(Diagnostic::UnparseableStatement(ix))?;
+                                .ok_or(StmtParseError::UnparseableStatement(ix))?;
                             for &reduce in leaf_label {
                                 Self::do_reduce(&mut formula_builder, reduce, nset);
                             }
@@ -1267,7 +1248,7 @@ impl Grammar {
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) = self
                             .next_var_node(self.root, typecode)
-                            .ok_or(Diagnostic::UnparseableStatement(ix))?;
+                            .ok_or(StmtParseError::UnparseableStatement(ix))?;
                         for &reduce in leaf_label {
                             Self::do_reduce(&mut formula_builder, reduce, nset);
                         }
@@ -1296,7 +1277,7 @@ impl Grammar {
                         } else {
                             // No matching constant, search among variables
                             if map.is_empty() || e.node_id == self.root {
-                                return Err(Diagnostic::UnparseableStatement(ix));
+                                return Err(StmtParseError::UnparseableStatement(ix));
                             }
 
                             debug!(
@@ -1323,14 +1304,42 @@ impl Grammar {
         }
     }
 
+    /// Parses a character string into a formula
+    /// As a first math token, the string is expected to contain the typecode for the formula.
+    pub fn parse_string(
+        &self,
+        formula_string: &str,
+        nset: &Arc<Nameset>,
+    ) -> Result<Formula, StmtParseError> {
+        // TODO an iterator taking notes of the start and end of the math tokens would allow to return richer error messages, including actual spans rather than indices.
+        let mut symbols = formula_string.trim().split(&[' ', '\t', '\n']);
+        let typecode_name = symbols
+            .next()
+            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
+        let typecode = nset
+            .lookup_symbol(typecode_name.as_bytes())
+            .ok_or(StmtParseError::UnknownToken(0))?
+            .atom;
+        let expected_typecode = if typecode == self.provable_type {
+            self.logic_type
+        } else {
+            typecode
+        };
+        self.parse_formula(
+            &mut symbols.map(|t| nset.lookup_symbol(t.as_bytes()).unwrap().atom),
+            &[expected_typecode],
+            nset,
+        )
+    }
+
     fn parse_statement(
         &self,
         sref: &StatementRef<'_>,
         nset: &Nameset,
         names: &mut NameReader<'_>,
-    ) -> Result<Option<Formula>, Diagnostic> {
+    ) -> Result<Option<Formula>, StmtParseError> {
         if sref.math_len() == 0 {
-            return Err(Diagnostic::ParsedStatementNoTypeCode);
+            return Err(StmtParseError::ParsedStatementNoTypeCode);
         }
 
         // Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
@@ -1557,7 +1566,7 @@ impl StmtParse {
         let mut out = Vec::new();
         for sps in self.segments.values() {
             for (&sa, diag) in &sps.diagnostics {
-                out.push((sa, diag.clone()));
+                out.push((sa, diag.clone().into()));
             }
         }
         out
@@ -1573,7 +1582,9 @@ impl StmtParse {
                 let sref = sset.statement(sa);
                 let math_iter = sref.math_iter().flat_map(|token| {
                     nset.lookup_symbol(token.slice)
-                        .ok_or_else(|| (sref.address(), Diagnostic::UnknownToken(token.index())))
+                        .ok_or_else(|| {
+                            (sref.address(), StmtParseError::UnknownToken(token.index()))
+                        })
                         .map(|l| l.atom)
                 });
                 let fmla_iter = formula.as_ref(db).iter();
@@ -1614,7 +1625,7 @@ impl StmtParse {
 #[derive(Debug)]
 struct StmtParseSegment {
     _source: Arc<Segment>,
-    diagnostics: HashMap<StatementAddress, Diagnostic>,
+    diagnostics: HashMap<StatementAddress, StmtParseError>,
     formulas: HashMap<StatementAddress, Formula>,
 }
 
