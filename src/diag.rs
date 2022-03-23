@@ -170,9 +170,6 @@ pub enum Diagnostic {
     NotAProvableStatement,
     OldAltNotDiscouraged,
     ParenOrderError(Span, Span),
-    ParsedStatementTooShort(Option<Token>),
-    ParsedStatementNoTypeCode,
-    ParsedStatementWrongTypeCode(Token),
     ProofDvViolation,
     ProofExcessEnd,
     ProofIncomplete,
@@ -196,6 +193,7 @@ pub enum Diagnostic {
     StepOutOfRange,
     StepUsedAfterScope(Token),
     StepUsedBeforeDefinition(Token),
+    StmtParseError(StmtParseError),
     SymbolDuplicatesLabel(TokenIndex, StatementAddress),
     SymbolRedeclared(TokenIndex, TokenAddress),
     TabUsed(Span),
@@ -217,10 +215,8 @@ pub enum Diagnostic {
     UninterpretedHtml(Span),
     UnknownLabel(Span),
     UnknownKeyword(Span),
-    UnknownToken(TokenIndex),
     UnknownTypesettingCommand(Span),
     UnmatchedCloseGroup,
-    UnparseableStatement(TokenIndex),
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
     WindowsReservedLabel(Span),
@@ -793,12 +789,6 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
-            ParsedStatementNoTypeCode => ("Empty statement".into(), vec![(
-                AnnotationType::Error,
-                "Empty statement".into(),
-                stmt,
-                stmt.span(),
-            )]),
             OldAltNotDiscouraged if stmt.statement_type() == StatementType::Axiom => {
                 notes = &["Add (New usage is discouraged.) to the comment"];
                 ("OLD/ALT axiom not discouraged".into(), vec![(
@@ -832,21 +822,6 @@ impl Diagnostic {
                     later,
                 )])
             }
-            ParsedStatementTooShort(ref opt_tok) => ("Parsed statement too short".into(), vec![(
-                AnnotationType::Error,
-                match opt_tok {
-                    Some(tok) => format!("Statement is too short, expecting for example {expected}", expected = t(tok)).into(),
-                    None => "Statement is too short, and does not correspond to any valid prefix".into(),
-                },
-                stmt,
-                stmt.span(),
-            )]),
-            ParsedStatementWrongTypeCode(ref found) => ("Parsed statement has wrong typecode".into(), vec![(
-                AnnotationType::Error,
-                format!("Type code {found} is not among the expected type codes", found = t(found)).into(),
-                stmt,
-                stmt.span(),
-            )]),
             ProofDvViolation => ("Distinct variable violation".into(), vec![(
                 AnnotationType::Error,
                 "Disjoint variable constraint violated".into(),
@@ -1003,6 +978,7 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            StmtParseError(err) => err.build_info(stmt),
             SymbolDuplicatesLabel(index, saddr) => ("Symbol duplicates label".into(), vec![(
                 AnnotationType::Warning,
                 "Metamath spec forbids symbols which are the same as labels in the same \
@@ -1171,23 +1147,11 @@ impl Diagnostic {
                 stmt,
                 *span,
             )]),
-            UnknownToken(index) => ("Unknown token".into(), vec![(
-                AnnotationType::Error,
-                "This token was not declared in any $v or $c statement".into(),
-                stmt,
-                stmt.math_span(*index),
-            )]),
             UnmatchedCloseGroup => ("Unmatched close group".into(), vec![(
                 AnnotationType::Error,
                 "This $} does not match any open ${".into(),
                 stmt,
                 stmt.span(),
-            )]),
-            UnparseableStatement(index) => ("Unparseable statement".into(), vec![(
-                AnnotationType::Error,
-                "Could not parse this statement".into(),
-                stmt,
-                stmt.math_span(*index),
             )]),
             VariableMissingFloat(index) => ("Variable missing float".into(), vec![(
                 AnnotationType::Error,
@@ -1219,6 +1183,100 @@ impl Diagnostic {
         };
 
         make_snippet(sset, infos, notes, lc, f)
+    }
+}
+
+/// An error during statement parsing.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[allow(missing_docs)]
+pub enum StmtParseError {
+    ParsedStatementTooShort(Option<Token>),
+    ParsedStatementNoTypeCode,
+    ParsedStatementWrongTypeCode(Token),
+    UnknownToken(TokenIndex),
+    UnparseableStatement(TokenIndex),
+}
+
+impl StmtParseError {
+    /// The diagnostic's label
+    #[must_use]
+    pub fn label<'a>(&self) -> Cow<'a, str> {
+        match self {
+            StmtParseError::ParsedStatementTooShort(_) => "Parsed statement too short",
+            StmtParseError::ParsedStatementWrongTypeCode(_) => {
+                "Parsed statement has wrong typecode"
+            }
+            StmtParseError::UnknownToken(_) => "Unknown token",
+            StmtParseError::UnparseableStatement(_) => "Unparseable statement",
+            StmtParseError::ParsedStatementNoTypeCode => "Empty statement",
+        }
+        .into()
+    }
+
+    /// The diagnostic's severity
+    #[must_use]
+    #[allow(clippy::unused_self)]
+    pub const fn severity(&self) -> AnnotationType {
+        AnnotationType::Error
+    }
+
+    fn build_info<'a>(&self, stmt: StatementRef<'a>) -> AnnInfo<'a> {
+        fn t(v: &Token) -> String {
+            as_str(v).to_owned()
+        }
+        let severity = self.severity();
+        let info = match self {
+            StmtParseError::ParsedStatementTooShort(ref opt_tok) => (
+                severity,
+                match opt_tok {
+                    Some(tok) => format!(
+                        "Statement is too short, expecting for example {expected}",
+                        expected = t(tok)
+                    )
+                    .into(),
+                    None => {
+                        "Statement is too short, and does not correspond to any valid prefix".into()
+                    }
+                },
+                stmt,
+                stmt.span(),
+            ),
+            StmtParseError::ParsedStatementWrongTypeCode(ref found) => (
+                severity,
+                format!(
+                    "Type code {found} is not among the expected type codes",
+                    found = t(found)
+                )
+                .into(),
+                stmt,
+                stmt.span(),
+            ),
+            StmtParseError::UnknownToken(index) => (
+                severity,
+                "This token was not declared in any $v or $c statement".into(),
+                stmt,
+                stmt.math_span(*index),
+            ),
+            StmtParseError::UnparseableStatement(index) => (
+                severity,
+                "Could not parse this statement".into(),
+                stmt,
+                stmt.math_span(*index),
+            ),
+            StmtParseError::ParsedStatementNoTypeCode => (
+                AnnotationType::Error,
+                "Empty statement".into(),
+                stmt,
+                stmt.span(),
+            ),
+        };
+        (self.label(), vec![info])
+    }
+}
+
+impl From<StmtParseError> for Diagnostic {
+    fn from(err: StmtParseError) -> Self {
+        Diagnostic::StmtParseError(err)
     }
 }
 
