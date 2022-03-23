@@ -101,7 +101,7 @@ impl GrammarTree {
         copy_from_node_id: NodeId,
         copy_to_node_id: NodeId,
         add_reduce: Reduce,
-    ) -> Result<(), NodeId> {
+    ) -> Result<(), Diagnostic> {
         match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
             (
                 GrammarNode::Branch { map },
@@ -127,7 +127,7 @@ impl GrammarTree {
                 }
                 Ok(())
             }
-            _ => Err(copy_to_node_id),
+            _ => Err(Diagnostic::GrammarCantBuild("Malformed garden path: Cannot copy branches if any of the 'from' or 'to' is a leaf.")),
         }
     }
 }
@@ -225,7 +225,7 @@ fn diff_extend(rv1: ReduceVec, rv2: ReduceVec, extend: &mut ReduceVec) -> Result
         }
     }
     if or2.is_some() {
-        Err(Diagnostic::GrammarCantBuild)
+        Err(Diagnostic::GrammarCantBuild("Malformed garden path: More <reduce> in the target branch than in the template branch."))
     } else {
         Ok(())
     }
@@ -547,8 +547,11 @@ impl Grammar {
         let mut tokens = sref.math_iter().peekable();
 
         // Atom for this axiom's label.
-        let this_label = names.lookup_label(sref.label()).unwrap().atom;
-        let this_typecode = nset.get_atom(tokens.next().unwrap().slice);
+        let this_label = names
+            .lookup_label(sref.label())
+            .ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?
+            .atom;
+        let this_typecode = nset.get_atom(tokens.next().ok_or(Diagnostic::UnknownToken(0))?.slice);
 
         // In case of a non-syntax axiom, skip it.
         if this_typecode == self.provable_type {
@@ -623,7 +626,10 @@ impl Grammar {
         let mut tokens = sref.math_iter();
 
         // Atom for this float's label.
-        let this_label = names.lookup_label(sref.label()).unwrap().atom;
+        let this_label = names
+            .lookup_label(sref.label())
+            .ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?
+            .atom;
         let this_typecode =
             nset.get_atom(tokens.next().ok_or(Diagnostic::NotActiveSymbol(0))?.slice);
 
@@ -637,8 +643,7 @@ impl Grammar {
             .nodes
             .create_leaf(Reduce::new_variable(this_label), this_typecode);
 
-        // If is safe to unwrap here since parser has already checked.
-        let token = tokens.next().unwrap();
+        let token = tokens.next().ok_or(Diagnostic::BadFloating)?;
         let symbol = names
             .lookup_symbol(token.slice)
             .ok_or(Diagnostic::FloatNotVariable(1))?;
@@ -698,7 +703,7 @@ impl Grammar {
                                     leaf_label,
                                 },
                             )
-                            .unwrap();
+                            .unwrap(); // We're adding a missing branch, not such branch shall not exist yet.
                         }
                         Some(existing_next_node) => {
                             // A branch for the converted type already exist: add the conversion to that branch!
@@ -709,13 +714,11 @@ impl Grammar {
                             debug!("{:?}", self.node_id(db, next_node_id));
                             debug!("{:?}", self.node_id(db, existing_next_node.next_node_id));
                             let existing_next_node_id = existing_next_node.next_node_id;
-                            self.nodes
-                                .copy_branches(
-                                    next_node_id,
-                                    existing_next_node_id,
-                                    Reduce::new(label, 1),
-                                )
-                                .unwrap();
+                            self.nodes.copy_branches(
+                                next_node_id,
+                                existing_next_node_id,
+                                Reduce::new(label, 1),
+                            )?;
                         }
                     }
                 }
@@ -752,8 +755,9 @@ impl Grammar {
         db: &Database,
         mut stored_reduces: ReduceVec,
         make_final: F,
-    ) where
-        F: FnOnce(&ReduceVec, TypeCode) -> NextNode + Copy,
+    ) -> Result<(), Diagnostic>
+    where
+        F: FnOnce(&ReduceVec, TypeCode) -> Result<NextNode, Diagnostic> + Copy,
     {
         debug!("Clone {} to {}", add_from_node_id, add_to_node_id);
         debug!("{:?}", self.node_id(db, add_from_node_id));
@@ -785,7 +789,7 @@ impl Grammar {
                         "LEAF for {} to {} {:?}",
                         add_from_node_id, add_to_node_id, reduce_vec
                     );
-                    let final_node = make_final(&reduce_vec, typecode);
+                    let final_node = make_final(&reduce_vec, typecode)?;
                     match self.add_branch(add_to_node_id, symbol, stype, &final_node) {
                         Ok(_) => {}
                         Err(conflict_node_id) => {
@@ -798,7 +802,7 @@ impl Grammar {
                                 final_node.next_node_id,
                                 conflict_node_id,
                                 &reduce_vec,
-                            );
+                            )?;
                         }
                     }
                 } else {
@@ -830,10 +834,11 @@ impl Grammar {
                         db,
                         new_stored_reduces,
                         make_final,
-                    );
+                    )?;
                 }
             }
         }
+        Ok(())
     }
 
     // compare this with "copy_branches"!
@@ -842,10 +847,10 @@ impl Grammar {
         add_from_node_id: NodeId,
         add_to_node_id: NodeId,
         reduce_vec: &ReduceVec,
-    ) {
+    ) -> Result<(), Diagnostic> {
         if add_from_node_id == add_to_node_id {
             // nothing to clone here!
-            return;
+            return Ok(());
         }
         debug!(
             "Clone with reduce {} to {}",
@@ -859,8 +864,13 @@ impl Grammar {
                 stype,
                 &next_node.with_reduce_vec(reduce_vec),
             )
-            .expect("Double conflict!");
+            .map_err(|_| {
+                Diagnostic::GrammarCantBuild(
+                    "Grammar implementation does not handle double conflicts",
+                )
+            })?;
         }
+        Ok(())
     }
 
     /// Expand the tree at the given node, for the given symbol.  This means cloning/inserting from the root tree at that symbol, until a given typecode is obtained, into the given node
@@ -871,34 +881,45 @@ impl Grammar {
         symbol: Symbol,
         stype: SymbolType,
         db: &Database,
-    ) -> NodeId {
+    ) -> Result<NodeId, Diagnostic> {
         let next_node_id_from_root = self
             .nodes
             .get(self.root)
             .next_node(symbol, stype)
-            .expect("Expanded formula cannot be parsed from root node!")
+            .ok_or(Diagnostic::GrammarCantBuild(
+                "Expanded formula cannot be parsed from root node",
+            ))?
             .next_node_id;
         let node_from_root = self.nodes.get(next_node_id_from_root).clone();
         let new_node_id = self
             .add_branch_with_reduce(to_node, symbol, stype, ReduceVec::new())
-            .unwrap();
+            .map_err(|_| {
+                Diagnostic::GrammarCantBuild(
+                    "Malformed garden path: Tree to be expanded already exists",
+                )
+            })?;
         self.clone_branches(
             next_node_id_from_root,
             new_node_id,
             db,
             ReduceVec::new(),
             |rv, t| {
-                node_from_root
+                Ok(node_from_root
                     .next_node(t, SymbolType::Variable)
-                    .expect("Expanded node's typecode not available!")
-                    .with_reduce_vec(rv)
+                    .ok_or(Diagnostic::GrammarCantBuild(
+                        "Malformed garden path: Expanded node's typecode is not available",
+                    ))?
+                    .with_reduce_vec(rv))
             },
-        );
-        self.nodes
+        )?;
+        Ok(self
+            .nodes
             .get(to_node)
             .next_node(symbol, stype)
-            .unwrap()
-            .next_node_id
+            .ok_or(Diagnostic::GrammarCantBuild(
+                "Malformed garden path: prefix cannot be parsed",
+            ))?
+            .next_node_id)
     }
 
     /// Handle common prefixes (garden paths).
@@ -926,22 +947,33 @@ impl Grammar {
             }
             // TODO(tirix): use https://rust-lang.github.io/rfcs/2497-if-let-chains.html once it's out!
             if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
-                let prefix_symbol = db.name_result().lookup_symbol(prefix[index]).unwrap().atom;
+                let prefix_symbol = db
+                    .name_result()
+                    .lookup_symbol(prefix[index])
+                    .ok_or(Diagnostic::UnknownToken(index as i32))?
+                    .atom;
                 let next_node = map
                     .get(&(SymbolType::Constant, prefix_symbol))
                     .expect("Prefix cannot be parsed!");
                 node_id = next_node.next_node_id;
                 index += 1;
             } else {
-                panic!("Leaf reached while parsing common prefixes!");
+                return Err(Diagnostic::GrammarCantBuild(
+                    "Leaf reached while parsing common prefixes",
+                ));
             }
         }
 
         // We note the typecode and next branch of the "shadowed" prefix
-        let shadowed_typecode = names.lookup_float(shadows[index]).unwrap().typecode_atom;
-        let (shadowed_next_node, _) = self
-            .next_var_node(node_id, shadowed_typecode)
-            .expect("Shadowed prefix cannot be parsed!");
+        let shadowed_typecode = names
+            .lookup_float(shadows[index])
+            .ok_or(Diagnostic::UnknownToken(index as i32))?
+            .typecode_atom;
+        let (shadowed_next_node, _) =
+            self.next_var_node(node_id, shadowed_typecode)
+                .ok_or(Diagnostic::GrammarCantBuild(
+                    "Shadowed prefix cannot be parsed",
+                ))?;
 
         // We note what comes after the shadowing typecode, both if we start from the prefix and if we start from the root
         let mut add_from_node_id = self.root;
@@ -949,7 +981,9 @@ impl Grammar {
         let mut shadowing_stype;
         let mut missing_reduce = ReduceVec::new();
         for token in &prefix[index..] {
-            let lookup_symbol = names.lookup_symbol(token).unwrap();
+            let lookup_symbol = names
+                .lookup_symbol(token)
+                .ok_or(Diagnostic::UnknownToken(index as i32))?;
             debug!(
                 "Following prefix {}, at {} / {}",
                 as_str(token),
@@ -961,14 +995,17 @@ impl Grammar {
                 SymbolType::Constant => lookup_symbol.atom,
                 SymbolType::Variable => {
                     increment_offsets(&mut missing_reduce);
-                    names.lookup_float(token).unwrap().typecode_atom
+                    names
+                        .lookup_float(token)
+                        .ok_or(Diagnostic::UnknownToken(index as i32))?
+                        .typecode_atom
                 }
             };
             let add_to_next_node = self
                 .nodes
                 .get(node_id)
                 .next_node(shadowing_atom, shadowing_stype)
-                .expect("Prefix cannot be parsed!");
+                .ok_or(Diagnostic::GrammarCantBuild("Prefix cannot be parsed"))?;
             node_id = add_to_next_node.next_node_id;
             add_from_node_id = match self
                 .nodes
@@ -983,7 +1020,7 @@ impl Grammar {
                     )?;
                     next_node.next_node_id
                 }
-                None => self.expand_tree(add_from_node_id, shadowing_atom, shadowing_stype, db),
+                None => self.expand_tree(add_from_node_id, shadowing_atom, shadowing_stype, db)?,
             }
         }
 
@@ -1001,17 +1038,19 @@ impl Grammar {
 
         // Then we copy each of the next branch of the shadowed string to the shadowing branch
         // If the next node is a leaf, instead, we add a leaf label, and point to the next
-        let make_final = |rv: &ReduceVec, _| NextNode {
-            next_node_id: shadowed_next_node,
-            leaf_label: *rv,
+        let make_final = |rv: &ReduceVec, _| {
+            Ok(NextNode {
+                next_node_id: shadowed_next_node,
+                leaf_label: *rv,
+            })
         };
         match self.nodes.get(add_from_node_id) {
             GrammarNode::Branch { .. } => {
-                self.clone_branches(add_from_node_id, node_id, db, missing_reduce, make_final);
+                self.clone_branches(add_from_node_id, node_id, db, missing_reduce, make_final)?;
             }
             GrammarNode::Leaf { reduce, .. } => {
                 missing_reduce.push(*reduce);
-                self.clone_with_reduce_vec(shadowed_next_node, node_id, &missing_reduce);
+                self.clone_with_reduce_vec(shadowed_next_node, node_id, &missing_reduce)?;
             }
         }
 
@@ -1044,23 +1083,53 @@ impl Grammar {
         let nset = db.name_result();
         for sref in db.parse_result().segments(..) {
             let buf = &**sref.buffer;
-            for &(ix, (_, ref command)) in &sref.j_commands {
+            for &(ix, (span, ref command)) in &sref.j_commands {
                 use CommandToken::*;
                 let address = StatementAddress::new(sref.id, ix);
-                if let (Keyword(k), rest) = command.split_first().expect("Empty parser command!") {
+                if let (Keyword(k), rest) = command
+                    .split_first()
+                    .ok_or((address, Diagnostic::BadCommand(span)))?
+                {
+                    // Empty parser command
                     match k.as_ref(buf) {
                         b"syntax" => match rest {
                             [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
                                 // syntax '|-' as 'wff';
-                                self.provable_type =
-                                    nset.lookup_symbol(ty.value(buf)).unwrap().atom;
-                                self.typecodes
-                                    .push(nset.lookup_symbol(code.value(buf)).unwrap().atom);
+                                self.provable_type = nset
+                                    .lookup_symbol(ty.value(buf))
+                                    .ok_or((
+                                        address,
+                                        Diagnostic::UndefinedToken(
+                                            ty.full_span(),
+                                            ty.value(buf).into(),
+                                        ),
+                                    ))?
+                                    .atom;
+                                self.typecodes.push(
+                                    nset.lookup_symbol(code.value(buf))
+                                        .ok_or((
+                                            address,
+                                            Diagnostic::UndefinedToken(
+                                                code.full_span(),
+                                                code.value(buf).into(),
+                                            ),
+                                        ))?
+                                        .atom,
+                                );
                             }
                             [ty] => {
                                 // syntax 'setvar';
-                                self.typecodes
-                                    .push(nset.lookup_symbol(ty.value(buf)).unwrap().atom);
+                                self.typecodes.push(
+                                    nset.lookup_symbol(ty.value(buf))
+                                        .ok_or((
+                                            address,
+                                            Diagnostic::UndefinedToken(
+                                                ty.full_span(),
+                                                ty.value(buf).into(),
+                                            ),
+                                        ))?
+                                        .atom,
+                                );
                             }
                             _ => {}
                         },
@@ -1069,7 +1138,7 @@ impl Grammar {
                             let split_index = rest
                                 .iter()
                                 .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
-                                .expect("'=>' not present in 'garden_path' command!");
+                                .ok_or((address, Diagnostic::BadCommand(*k)))?; // '=>' not present in 'garden_path' command
                             let (prefix, shadows) = rest.split_at(split_index);
                             let prefix =
                                 prefix.iter().map(|tk| tk.value(buf)).collect::<Box<[_]>>();
@@ -1145,7 +1214,7 @@ impl Grammar {
 
         let mut formula_builder = FormulaBuilder::default();
         let mut symbol_enum = symbol_iter.enumerate().peekable();
-        let mut ix;
+        let mut ix = 0;
         let mut e = StackElement {
             node_id: self.root,
             expected_typecodes: expected_typecodes.to_vec().into_boxed_slice(),
@@ -1189,8 +1258,9 @@ impl Grammar {
                             return Ok(formula_builder.build(typecode));
                         } else {
                             // There are still symbols to parse, continue from root
-                            let (next_node_id, leaf_label) =
-                                self.next_var_node(self.root, typecode).unwrap(); // TODO(tirix): error case
+                            let (next_node_id, leaf_label) = self
+                                .next_var_node(self.root, typecode)
+                                .ok_or(Diagnostic::UnparseableStatement(ix))?;
                             for &reduce in leaf_label {
                                 Self::do_reduce(&mut formula_builder, reduce, nset);
                             }
@@ -1211,8 +1281,9 @@ impl Grammar {
                         }
                         // We have not found the expected typecode, continue from root
                         debug!(" ++ Wrong type obtained, continue.");
-                        let (next_node_id, leaf_label) =
-                            self.next_var_node(self.root, typecode).unwrap(); // TODO(tirix): error case
+                        let (next_node_id, leaf_label) = self
+                            .next_var_node(self.root, typecode)
+                            .ok_or(Diagnostic::UnparseableStatement(ix))?;
                         for &reduce in leaf_label {
                             Self::do_reduce(&mut formula_builder, reduce, nset);
                         }
@@ -1516,9 +1587,11 @@ impl StmtParse {
         for sps in self.segments.values() {
             for (&sa, formula) in &sps.formulas {
                 let sref = sset.statement(sa);
-                let math_iter = sref
-                    .math_iter()
-                    .map(|token| nset.lookup_symbol(token.slice).unwrap().atom);
+                let math_iter = sref.math_iter().flat_map(|token| {
+                    nset.lookup_symbol(token.slice)
+                        .ok_or_else(|| (sref.address(), Diagnostic::UnknownToken(token.index())))
+                        .map(|l| l.atom)
+                });
                 let fmla_iter = formula.as_ref(db).iter();
                 if math_iter.ne(fmla_iter) {
                     return Err((sa, Diagnostic::FormulaVerificationFailed));

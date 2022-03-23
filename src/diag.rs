@@ -146,7 +146,7 @@ pub enum Diagnostic {
     FloatRedeclared(StatementAddress),
     FormulaVerificationFailed,
     GrammarAmbiguous(StatementAddress),
-    GrammarCantBuild,
+    GrammarCantBuild(&'static str),
     GrammarProvableFloat,
     HeaderCommentParseError(HeadingLevel),
     InvalidAxiomRestatement(Span, Span),
@@ -631,9 +631,9 @@ impl Diagnostic {
                 sset.statement(*prevstmt),
                 sset.statement(*prevstmt).span(),
             )]),
-            GrammarCantBuild => ("Can't build the grammar".into(), vec![(
+            GrammarCantBuild(message) => ("Can't build the grammar".into(), vec![(
                 AnnotationType::Error,
-                "Can't build the grammar".into(),
+                (*message).into(),
                 stmt,
                 stmt.span(),
             )]),
