@@ -101,7 +101,7 @@ impl GrammarTree {
         copy_from_node_id: NodeId,
         copy_to_node_id: NodeId,
         add_reduce: Reduce,
-    ) -> Result<(), NodeId> {
+    ) -> Result<(), Diagnostic> {
         match self.get_two_nodes_mut(copy_from_node_id, copy_to_node_id) {
             (
                 GrammarNode::Branch { map },
@@ -127,7 +127,7 @@ impl GrammarTree {
                 }
                 Ok(())
             }
-            _ => Err(copy_to_node_id),
+            _ => Err(Diagnostic::GrammarCantBuild("Malformed garden path: Cannot copy branches if any of the 'from' or 'to' is a leaf.")),
         }
     }
 }
@@ -225,7 +225,7 @@ fn diff_extend(rv1: ReduceVec, rv2: ReduceVec, extend: &mut ReduceVec) -> Result
         }
     }
     if or2.is_some() {
-        Err(Diagnostic::GrammarCantBuild)
+        Err(Diagnostic::GrammarCantBuild("Malformed garden path: More <reduce> in the target branch than in the template branch."))
     } else {
         Ok(())
     }
@@ -703,7 +703,7 @@ impl Grammar {
                                     leaf_label,
                                 },
                             )
-                            .map_err(|_| Diagnostic::GrammarCantBuild)?;
+                            .unwrap(); // We're adding a missing branch, not such branch shall not exist yet.
                         }
                         Some(existing_next_node) => {
                             // A branch for the converted type already exist: add the conversion to that branch!
@@ -714,13 +714,11 @@ impl Grammar {
                             debug!("{:?}", self.node_id(db, next_node_id));
                             debug!("{:?}", self.node_id(db, existing_next_node.next_node_id));
                             let existing_next_node_id = existing_next_node.next_node_id;
-                            self.nodes
-                                .copy_branches(
-                                    next_node_id,
-                                    existing_next_node_id,
-                                    Reduce::new(label, 1),
-                                )
-                                .map_err(|_| Diagnostic::GrammarCantBuild)?;
+                            self.nodes.copy_branches(
+                                next_node_id,
+                                existing_next_node_id,
+                                Reduce::new(label, 1),
+                            )?;
                         }
                     }
                 }
@@ -866,7 +864,11 @@ impl Grammar {
                 stype,
                 &next_node.with_reduce_vec(reduce_vec),
             )
-            .map_err(|_| Diagnostic::GrammarCantBuild)?; // Double conflict
+            .map_err(|_| {
+                Diagnostic::GrammarCantBuild(
+                    "Grammar implementation does not handle double conflicts",
+                )
+            })?;
         }
         Ok(())
     }
@@ -884,12 +886,18 @@ impl Grammar {
             .nodes
             .get(self.root)
             .next_node(symbol, stype)
-            .ok_or(Diagnostic::GrammarCantBuild)? // Expanded formula cannot be parsed from root node
+            .ok_or(Diagnostic::GrammarCantBuild(
+                "Expanded formula cannot be parsed from root node",
+            ))?
             .next_node_id;
         let node_from_root = self.nodes.get(next_node_id_from_root).clone();
         let new_node_id = self
             .add_branch_with_reduce(to_node, symbol, stype, ReduceVec::new())
-            .map_err(|_| Diagnostic::GrammarCantBuild)?;
+            .map_err(|_| {
+                Diagnostic::GrammarCantBuild(
+                    "Malformed garden path: Tree to be expanded already exists",
+                )
+            })?;
         self.clone_branches(
             next_node_id_from_root,
             new_node_id,
@@ -898,7 +906,9 @@ impl Grammar {
             |rv, t| {
                 Ok(node_from_root
                     .next_node(t, SymbolType::Variable)
-                    .ok_or(Diagnostic::GrammarCantBuild)? // Expanded node's typecode is not available
+                    .ok_or(Diagnostic::GrammarCantBuild(
+                        "Malformed garden path: Expanded node's typecode is not available",
+                    ))?
                     .with_reduce_vec(rv))
             },
         )?;
@@ -906,7 +916,9 @@ impl Grammar {
             .nodes
             .get(to_node)
             .next_node(symbol, stype)
-            .ok_or(Diagnostic::GrammarCantBuild)?
+            .ok_or(Diagnostic::GrammarCantBuild(
+                "Malformed garden path: prefix cannot be parsed",
+            ))?
             .next_node_id)
     }
 
@@ -946,7 +958,9 @@ impl Grammar {
                 node_id = next_node.next_node_id;
                 index += 1;
             } else {
-                return Err(Diagnostic::GrammarCantBuild); // Leaf reached while parsing common prefixes!
+                return Err(Diagnostic::GrammarCantBuild(
+                    "Leaf reached while parsing common prefixes",
+                ));
             }
         }
 
@@ -955,9 +969,11 @@ impl Grammar {
             .lookup_float(shadows[index])
             .ok_or(Diagnostic::UnknownToken(index as i32))?
             .typecode_atom;
-        let (shadowed_next_node, _) = self
-            .next_var_node(node_id, shadowed_typecode)
-            .ok_or(Diagnostic::GrammarCantBuild)?; // Shadowed prefix cannot be parsed
+        let (shadowed_next_node, _) =
+            self.next_var_node(node_id, shadowed_typecode)
+                .ok_or(Diagnostic::GrammarCantBuild(
+                    "Shadowed prefix cannot be parsed",
+                ))?;
 
         // We note what comes after the shadowing typecode, both if we start from the prefix and if we start from the root
         let mut add_from_node_id = self.root;
@@ -989,7 +1005,7 @@ impl Grammar {
                 .nodes
                 .get(node_id)
                 .next_node(shadowing_atom, shadowing_stype)
-                .ok_or(Diagnostic::GrammarCantBuild)?; // Prefix cannot be parsed
+                .ok_or(Diagnostic::GrammarCantBuild("Prefix cannot be parsed"))?;
             node_id = add_to_next_node.next_node_id;
             add_from_node_id = match self
                 .nodes
