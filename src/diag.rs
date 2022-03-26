@@ -216,6 +216,7 @@ pub enum Diagnostic {
     UnknownLabel(Span),
     UnknownKeyword(Span),
     UnknownTypesettingCommand(Span),
+    UnknownToken(TokenIndex),
     UnmatchedCloseGroup,
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
@@ -1113,6 +1114,12 @@ impl Diagnostic {
                 stmt,
                 *kwspan,
             )]),
+            UnknownToken(index) => ("Undeclared token".into(), vec![(
+                AnnotationType::Warning,
+                "This token was not declared in any $v or $c statement".into(),
+                stmt,
+                stmt.math_span(*index),
+            )]),
             UnknownTypesettingCommand(kwspan) => ("Unknown $t command".into(), vec![(
                 AnnotationType::Error,
                 "Typesetting command must be one of:\n\
@@ -1190,11 +1197,11 @@ impl Diagnostic {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum StmtParseError {
-    ParsedStatementTooShort(Option<Token>),
+    ParsedStatementTooShort(Span, Option<Token>),
     ParsedStatementNoTypeCode,
     ParsedStatementWrongTypeCode(Token),
-    UnknownToken(TokenIndex),
-    UnparseableStatement(TokenIndex),
+    UnknownToken(Span),
+    UnparseableStatement(Span),
 }
 
 impl StmtParseError {
@@ -1202,7 +1209,7 @@ impl StmtParseError {
     #[must_use]
     pub fn label<'a>(&self) -> Cow<'a, str> {
         match self {
-            StmtParseError::ParsedStatementTooShort(_) => "Parsed statement too short",
+            StmtParseError::ParsedStatementTooShort(_, _) => "Parsed statement too short",
             StmtParseError::ParsedStatementWrongTypeCode(_) => {
                 "Parsed statement has wrong typecode"
             }
@@ -1226,7 +1233,7 @@ impl StmtParseError {
         }
         let severity = self.severity();
         let info = match self {
-            StmtParseError::ParsedStatementTooShort(ref opt_tok) => (
+            StmtParseError::ParsedStatementTooShort(span, ref opt_tok) => (
                 severity,
                 match opt_tok {
                     Some(tok) => format!(
@@ -1239,7 +1246,7 @@ impl StmtParseError {
                     }
                 },
                 stmt,
-                stmt.span(),
+                *span,
             ),
             StmtParseError::ParsedStatementWrongTypeCode(ref found) => (
                 severity,
@@ -1251,17 +1258,17 @@ impl StmtParseError {
                 stmt,
                 stmt.span(),
             ),
-            StmtParseError::UnknownToken(index) => (
+            StmtParseError::UnknownToken(span) => (
                 severity,
                 "This token was not declared in any $v or $c statement".into(),
                 stmt,
-                stmt.math_span(*index),
+                *span,
             ),
-            StmtParseError::UnparseableStatement(index) => (
+            StmtParseError::UnparseableStatement(span) => (
                 severity,
                 "Could not parse this statement".into(),
                 stmt,
-                stmt.math_span(*index),
+                *span,
             ),
             StmtParseError::ParsedStatementNoTypeCode => (
                 AnnotationType::Error,
