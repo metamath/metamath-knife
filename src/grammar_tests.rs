@@ -340,5 +340,5 @@ grammar_test!(
     b"$c |- ( $. err $a |- ( unknown $.",
     2,
     1,
-    Diagnostic::UnknownToken(2)
+    Diagnostic::UndefinedToken(crate::Span::new(23, 30), Box::new(*b"unknown"))
 );

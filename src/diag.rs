@@ -216,7 +216,6 @@ pub enum Diagnostic {
     UnknownLabel(Span),
     UnknownKeyword(Span),
     UnknownTypesettingCommand(Span),
-    UnknownToken(TokenIndex),
     UnmatchedCloseGroup,
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
@@ -1113,12 +1112,6 @@ impl Diagnostic {
                 "Statement-starting keyword must be one of $a $c $d $e $f $p $v".into(),
                 stmt,
                 *kwspan,
-            )]),
-            UnknownToken(index) => ("Undeclared token".into(), vec![(
-                AnnotationType::Warning,
-                "This token was not declared in any $v or $c statement".into(),
-                stmt,
-                stmt.math_span(*index),
             )]),
             UnknownTypesettingCommand(kwspan) => ("Unknown $t command".into(), vec![(
                 AnnotationType::Error,

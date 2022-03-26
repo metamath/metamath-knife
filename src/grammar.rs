@@ -401,8 +401,8 @@ impl Default for Grammar {
     }
 }
 
-const fn undefined(token: TokenRef<'_>) -> Diagnostic {
-    Diagnostic::UnknownToken(token.address.token_index)
+fn undefined(token: TokenRef<'_>, sref: &StatementRef<'_>) -> Diagnostic {
+    Diagnostic::UndefinedToken(sref.math_span(token.index()), token.slice.into())
 }
 
 fn undefined_cmd(token: &CommandToken, buf: &[u8]) -> Diagnostic {
@@ -592,7 +592,7 @@ impl Grammar {
         while let Some(token) = tokens.next() {
             let symbol = names
                 .lookup_symbol(token.slice)
-                .ok_or_else(|| undefined(token))?;
+                .ok_or_else(|| undefined(token, sref))?;
             let atom = match symbol.stype {
                 SymbolType::Constant => symbol.atom,
                 SymbolType::Variable => {
@@ -601,7 +601,7 @@ impl Grammar {
                     // Ideally this information would be included in the LookupSymbol
                     names
                         .lookup_float(token.slice)
-                        .ok_or_else(|| undefined(token))?
+                        .ok_or_else(|| undefined(token, sref))?
                         .typecode_atom
                 }
             };
