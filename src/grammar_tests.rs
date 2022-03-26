@@ -2,6 +2,7 @@ use crate::as_str;
 use crate::database::Database;
 use crate::database::DbOptions;
 use crate::diag::Diagnostic;
+use crate::diag::StmtParseError;
 use crate::statement::SegmentId;
 use crate::statement::StatementAddress;
 
@@ -306,12 +307,12 @@ grammar_test!(
     b"$c |- $. err $a |- unknown $.",
     2,
     1,
-    Diagnostic::UnknownToken(1)
+    Diagnostic::UndefinedToken(crate::Span::new(19, 26), Box::new(*b"unknown"))
 );
 grammar_test!(
     test_unknown_token_2,
     b"$c |- ( $. err $a |- ( unknown $.",
     2,
     1,
-    Diagnostic::UnknownToken(2)
+    Diagnostic::StmtParseError(StmtParseError::UnknownToken(2))
 );
