@@ -323,6 +323,7 @@ impl<'a> Iterator for NormalIter<'a> {
 impl ProofBuilder for ProofTreeArray {
     type Item = usize;
     type Accum = Vec<usize>;
+    type StackBuffer = Vec<u8>;
 
     fn push(&mut self, hyps: &mut Vec<usize>, hyp: usize) {
         hyps.push(hyp);
@@ -332,7 +333,7 @@ impl ProofBuilder for ProofTreeArray {
         &mut self,
         addr: StatementAddress,
         trees: Vec<usize>,
-        pool: &[u8],
+        pool: &Vec<u8>,
         expr: Range<usize>,
     ) -> usize {
         let tree = ProofTree::new(self, addr, trees);

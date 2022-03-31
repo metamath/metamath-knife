@@ -434,7 +434,7 @@ impl<'a> FormulaRef<'a> {
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         self,
         stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A, StackBuffer = Vec<u8>>,
     ) -> I {
         self.sub_build_syntax_proof(self.root, stack_buffer, arr)
     }
@@ -450,7 +450,7 @@ impl<'a> FormulaRef<'a> {
         self,
         node_id: NodeId,
         stack_buffer: &mut Vec<u8>,
-        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A, StackBuffer = Vec<u8>>,
     ) -> I {
         let nset = self.db.name_result();
 
