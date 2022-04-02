@@ -1,10 +1,14 @@
+use std::sync::Arc;
+
 use crate::as_str;
 use crate::database::Database;
 use crate::database::DbOptions;
 use crate::diag::Diagnostic;
-use crate::diag::StmtParseError;
+use crate::grammar::FormulaToken;
+use crate::nameck::Nameset;
 use crate::statement::SegmentId;
 use crate::statement::StatementAddress;
+use crate::Span;
 
 macro_rules! sa {
     ($id: expr, $index:expr) => {
@@ -86,6 +90,13 @@ fn test_db_formula() {
     }
 }
 
+fn make_tok(t: &[u8], names: &Arc<Nameset>) -> FormulaToken {
+    FormulaToken {
+        symbol: names.lookup_symbol(t).unwrap().atom,
+        span: Span::default(),
+    }
+}
+
 #[test]
 fn test_parse_formula() {
     let mut db = mkdb(GRAMMAR_DB);
@@ -93,12 +104,12 @@ fn test_parse_formula() {
     let grammar = db.grammar_pass().clone();
     let wff = names.lookup_symbol(b"wff").unwrap().atom;
     let class = names.lookup_symbol(b"class").unwrap().atom;
-    let a = names.lookup_symbol(b"A").unwrap().atom;
-    let b = names.lookup_symbol(b"B").unwrap().atom;
-    let eq = names.lookup_symbol(b"=").unwrap().atom;
-    let plus = names.lookup_symbol(b"+").unwrap().atom;
-    let open_parens = names.lookup_symbol(b"(").unwrap().atom;
-    let close_parens = names.lookup_symbol(b")").unwrap().atom;
+    let a = make_tok(b"A", &names);
+    let b = make_tok(b"B", &names);
+    let eq = make_tok(b"=", &names);
+    let plus = make_tok(b"+", &names);
+    let open_parens = make_tok(b"(", &names);
+    let close_parens = make_tok(b")", &names);
     let fmla_vec = vec![a, eq, open_parens, b, plus, a, close_parens];
     let formula = grammar
         .parse_formula(&mut fmla_vec.clone().into_iter(), &[wff, class], &names)
@@ -127,7 +138,19 @@ fn test_parse_formula() {
     // Accessing formula as S-Expression
     assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (cadd cB cA))");
     // Accessing formula as flattened string of tokens
-    assert!(formula.as_ref(&db).iter().eq(fmla_vec.into_iter()));
+    assert!(formula
+        .as_ref(&db)
+        .iter()
+        .eq(fmla_vec.into_iter().map(|t| t.symbol)));
+}
+
+#[test]
+fn test_parse_string() {
+    let mut db = mkdb(GRAMMAR_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let formula = grammar.parse_string("|- A = ( B + A )", &names).unwrap();
+    assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (cadd cB cA))");
 }
 
 // This grammar exposes issue #32 in the statement parser
@@ -166,7 +189,10 @@ fn test_setvar_as_class() {
     let grammar = db.grammar_pass().clone();
     let names = db.name_pass().clone();
     let class_symbol = names.lookup_symbol(b"class").unwrap().atom;
-    let x_symbol = names.lookup_symbol(b"x").unwrap().atom;
+    let x_symbol = FormulaToken {
+        symbol: names.lookup_symbol(b"x").unwrap().atom,
+        span: Span::default(),
+    };
     {
         let formula = grammar
             .parse_formula(&mut vec![x_symbol].into_iter(), &[class_symbol], &names)
@@ -314,5 +340,5 @@ grammar_test!(
     b"$c |- ( $. err $a |- ( unknown $.",
     2,
     1,
-    Diagnostic::StmtParseError(StmtParseError::UnknownToken(2))
+    Diagnostic::UndefinedToken(crate::Span::new(23, 30), Box::new(*b"unknown"))
 );
