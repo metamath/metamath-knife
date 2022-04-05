@@ -13,7 +13,7 @@ use crate::{
         StatementAddress, StatementIndex, StatementIter, SymbolDef, TokenAddress, DUMMY_STATEMENT,
         NO_STATEMENT,
     },
-    StatementRef,
+    Database, StatementRef,
 };
 
 /// Data structure which tracks the logical order of segment IDs, since they are
@@ -127,16 +127,18 @@ impl<'a> DoubleEndedIterator for SegmentIter<'a> {
 }
 
 /// A trait for objects which can be used to order other datatypes.
-pub(crate) trait Comparer<T> {
+pub trait Comparer<T> {
     /// Compares two objects, like `Ord::cmp`, but with additional state data
     /// from the comparer that can be used for the ordering.
     fn cmp(&self, left: &T, right: &T) -> Ordering;
 
+    /// Returns true if the `left` argument is (strictly) less than the `right` argument
     #[inline]
     fn lt(&self, left: &T, right: &T) -> bool {
         self.cmp(left, right) == Ordering::Less
     }
 
+    /// Returns true if the `left` argument is less or equal to the `right` argument
     #[inline]
     fn le(&self, left: &T, right: &T) -> bool {
         self.cmp(left, right) != Ordering::Greater
@@ -160,6 +162,24 @@ impl Comparer<TokenAddress> for SegmentOrder {
     fn cmp(&self, left: &TokenAddress, right: &TokenAddress) -> Ordering {
         self.cmp(&left.statement, &right.statement)
             .then_with(|| left.token_index.cmp(&right.token_index))
+    }
+}
+
+impl Comparer<SegmentId> for Database {
+    fn cmp(&self, left: &SegmentId, right: &SegmentId) -> Ordering {
+        self.parse_result().order.cmp(left, right)
+    }
+}
+
+impl Comparer<StatementAddress> for Database {
+    fn cmp(&self, left: &StatementAddress, right: &StatementAddress) -> Ordering {
+        self.parse_result().order.cmp(left, right)
+    }
+}
+
+impl Comparer<TokenAddress> for Database {
+    fn cmp(&self, left: &TokenAddress, right: &TokenAddress) -> Ordering {
+        self.parse_result().order.cmp(left, right)
     }
 }
 
