@@ -10,7 +10,7 @@ use crate::segment::Segment;
 use crate::segment_set::SegmentSet;
 use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenRef};
 use crate::util::HashMap;
-use crate::{as_str, Database, StatementRef, StatementType};
+use crate::{as_str, Database, Span, StatementRef, StatementType};
 use log::{debug, warn};
 use std::collections::hash_map::Entry;
 use std::fmt;
@@ -401,8 +401,8 @@ impl Default for Grammar {
     }
 }
 
-const fn undefined(token: TokenRef<'_>) -> StmtParseError {
-    StmtParseError::UnknownToken(token.address.token_index)
+fn undefined(token: TokenRef<'_>, sref: &StatementRef<'_>) -> Diagnostic {
+    Diagnostic::UndefinedToken(sref.math_span(token.index()), token.slice.into())
 }
 
 fn undefined_cmd(token: &CommandToken, buf: &[u8]) -> Diagnostic {
@@ -466,8 +466,13 @@ impl Grammar {
         }
     }
 
-    fn too_short(map: &HashMap<(SymbolType, Atom), NextNode>, nset: &Nameset) -> StmtParseError {
+    fn too_short(
+        last_token: FormulaToken,
+        map: &HashMap<(SymbolType, Atom), NextNode>,
+        nset: &Nameset,
+    ) -> StmtParseError {
         StmtParseError::ParsedStatementTooShort(
+            last_token.span,
             map.keys()
                 .find(|k| k.0 == SymbolType::Constant)
                 .map(|(_, expected_symbol)| nset.atom_name(*expected_symbol).into()),
@@ -587,7 +592,7 @@ impl Grammar {
         while let Some(token) = tokens.next() {
             let symbol = names
                 .lookup_symbol(token.slice)
-                .ok_or_else(|| undefined(token))?;
+                .ok_or_else(|| undefined(token, sref))?;
             let atom = match symbol.stype {
                 SymbolType::Constant => symbol.atom,
                 SymbolType::Variable => {
@@ -596,7 +601,7 @@ impl Grammar {
                     // Ideally this information would be included in the LookupSymbol
                     names
                         .lookup_float(token.slice)
-                        .ok_or_else(|| undefined(token))?
+                        .ok_or_else(|| undefined(token, sref))?
                         .typecode_atom
                 }
             };
@@ -1156,10 +1161,10 @@ impl Grammar {
         Ok(())
     }
 
-    fn do_shift(&self, symbol_iter: &mut dyn Iterator<Item = (usize, Symbol)>, nset: &Nameset) {
-        if let Some((_ix, symbol)) = symbol_iter.next() {
+    fn do_shift(&self, symbol_iter: &mut dyn Iterator<Item = FormulaToken>, nset: &Nameset) {
+        if let Some(token) = symbol_iter.next() {
             if self.debug {
-                debug!("   SHIFT {:?}", as_str(nset.atom_name(symbol)));
+                debug!("   SHIFT {:?}", as_str(nset.atom_name(token.symbol)));
             }
         }
     }
@@ -1184,7 +1189,7 @@ impl Grammar {
     /// Parses the given list of symbols into a formula syntax tree.
     pub fn parse_formula(
         &self,
-        symbol_iter: &mut impl Iterator<Item = Symbol>,
+        symbol_iter: &mut impl Iterator<Item = FormulaToken>,
         expected_typecodes: &[TypeCode],
         nset: &Nameset,
     ) -> Result<Formula, StmtParseError> {
@@ -1194,8 +1199,10 @@ impl Grammar {
         }
 
         let mut formula_builder = FormulaBuilder::default();
-        let mut symbol_enum = symbol_iter.enumerate().peekable();
-        let mut ix = 0;
+        let mut symbol_enum = symbol_iter.peekable();
+        let mut last_token = *symbol_enum
+            .peek()
+            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
         let mut e = StackElement {
             node_id: self.root,
             expected_typecodes: expected_typecodes.to_vec().into_boxed_slice(),
@@ -1241,7 +1248,7 @@ impl Grammar {
                             // There are still symbols to parse, continue from root
                             let (next_node_id, leaf_label) = self
                                 .next_var_node(self.root, typecode)
-                                .ok_or(StmtParseError::UnparseableStatement(ix))?;
+                                .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
                             for &reduce in leaf_label {
                                 Self::do_reduce(&mut formula_builder, reduce, nset);
                             }
@@ -1264,7 +1271,7 @@ impl Grammar {
                         debug!(" ++ Wrong type obtained, continue.");
                         let (next_node_id, leaf_label) = self
                             .next_var_node(self.root, typecode)
-                            .ok_or(StmtParseError::UnparseableStatement(ix))?;
+                            .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
                         for &reduce in leaf_label {
                             Self::do_reduce(&mut formula_builder, reduce, nset);
                         }
@@ -1272,14 +1279,14 @@ impl Grammar {
                     }
                 }
                 GrammarNode::Branch { ref map } => {
-                    if let Some(&(index, symbol)) = symbol_enum.peek() {
-                        ix = index as i32;
-                        debug!("   {:?}", as_str(nset.atom_name(symbol)));
+                    if let Some(&token) = symbol_enum.peek() {
+                        last_token = token;
+                        debug!("   {:?}", as_str(nset.atom_name(token.symbol)));
 
                         if let Some(NextNode {
                             next_node_id,
                             leaf_label,
-                        }) = map.get(&(SymbolType::Constant, symbol))
+                        }) = map.get(&(SymbolType::Constant, token.symbol))
                         {
                             // Found an atom matching one of our next nodes: First optionally REDUCE and continue
                             for &reduce in leaf_label {
@@ -1293,7 +1300,7 @@ impl Grammar {
                         } else {
                             // No matching constant, search among variables
                             if map.is_empty() || e.node_id == self.root {
-                                return Err(StmtParseError::UnparseableStatement(ix));
+                                return Err(StmtParseError::UnparseableStatement(token.span));
                             }
 
                             debug!(
@@ -1313,39 +1320,96 @@ impl Grammar {
                             };
                         }
                     } else {
-                        return Err(Grammar::too_short(map, nset));
+                        return Err(Grammar::too_short(last_token, map, nset));
                     }
                 }
             }
         }
     }
+}
 
+/// An Atom which remembers its position in the source, for error handling
+#[derive(Clone, Copy, Debug)]
+pub struct FormulaToken {
+    /// The symbol's atom
+    pub symbol: Symbol,
+    /// The span of the original source string this token has been read from, used for error reporting.
+    pub span: Span,
+}
+
+/// An iterator through the tokens of a string
+struct FormulaTokenIter<'a> {
+    string: &'a str,
+    chars: core::str::Chars<'a>,
+    nset: &'a Arc<Nameset>,
+    last_pos: usize,
+    done: bool,
+}
+
+impl<'a> FormulaTokenIter<'a> {
+    /// Builds a `FormulaTokenIter` from a string.
+    /// Characters are expected to be ASCII
+    fn from_str(string: &'a str, nset: &'a Arc<Nameset>) -> Self {
+        Self {
+            string,
+            chars: string.chars(),
+            nset,
+            last_pos: 0,
+            done: false,
+        }
+    }
+}
+
+impl Iterator for FormulaTokenIter<'_> {
+    type Item = Result<FormulaToken, StmtParseError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            None
+        } else {
+            let span = if let Some(next_pos) =
+                self.chars.position(|c| c == ' ' || c == '\t' || c == '\n')
+            {
+                Span::new(self.last_pos, self.last_pos + next_pos)
+            } else {
+                self.done = true;
+                Span::new(self.last_pos, self.string.len())
+            };
+            self.last_pos = span.end as usize + 1;
+            let t = &self.string[span.start as usize..span.end as usize];
+            if let Some(l) = self.nset.lookup_symbol(t.as_bytes()) {
+                Some(Ok(FormulaToken {
+                    symbol: l.atom,
+                    span,
+                }))
+            } else {
+                Some(Err(StmtParseError::UnknownToken(span)))
+            }
+        }
+    }
+}
+
+impl Grammar {
     /// Parses a character string into a formula
     /// As a first math token, the string is expected to contain the typecode for the formula.
+    /// Diagnostics mark the errors with [Span]s based on the position in the input string.
     pub fn parse_string(
         &self,
         formula_string: &str,
         nset: &Arc<Nameset>,
     ) -> Result<Formula, StmtParseError> {
-        // TODO an iterator taking notes of the start and end of the math tokens would allow to return richer error messages, including actual spans rather than indices.
-        let mut symbols = formula_string.trim().split(&[' ', '\t', '\n']);
-        let typecode_name = symbols
+        let mut symbols = FormulaTokenIter::from_str(formula_string, nset)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter();
+        let typecode = symbols
             .next()
             .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
-        let typecode = nset
-            .lookup_symbol(typecode_name.as_bytes())
-            .ok_or(StmtParseError::UnknownToken(0))?
-            .atom;
-        let expected_typecode = if typecode == self.provable_type {
+        let expected_typecode = if typecode.symbol == self.provable_type {
             self.logic_type
         } else {
-            typecode
+            typecode.symbol
         };
-        self.parse_formula(
-            &mut symbols.map(|t| nset.lookup_symbol(t.as_bytes()).unwrap().atom),
-            &[expected_typecode],
-            nset,
-        )
+        self.parse_formula(&mut symbols, &[expected_typecode], nset)
     }
 
     fn parse_statement(
@@ -1383,10 +1447,14 @@ impl Grammar {
             .math_iter()
             .skip(1)
             .map(|token| {
+                let span = sref.math_span(token.index());
                 if let Some(lookup) = names.lookup_symbol(token.slice) {
-                    Ok(lookup.atom)
+                    Ok(FormulaToken {
+                        symbol: lookup.atom,
+                        span,
+                    })
                 } else {
-                    Err(undefined(token))
+                    Err(StmtParseError::UnknownToken(span))
                 }
             })
             .collect();
@@ -1505,9 +1573,7 @@ impl Grammar {
         }
         Ok(())
     }
-}
 
-impl Grammar {
     /// Called by [`crate::Database`] to build the grammar from the syntax axioms in the database.
     ///
     /// The provided `sset`, and `nset` shall be the result of previous phases over the database.
@@ -1599,7 +1665,10 @@ impl StmtParse {
                 let math_iter = sref.math_iter().flat_map(|token| {
                     nset.lookup_symbol(token.slice)
                         .ok_or_else(|| {
-                            (sref.address(), StmtParseError::UnknownToken(token.index()))
+                            (
+                                sref.address(),
+                                StmtParseError::UnknownToken(sref.math_span(token.index())),
+                            )
                         })
                         .map(|l| l.atom)
                 });
