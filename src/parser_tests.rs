@@ -87,12 +87,13 @@ fn test_stref_v() {
 
 #[test]
 fn test_inclusion() {
+    use Diagnostic::*;
     macro_rules! test {
         (   $start:literal: { $($name:literal = $text:literal),* $(,)? };
             parse [$($e:expr),* $(,)?];
             errors [$($parse:expr),* $(,)?];
         ) => {{
-            use {StatementType::*, Diagnostic::*};
+            use StatementType::*;
             let mut db = Database::default();
             db.parse($start.to_owned(), vec![$(($name.to_owned(), $text.to_vec()),)*]);
             assert_eq!(
