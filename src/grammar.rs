@@ -1340,10 +1340,9 @@ pub struct FormulaToken {
 /// An iterator through the tokens of a string
 struct FormulaTokenIter<'a> {
     string: &'a str,
-    chars: core::str::Chars<'a>,
+    chars: std::iter::Peekable<core::str::Chars<'a>>,
     nset: &'a Arc<Nameset>,
     last_pos: usize,
-    done: bool,
 }
 
 impl<'a> FormulaTokenIter<'a> {
@@ -1352,10 +1351,9 @@ impl<'a> FormulaTokenIter<'a> {
     fn from_str(string: &'a str, nset: &'a Arc<Nameset>) -> Self {
         Self {
             string,
-            chars: string.chars(),
+            chars: string.chars().peekable(),
             nset,
             last_pos: 0,
-            done: false,
         }
     }
 }
@@ -1364,18 +1362,19 @@ impl Iterator for FormulaTokenIter<'_> {
     type Item = Result<FormulaToken, StmtParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
+        if self.last_pos >= self.string.len() {
             None
         } else {
-            let span = if let Some(next_pos) =
-                self.chars.position(|c| c == ' ' || c == '\t' || c == '\n')
-            {
+            let span = if let Some(next_pos) = self.chars.position(|c| c.is_ascii_whitespace()) {
                 Span::new(self.last_pos, self.last_pos + next_pos)
             } else {
-                self.done = true;
                 Span::new(self.last_pos, self.string.len())
             };
             self.last_pos = span.end as usize + 1;
+            while self.chars.peek().map(char::is_ascii_whitespace) == Some(true) {
+                self.chars.next();
+                self.last_pos += 1;
+            }
             let t = &self.string[span.start as usize..span.end as usize];
             if let Some(l) = self.nset.lookup_symbol(t.as_bytes()) {
                 Some(Ok(FormulaToken {

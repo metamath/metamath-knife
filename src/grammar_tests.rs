@@ -151,6 +151,10 @@ fn test_parse_string() {
     let grammar = db.grammar_pass().clone();
     let formula = grammar.parse_string("|- A = ( B + A )", &names).unwrap();
     assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (cadd cB cA))");
+    let formula = grammar
+        .parse_string("|- A\n   = ( B + A )\n\n", &names)
+        .unwrap();
+    assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (cadd cB cA))");
 }
 
 // This grammar exposes issue #32 in the statement parser

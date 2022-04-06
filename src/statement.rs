@@ -153,9 +153,7 @@ impl StatementAddress {
     pub const fn new(segment_id: SegmentId, index: StatementIndex) -> Self {
         StatementAddress { segment_id, index }
     }
-}
 
-impl StatementAddress {
     /// Convert a statement address into a statement range from here to the
     /// logical end of the database.
     #[inline]

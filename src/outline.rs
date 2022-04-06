@@ -347,11 +347,8 @@ impl<'a> OutlineNodeRef<'a> {
                 let end = if let Some(next_stmt) = self.next_after_children() {
                     next_stmt.get_statement().span().start - 1
                 } else {
-                    database
-                        .parse_result()
-                        .source_info(stmt.segment.id)
-                        .span
-                        .end
+                    let segment_span = database.parse_result().source_info(stmt.segment.id).span;
+                    segment_span.end - segment_span.start
                 };
                 Span { start, end }
             }
