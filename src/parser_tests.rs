@@ -85,6 +85,49 @@ fn test_stref_v() {
     assert_eq!(zz, vec![b"Y", b"Z"]);
 }
 
+#[test]
+fn test_inclusion() {
+    use Diagnostic::*;
+    macro_rules! test {
+        (   $start:literal: { $($name:literal = $text:literal),* $(,)? };
+            parse [$($e:expr),* $(,)?];
+            errors [$($parse:expr),* $(,)?];
+        ) => {{
+            use StatementType::*;
+            let mut db = Database::default();
+            db.parse($start.to_owned(), vec![$(($name.to_owned(), $text.to_vec()),)*]);
+            assert_eq!(
+                db.parse_result()
+                    .segments(..)
+                    .map(|seg| {
+                        seg.into_iter()
+                            .map(|stmt| stmt.statement_type())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+                [$($e.to_vec(),)*].to_vec()
+            );
+            let diags = db.parse_result().parse_diagnostics();
+            assert_eq!(diags.into_iter().map(|e| e.1).collect::<Vec<_>>(), vec![$($parse,)*]);
+        }}
+    }
+    test!(
+        "A": { "A" = b"$[ B $] $c a $.", "B" = b"$[ B $] ${ $}" };
+        parse [[FileInclude], [FileInclude], [OpenGroup, CloseGroup, Eof], [Constant, Eof]];
+        errors [];
+    );
+    test!(
+        "A": { "A" = b"${ $[ B $] $}", "B" = b"$c b $." };
+        parse [[OpenGroup, FileInclude], [Constant, Eof], [CloseGroup, Eof]];
+        errors [UnclosedBeforeInclude(1), UnmatchedCloseGroup];
+    );
+    test!(
+        "A": { "A" = b"${ $c b $. $}" };
+        parse [[OpenGroup, Constant, CloseGroup, Eof]];
+        errors [ConstantNotTopLevel];
+    );
+}
+
 macro_rules! parse_test {
     ($name:ident, $text:expr, $diags:expr) => {
         #[test]
