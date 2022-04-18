@@ -17,6 +17,7 @@ use std::str;
 
 /// The error type for [`Database::export_mmp`].
 #[derive(Debug)]
+#[allow(variant_size_differences)]
 pub enum ExportError {
     /// IO Error during write
     Io(io::Error),
