@@ -7,7 +7,6 @@
 //! standard set.mm.  (Thus, on a 64-bit build the fallback code doesn't get
 //! exercised at all without special measures.)
 
-use std::mem::size_of;
 use std::ops::BitOrAssign;
 use std::slice;
 
@@ -25,7 +24,7 @@ pub struct Bitset {
 }
 
 const fn bits_per_word() -> usize {
-    size_of::<usize>() * 8
+    usize::BITS as usize
 }
 
 impl Clone for Bitset {
