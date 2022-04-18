@@ -112,7 +112,12 @@ fn test_parse_formula() {
     let close_parens = make_tok(b")", &names);
     let fmla_vec = vec![a, eq, open_parens, b, plus, a, close_parens];
     let formula = grammar
-        .parse_formula(&mut fmla_vec.clone().into_iter(), &[wff, class], &names)
+        .parse_formula(
+            &mut fmla_vec.clone().into_iter(),
+            &[wff, class],
+            false,
+            &names,
+        )
         .unwrap();
     // Accessing formula using paths to labels
     assert_eq!(
@@ -199,7 +204,12 @@ fn test_setvar_as_class() {
     };
     {
         let formula = grammar
-            .parse_formula(&mut vec![x_symbol].into_iter(), &[class_symbol], &names)
+            .parse_formula(
+                &mut vec![x_symbol].into_iter(),
+                &[class_symbol],
+                false,
+                &names,
+            )
             .unwrap();
         assert_eq!(formula.as_ref(&db).as_sexpr(), "(cv vx)");
     }
