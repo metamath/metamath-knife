@@ -1,4 +1,4 @@
-use crate::grammar_tests::mkdb;
+use crate::{grammar_tests::mkdb, formula::{UnificationError, Substitutions}};
 
 const FORMULA_DB: &[u8] = b"
     $c |- wff class ( ) + = 1 2 $.
@@ -32,7 +32,8 @@ fn test_unify() {
     let axiom = stmt_parse
         .get_formula(&db.statement(b"ax-com").unwrap())
         .unwrap();
-    let subst = goal.unify(axiom).unwrap();
+    let mut subst = Substitutions::new();
+    assert!(goal.unify(axiom, &mut subst).is_ok());
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
     assert_eq!(subst[a].as_ref(&db).as_sexpr(), "c1");
@@ -50,7 +51,8 @@ fn test_unify_fail() {
     let axiom = stmt_parse
         .get_formula(&db.statement(b"addeq1").unwrap())
         .unwrap();
-    assert!(goal.unify(axiom).is_none());
+    let mut subst = Substitutions::new();
+    assert_eq!(goal.unify(axiom, &mut subst), Err(UnificationError::UnificationFailed));
 }
 
 #[test]
@@ -66,7 +68,8 @@ fn test_substitute() {
     let axiom = stmt_parse
         .get_formula(&db.statement(b"addeq1.1").unwrap())
         .unwrap();
-    let subst = goal.unify(axiom).unwrap();
+    let mut subst = Substitutions::default();
+    assert!(goal.unify(axiom, &mut subst).is_ok());
     let a = names.lookup_label(b"cA").unwrap().atom;
     let b = names.lookup_label(b"cB").unwrap().atom;
     assert_eq!(subst[a].as_ref(&db).as_sexpr(), "(cadd c1 c2)");

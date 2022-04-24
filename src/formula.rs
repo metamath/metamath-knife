@@ -49,10 +49,16 @@ pub type Symbol = Atom;
 /// An atom representing a label (nameck suggests `LAtom` for this)
 pub type Label = Atom;
 
-#[derive(Clone, Default)]
+/// An error occurring during unification
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UnificationError {
+    /// Generic unification failure
+    UnificationFailed,
+}
+
 /// A set of substitutions, mapping variables to a formula
 /// We also could have used `dyn Index<&Label, Output=Box<Formula>>`
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Substitutions(HashMap<Label, Formula>);
 
 impl Index<Label> for Substitutions {
@@ -65,6 +71,12 @@ impl Index<Label> for Substitutions {
 }
 
 impl Substitutions {
+    /// Creates a new, empty, set of substitutions
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Augment a substitution with a database reference, to produce a [`SubstitutionsRef`].
     /// The resulting object implements [`Debug`].
     #[must_use]
@@ -238,26 +250,12 @@ impl Formula {
     }
 
     /// Unify this formula with the given formula model
-    /// If successful, this returns the substitutions which needs to be made in
+    /// If successful, the provided `substitutions` are completed 
+    /// with the substitutions which needs to be made in
     /// `other` in order to match this formula.
     #[must_use]
-    pub fn unify(&self, other: &Formula) -> Option<Box<Substitutions>> {
-        let mut substitutions = Substitutions(HashMap::default());
-        self.sub_unify(self.root, other, other.root, &mut substitutions)?;
-        Some(Box::new(substitutions))
-    }
-
-    /// Unify two sets of formulas
-    /// If successful, this returns the substitutions which needs to be made in
-    /// the second formulas in the tuples in order to match the first formulas.
-    /// In case of failure, returns the index at which the substitution failed.
-    pub fn unify_n(formulas: &[(&Formula, &Formula)]) -> Result<Box<Substitutions>, usize> {
-        let mut substitutions = Substitutions(HashMap::default());
-        for (index, (this, other)) in formulas.iter().enumerate() {
-            this.sub_unify(this.root, *other, other.root, &mut substitutions)
-                .ok_or(index)?;
-        }
-        Ok(Box::new(substitutions))
+    pub fn unify(&self, other: &Formula, substitutions: &mut Substitutions) -> Result<(), UnificationError> {
+        self.sub_unify(self.root, other, other.root, substitutions)
     }
 
     /// Unify a sub-formula
@@ -267,18 +265,19 @@ impl Formula {
         other: &Formula,
         other_node_id: NodeId,
         substitutions: &mut Substitutions,
-    ) -> Option<()> {
+    ) -> Result<(), UnificationError> {
         if other.is_variable(other_node_id) {
             // the model formula is a variable, build or match the substitution
             if let Some(formula) = substitutions.0.get(&other.tree[other_node_id]) {
                 // there already is as substitution for that variable, check equality
-                self.sub_eq(node_id, formula, formula.root).then(|| {})
+                if self.sub_eq(node_id, formula, formula.root) { Ok(()) }
+                else { Err(UnificationError::UnificationFailed) }
             } else {
                 // store the new substitution and succeed
                 substitutions
                     .0
                     .insert(other.tree[other_node_id], self.sub_formula(node_id));
-                Some(())
+                Ok(())
             }
         } else if self.tree[node_id] == other.tree[other_node_id]
             && self.tree.has_children(node_id) == other.tree.has_children(other_node_id)
@@ -291,10 +290,10 @@ impl Formula {
             {
                 self.sub_unify(s_id, other, o_id, substitutions)?;
             }
-            Some(())
+            Ok(())
         } else {
             // formulas differ, we cannot unify.
-            None
+            Err(UnificationError::UnificationFailed)
         }
     }
 
