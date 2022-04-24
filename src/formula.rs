@@ -111,6 +111,13 @@ impl<'a> IntoIterator for &'a Substitutions {
     }
 }
 
+/// A provider for work variables
+/// Work variables are typically used when a new variable appears in an unification, which cannot be immediately assigned.
+pub trait WorkVariableProvider<E> {
+    /// Provide a new work variable for the given typecode
+    fn new_work_variable(&mut self, typecode: TypeCode) -> Result<Label, E>;
+}
+
 /// A [`Substitutions`] reference in the context of a [`Database`].
 /// This allows the values in the [`Substitutions`] to be resolved,
 #[derive(Copy, Clone)]
@@ -150,6 +157,21 @@ pub struct Formula {
 }
 
 impl Formula {
+    /// Creates a formula with just a variable
+    #[must_use]
+    pub fn from_float(label: Label, typecode: TypeCode) -> Self {
+        let mut tree = Tree::default();
+        let root = tree.add_node(label, &[]);
+        let mut variables = Bitset::new();
+        variables.set_bit(root);
+        Formula {
+            typecode,
+            tree: Arc::new(tree),
+            root,
+            variables,
+        }
+    }
+
     /// Augment a formula with a database reference, to produce a [`FormulaRef`].
     /// The resulting object implements [`Display`], [`Debug`], and [`IntoIterator`].
     #[must_use]
@@ -223,6 +245,19 @@ impl Formula {
         let mut substitutions = Substitutions(HashMap::default());
         self.sub_unify(self.root, other, other.root, &mut substitutions)?;
         Some(Box::new(substitutions))
+    }
+
+    /// Unify two sets of formulas
+    /// If successful, this returns the substitutions which needs to be made in
+    /// the second formulas in the tuples in order to match the first formulas.
+    /// In case of failure, returns the index at which the substitution failed.
+    pub fn unify_n(formulas: &[(&Formula, &Formula)]) -> Result<Box<Substitutions>, usize> {
+        let mut substitutions = Substitutions(HashMap::default());
+        for (index, (this, other)) in formulas.iter().enumerate() {
+            this.sub_unify(this.root, *other, other.root, &mut substitutions)
+                .ok_or(index)?;
+        }
+        Ok(Box::new(substitutions))
     }
 
     /// Unify a sub-formula
@@ -325,6 +360,58 @@ impl PartialEq for Formula {
     }
 }
 
+impl<'a> IntoIterator for &'a Formula {
+    type Item = (Label, bool);
+    type IntoIter = LabelIter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        LabelIter {
+            formula: self,
+            stack: vec![(self.root, self.tree.children_iter(self.root))],
+        }
+    }
+}
+
+/// An iterator through the labels of a formula.
+/// This iterator sequence is depth-first, postfix (post-order).
+/// It provides the label, and a boolean indicating whether the current label is a variable or not.
+#[derive(Debug)]
+pub struct LabelIter<'a> {
+    formula: &'a Formula,
+    stack: Vec<(NodeId, SiblingIter<'a, Label>)>,
+}
+
+impl<'a> Iterator for LabelIter<'a> {
+    type Item = (Label, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stack.is_empty() {
+            return None;
+        }
+        let stack_end = self.stack.len() - 1;
+        if let Some(node_id) = self.stack[stack_end].1.next() {
+            if self.formula.tree.has_children(node_id) {
+                self.stack
+                    .push((node_id, self.formula.tree.children_iter(node_id)));
+                self.next()
+            } else {
+                Some((
+                    self.formula.tree[node_id],
+                    self.formula.is_variable(node_id),
+                ))
+            }
+        } else {
+            self.stack.pop().map(|(node_id, _)| {
+                (
+                    self.formula.tree[node_id],
+                    self.formula.is_variable(node_id),
+                )
+            })
+        }
+    }
+}
+
 /// A [`Formula`] reference in the context of a [`Database`].
 /// This allows the values in the [`Formula`] to be resolved,
 #[derive(Copy, Clone)]
@@ -370,12 +457,7 @@ impl<'a> FormulaRef<'a> {
     /// Computes the typecode of the given node
     /// according to the corresponding statement
     fn compute_typecode_at(&self, node_id: NodeId) -> TypeCode {
-        let sref = self
-            .db
-            .statement_by_label(self.formula.tree[node_id])
-            .expect("Formulas shall only contain valid labels. \
-                It shall always be the case when they are obtained from Grammar::parse_formula or StmtParse::get_formula.");
-        self.db.name_result().get_atom(sref.math_at(0).slice)
+        self.db.label_typecode(self.formula.tree[node_id])
     }
 
     /// Convert this formula into an s-expression string.
@@ -404,6 +486,38 @@ impl<'a> FormulaRef<'a> {
         } else {
             write!(w, "{}", name)
         }
+    }
+
+    /// Handles the variables present in the formula but not in the substitution list
+    /// The function `f` provided can modify on the fly the substitution list, adding any missing one.
+    pub fn complete_substitutions<E>(
+        &self,
+        substitutions: &mut Substitutions,
+        wvp: &mut impl WorkVariableProvider<E>,
+    ) -> Result<(), E> {
+        self.sub_complete_substitutions(self.formula.root, substitutions, wvp)
+    }
+
+    /// Handles the variables present in the sub-formula but not in the substitution list
+    fn sub_complete_substitutions<E>(
+        &self,
+        node_id: NodeId,
+        substitutions: &mut Substitutions,
+        wvp: &mut impl WorkVariableProvider<E>,
+    ) -> Result<(), E> {
+        if self.is_variable(node_id) {
+            let label = &self.tree[node_id];
+            if substitutions.0.get(label).is_none() {
+                let typecode = self.db.label_typecode(*label);
+                let work_var = wvp.new_work_variable(typecode)?;
+                substitutions.insert(*label, Formula::from_float(work_var, typecode));
+            }
+        } else {
+            for child_node_id in self.tree.children_iter(node_id) {
+                self.sub_complete_substitutions(child_node_id, substitutions, wvp)?;
+            }
+        }
+        Ok(())
     }
 
     /// Appends this formula to the provided stack buffer.

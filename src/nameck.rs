@@ -62,7 +62,7 @@ use std::u32;
 /// a new type like `LAtom` for labels, with `Atom` for symbols only.
 ///
 /// [INC]: https://github.com/sorear/smetamath-rs/issues/11
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Hash)]
+#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Default, Hash)]
 pub struct Atom(u32);
 
 // currently we use Vecs for a lot of things in the index.  we might consider
@@ -371,7 +371,7 @@ impl Nameset {
                 .float
                 .first()
                 .map(|(addr, (label, _, tcatom))| LookupFloatOwned {
-                    statement_atom: self.get_atom(&label),
+                    statement_atom: self.get_atom(label),
                     address: *addr,
                     typecode_atom: *tcatom,
                 })
@@ -380,22 +380,28 @@ impl Nameset {
         }
     }
 
-    /// Looks up the label declaration for an atom representing a math symbol.
+    /// Looks up the label declaration for an atom representing a label.
     /// Atoms are only created and provided for existing labels, so this always returns a value
+    #[must_use]
     pub fn lookup_label_by_atom(&self, label_atom: Atom) -> LookupLabel {
-        self.lookup_label(self.atom_name(label_atom)).expect("Unknown label atom")
+        self.lookup_label(self.atom_name(label_atom))
+            .expect("Unknown label atom")
     }
 
     /// Looks up up the address and type for an atom representing a math symbol.
     /// Atoms are only created and provided for existing symbol, so this always returns a value
+    #[must_use]
     pub fn lookup_symbol_by_atom(&self, symbol_atom: Atom) -> LookupSymbol {
-        self.lookup_symbol(self.atom_name(symbol_atom)).expect("Unknown symbol atom")
+        self.lookup_symbol(self.atom_name(symbol_atom))
+            .expect("Unknown symbol atom")
     }
 
     /// Looks up the float declaration for an atom representing a math symbol.
     /// Atoms are only created and provided for existing symbol, so this always returns a value
+    #[must_use]
     pub fn lookup_float_by_atom(&self, symbol_atom: Atom) -> LookupFloatOwned {
-        self.lookup_float(self.atom_name(symbol_atom)).expect("Unknown symbol atom")
+        self.lookup_float(self.atom_name(symbol_atom))
+            .expect("Unknown symbol atom")
     }
 
     /// Looks up the atom from a $f statement.

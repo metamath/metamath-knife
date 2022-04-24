@@ -104,6 +104,7 @@ use crate::diag::DiagnosticClass;
 use crate::export;
 use crate::formula::Formula;
 use crate::formula::Label;
+use crate::formula::TypeCode;
 use crate::grammar;
 use crate::grammar::Grammar;
 use crate::grammar::StmtParse;
@@ -779,6 +780,15 @@ impl Database {
                 .order
                 .cmp(&lookup_left.address, &lookup_right.address),
         )
+    }
+
+    /// Returns the typecode for a given label.
+    #[must_use]
+    pub fn label_typecode(&self, label: Label) -> TypeCode {
+        let sref = self
+            .statement_by_label(label)
+            .expect("Invalid label provided to `label_typecode`.");
+        self.name_result().get_atom(sref.math_at(0).slice)
     }
 
     /// Export an mmp file for a given statement.
