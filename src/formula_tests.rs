@@ -1,4 +1,7 @@
-use crate::{grammar_tests::mkdb, formula::{UnificationError, Substitutions}};
+use crate::{
+    formula::{Substitutions, UnificationError},
+    grammar_tests::mkdb,
+};
 
 const FORMULA_DB: &[u8] = b"
     $c |- wff class ( ) + = 1 2 $.
@@ -52,7 +55,10 @@ fn test_unify_fail() {
         .get_formula(&db.statement(b"addeq1").unwrap())
         .unwrap();
     let mut subst = Substitutions::new();
-    assert_eq!(goal.unify(axiom, &mut subst), Err(UnificationError::UnificationFailed));
+    assert_eq!(
+        goal.unify(axiom, &mut subst),
+        Err(UnificationError::UnificationFailed)
+    );
 }
 
 #[test]

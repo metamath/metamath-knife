@@ -184,6 +184,17 @@ impl Formula {
         }
     }
 
+    #[inline]
+    /// Iterates through the labels of a formula, depth-first, post-order.
+    /// Items are the label, and a boolean indicating whether the current label is a variable or not.
+    #[must_use]
+    pub fn labels_postorder(&self) -> LabelIter<'_> {
+        LabelIter {
+            formula: self,
+            stack: vec![(self.root, self.tree.children_iter(self.root))],
+        }
+    }
+
     /// Augment a formula with a database reference, to produce a [`FormulaRef`].
     /// The resulting object implements [`Display`], [`Debug`], and [`IntoIterator`].
     #[must_use]
@@ -250,11 +261,14 @@ impl Formula {
     }
 
     /// Unify this formula with the given formula model
-    /// If successful, the provided `substitutions` are completed 
+    /// If successful, the provided `substitutions` are completed
     /// with the substitutions which needs to be made in
     /// `other` in order to match this formula.
-    #[must_use]
-    pub fn unify(&self, other: &Formula, substitutions: &mut Substitutions) -> Result<(), UnificationError> {
+    pub fn unify(
+        &self,
+        other: &Formula,
+        substitutions: &mut Substitutions,
+    ) -> Result<(), UnificationError> {
         self.sub_unify(self.root, other, other.root, substitutions)
     }
 
@@ -270,8 +284,11 @@ impl Formula {
             // the model formula is a variable, build or match the substitution
             if let Some(formula) = substitutions.0.get(&other.tree[other_node_id]) {
                 // there already is as substitution for that variable, check equality
-                if self.sub_eq(node_id, formula, formula.root) { Ok(()) }
-                else { Err(UnificationError::UnificationFailed) }
+                if self.sub_eq(node_id, formula, formula.root) {
+                    Ok(())
+                } else {
+                    Err(UnificationError::UnificationFailed)
+                }
             } else {
                 // store the new substitution and succeed
                 substitutions
@@ -356,19 +373,6 @@ impl Formula {
 impl PartialEq for Formula {
     fn eq(&self, other: &Self) -> bool {
         self.sub_eq(self.root, other, other.root)
-    }
-}
-
-impl<'a> IntoIterator for &'a Formula {
-    type Item = (Label, bool);
-    type IntoIter = LabelIter<'a>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        LabelIter {
-            formula: self,
-            stack: vec![(self.root, self.tree.children_iter(self.root))],
-        }
     }
 }
 
