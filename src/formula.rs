@@ -389,28 +389,31 @@ impl<'a> Iterator for LabelIter<'a> {
     type Item = (Label, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
+        let mut stack_end = self.stack.len() - 1;
         if self.stack.is_empty() {
             return None;
         }
-        let stack_end = self.stack.len() - 1;
-        if let Some(node_id) = self.stack[stack_end].1.next() {
-            if self.formula.tree.has_children(node_id) {
-                self.stack
-                    .push((node_id, self.formula.tree.children_iter(node_id)));
-                self.next()
+        loop {
+            if let Some(node_id) = self.stack[stack_end].1.next() {
+                if self.formula.tree.has_children(node_id) {
+                    self.stack
+                        .push((node_id, self.formula.tree.children_iter(node_id)));
+                    stack_end += 1;
+                    // and iterate
+                } else {
+                    return Some((
+                        self.formula.tree[node_id],
+                        self.formula.is_variable(node_id),
+                    ));
+                }
             } else {
-                Some((
-                    self.formula.tree[node_id],
-                    self.formula.is_variable(node_id),
-                ))
+                return self.stack.pop().map(|(node_id, _)| {
+                    (
+                        self.formula.tree[node_id],
+                        self.formula.is_variable(node_id),
+                    )
+                });
             }
-        } else {
-            self.stack.pop().map(|(node_id, _)| {
-                (
-                    self.formula.tree[node_id],
-                    self.formula.is_variable(node_id),
-                )
-            })
         }
     }
 }
