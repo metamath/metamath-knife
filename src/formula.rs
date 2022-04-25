@@ -185,13 +185,14 @@ impl Formula {
     }
 
     #[inline]
-    /// Iterates through the labels of a formula, depth-first, post-order.
+    /// Iterates through the labels of a formula, depth-first, pre-order.
     /// Items are the label, and a boolean indicating whether the current label is a variable or not.
     #[must_use]
-    pub fn labels_postorder(&self) -> LabelIter<'_> {
+    pub const fn labels_iter(&self) -> LabelIter<'_> {
         LabelIter {
             formula: self,
-            stack: vec![(self.root, self.tree.children_iter(self.root))],
+            stack: vec![],
+            root: Some(self.root),
         }
     }
 
@@ -382,37 +383,39 @@ impl PartialEq for Formula {
 #[derive(Debug)]
 pub struct LabelIter<'a> {
     formula: &'a Formula,
-    stack: Vec<(NodeId, SiblingIter<'a, Label>)>,
+    stack: Vec<SiblingIter<'a, Label>>,
+    root: Option<NodeId>,
+}
+
+impl<'a> LabelIter<'a> {
+    #[inline]
+    fn visit_children(&mut self, node_id: NodeId) -> (Label, bool) {
+        self.stack.push(self.formula.tree.children_iter(node_id));
+        (
+            self.formula.tree[node_id],
+            self.formula.is_variable(node_id),
+        )
+    }
 }
 
 impl<'a> Iterator for LabelIter<'a> {
     type Item = (Label, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut stack_end = self.stack.len() - 1;
-        if self.stack.is_empty() {
-            return None;
+        if let Some(node_id) = self.root {
+            self.root = None;
+            return Some(self.visit_children(node_id));
         }
         loop {
-            if let Some(node_id) = self.stack[stack_end].1.next() {
-                if self.formula.tree.has_children(node_id) {
-                    self.stack
-                        .push((node_id, self.formula.tree.children_iter(node_id)));
-                    stack_end += 1;
-                    // and iterate
-                } else {
-                    return Some((
-                        self.formula.tree[node_id],
-                        self.formula.is_variable(node_id),
-                    ));
+            if let Some(iter) = self.stack.last_mut() {
+                if let Some(node_id) = iter.next() {
+                    return Some(self.visit_children(node_id));
                 }
+                // Last sibling reached, pop and iterate
+                self.stack.pop();
             } else {
-                return self.stack.pop().map(|(node_id, _)| {
-                    (
-                        self.formula.tree[node_id],
-                        self.formula.is_variable(node_id),
-                    )
-                });
+                // No more iterator on the stack, bail out.
+                return None;
             }
         }
     }

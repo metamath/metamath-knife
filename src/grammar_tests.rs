@@ -147,6 +147,14 @@ fn test_parse_formula() {
         .as_ref(&db)
         .iter()
         .eq(fmla_vec.into_iter().map(|t| t.symbol)));
+    // Accessing formula labels
+    let map_label = |(label, is_var)| (as_str(names.atom_name(label)), is_var);
+    let mut labels = formula.labels_iter();
+    assert_eq!(labels.next().map(map_label), Some(("weq", false)));
+    assert_eq!(labels.next().map(map_label), Some(("cA", true)));
+    assert_eq!(labels.next().map(map_label), Some(("cadd", false)));
+    assert_eq!(labels.next().map(map_label), Some(("cB", true)));
+    assert_eq!(labels.next().map(map_label), Some(("cA", true)));
 }
 
 #[test]
