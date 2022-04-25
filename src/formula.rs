@@ -407,16 +407,12 @@ impl<'a> Iterator for LabelIter<'a> {
             return Some(self.visit_children(node_id));
         }
         loop {
-            if let Some(iter) = self.stack.last_mut() {
-                if let Some(node_id) = iter.next() {
-                    return Some(self.visit_children(node_id));
-                }
-                // Last sibling reached, pop and iterate
-                self.stack.pop();
-            } else {
-                // No more iterator on the stack, bail out.
-                return None;
+            let iter = self.stack.last_mut()?;
+            if let Some(node_id) = iter.next() {
+                return Some(self.visit_children(node_id));
             }
+            // Last sibling reached, pop and iterate
+            self.stack.pop();
         }
     }
 }
