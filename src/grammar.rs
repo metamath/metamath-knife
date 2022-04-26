@@ -1191,6 +1191,7 @@ impl Grammar {
         &self,
         symbol_iter: &mut impl Iterator<Item = FormulaToken>,
         expected_typecodes: &[TypeCode],
+        convert_to_provable: bool,
         nset: &Nameset,
     ) -> Result<Formula, StmtParseError> {
         struct StackElement {
@@ -1210,7 +1211,10 @@ impl Grammar {
         let mut stack = vec![];
         loop {
             match *self.nodes.get(e.node_id) {
-                GrammarNode::Leaf { reduce, typecode } => {
+                GrammarNode::Leaf {
+                    reduce,
+                    mut typecode,
+                } => {
                     // We found a leaf: REDUCE
                     Self::do_reduce(&mut formula_builder, reduce, nset);
 
@@ -1243,6 +1247,9 @@ impl Grammar {
                             }
                         } else if symbol_enum.peek().is_none() {
                             // We popped the last element from the stack and we are at the end of the math string, success
+                            if typecode == self.logic_type && convert_to_provable {
+                                typecode = self.provable_type;
+                            }
                             return Ok(formula_builder.build(typecode));
                         } else {
                             // There are still symbols to parse, continue from root
@@ -1263,7 +1270,13 @@ impl Grammar {
                                 {
                                     let reduce = Reduce::new(*label, 1);
                                     Self::do_reduce(&mut formula_builder, reduce, nset);
-                                    return Ok(formula_builder.build(*to_typecode));
+                                    let typecode =
+                                        if *to_typecode == self.logic_type && convert_to_provable {
+                                            self.provable_type
+                                        } else {
+                                            *to_typecode
+                                        };
+                                    return Ok(formula_builder.build(typecode));
                                 }
                             }
                         }
@@ -1408,7 +1421,13 @@ impl Grammar {
         } else {
             typecode.symbol
         };
-        self.parse_formula(&mut symbols, &[expected_typecode], nset)
+        let convert_to_provable = typecode.symbol == self.provable_type;
+        self.parse_formula(
+            &mut symbols,
+            &[expected_typecode],
+            convert_to_provable,
+            nset,
+        )
     }
 
     fn parse_statement(
@@ -1457,8 +1476,13 @@ impl Grammar {
                 }
             })
             .collect();
-        let formula =
-            self.parse_formula(&mut math_string?.into_iter(), &[expected_typecode], nset)?;
+        let convert_to_provable = typecode == self.provable_type;
+        let formula = self.parse_formula(
+            &mut math_string?.into_iter(),
+            &[expected_typecode],
+            convert_to_provable,
+            nset,
+        )?;
         Ok(Some(formula))
     }
 
