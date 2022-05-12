@@ -7,7 +7,7 @@ use crate::scopeck::{Hyp, ScopeResult};
 use crate::segment_set::SegmentSet;
 use crate::statement::{StatementAddress, TokenPtr};
 use crate::util::HashMap;
-use crate::verify::{verify_one, ProofBuilder};
+use crate::verify::ProofBuilder;
 use crate::{Database, StatementRef, StatementType};
 use std::cmp::{max, Ord, Ordering, PartialOrd};
 use std::collections::hash_map::{DefaultHasher, Entry};
@@ -119,7 +119,7 @@ impl ProofTreeArray {
     /// proof is faulty
     pub(crate) fn new(db: &Database, stmt: StatementRef<'_>) -> Result<ProofTreeArray, Diagnostic> {
         let mut arr = ProofTreeArray::default();
-        arr.qed = verify_one(db, &mut arr, stmt)?;
+        arr.qed = db.verify_one(&mut arr, stmt)?;
         arr.calc_indent();
         Ok(arr)
     }

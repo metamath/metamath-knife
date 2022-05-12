@@ -63,8 +63,7 @@ fn line_to_offset(buf: &[u8], index: &[u32], line: u32) -> usize {
                 Ordering::Greater
             }
         })
-        .err()
-        .expect("cannot match");
+        .expect_err("cannot match");
     // page*PAGE is the first page-aligned which is >= to the goal line, OR it
     // points at an incomplete end page
     if page == 0 {
