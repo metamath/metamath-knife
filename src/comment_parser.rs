@@ -294,9 +294,8 @@ impl<'a> CommentParser<'a> {
         let label_start = self.pos;
         while let Some(&c) = self.buf.get(self.pos) {
             match c {
-                b' ' | b'\n' => break,
                 b'[' | b'`' if self.buf.get(self.pos + 1) == Some(&c) => self.pos += 2,
-                b'`' => break,
+                b' ' | b'\n' | b'`' => break,
                 b'[' if self.parse_bib().is_some() => break,
                 b'<' if self.buf[self.pos..].starts_with(b"<HTML>")
                     || self.buf[self.pos..].starts_with(b"</HTML>") =>

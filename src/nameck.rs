@@ -87,11 +87,11 @@ fn autoviv<K: Hash + Eq, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V 
     map.entry(key).or_insert_with(Default::default)
 }
 
-fn deviv<K, Q: ?Sized, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
+fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
 where
     F: FnOnce(&mut V),
     K: Borrow<Q> + Hash + Eq,
-    Q: Hash + Eq,
+    Q: ?Sized + Hash + Eq,
     V: Default + Eq,
 {
     let kill = match map.get_mut(key) {
