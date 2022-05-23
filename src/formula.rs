@@ -19,7 +19,6 @@
 
 use crate::as_str;
 use crate::bit_set::Bitset;
-use crate::diag::StmtParseError;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
 use crate::scopeck::Hyp;
@@ -129,7 +128,7 @@ impl<'a> IntoIterator for &'a Substitutions {
 ///
 /// Work variables are typically used when a new variable appears in an unification,
 /// which cannot be immediately assigned.
-pub trait Resolver<E> {
+pub trait Resolver {
     /// Gets the symbol with the given name
     fn get_symbol(&self, name: &[u8]) -> Option<Symbol>;
 
@@ -152,13 +151,13 @@ pub trait Resolver<E> {
     fn label_for_symbol(&self, symbol: Symbol) -> (Label, TypeCode);
 
     /// Provide a new work variable for the given typecode
-    fn new_work_variable(&mut self, typecode: TypeCode) -> Result<Label, E>;
+    fn new_work_variable(&mut self, typecode: TypeCode) -> Option<Label>;
 
     /// Assess whether the given symbol is a work variable.
     fn is_work_variable(&self, symbol: Symbol) -> bool;
 }
 
-impl Resolver<StmtParseError> for Nameset {
+impl Resolver for Nameset {
     fn get_symbol(&self, name: &[u8]) -> Option<Symbol> {
         Some(self.lookup_symbol(name)?.atom)
     }
@@ -179,10 +178,10 @@ impl Resolver<StmtParseError> for Nameset {
         panic!("Symbols in regular formulas shall only be regular symbols");
     }
 
-    fn new_work_variable(&mut self, _typecode: TypeCode) -> Result<Label, StmtParseError> {
+    fn new_work_variable(&mut self, _typecode: TypeCode) -> Option<Label> {
         // Work variables are not implemented in Nameset,
         // callers must implement their own resolvers to have this functionality.
-        Err(StmtParseError::NoWorkVariable)
+        None
     }
 
     fn is_work_variable(&self, _symbol: Symbol) -> bool {
@@ -559,18 +558,18 @@ impl<'a> FormulaRef<'a> {
     pub fn complete_substitutions<E>(
         &self,
         substitutions: &mut Substitutions,
-        wvp: &mut impl Resolver<E>,
-    ) -> Result<(), E> {
+        wvp: &mut impl Resolver,
+    ) -> Option<()> {
         self.sub_complete_substitutions(self.formula.root, substitutions, wvp)
     }
 
     /// Handles the variables present in the sub-formula but not in the substitution list
-    fn sub_complete_substitutions<E>(
+    fn sub_complete_substitutions(
         &self,
         node_id: NodeId,
         substitutions: &mut Substitutions,
-        wvp: &mut impl Resolver<E>,
-    ) -> Result<(), E> {
+        wvp: &mut impl Resolver,
+    ) -> Option<()> {
         if self.is_variable(node_id) {
             let label = &self.tree[node_id];
             if substitutions.0.get(label).is_none() {
@@ -583,7 +582,7 @@ impl<'a> FormulaRef<'a> {
                 self.sub_complete_substitutions(child_node_id, substitutions, wvp)?;
             }
         }
-        Ok(())
+        Some(())
     }
 
     /// Appends this formula to the provided stack buffer.

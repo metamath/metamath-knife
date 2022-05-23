@@ -467,18 +467,17 @@ impl Grammar {
         }
     }
 
-    fn too_short<E: From<StmtParseError>>(
+    fn too_short(
         last_token: FormulaToken,
         map: &HashMap<(SymbolType, Atom), NextNode>,
-        rslv: &impl Resolver<E>,
-    ) -> E {
+        rslv: &impl Resolver,
+    ) -> StmtParseError {
         StmtParseError::ParsedStatementTooShort(
             last_token.span,
             map.keys()
                 .find(|k| k.0 == SymbolType::Constant)
                 .map(|(_, expected_symbol)| rslv.symbol_token(*expected_symbol).into()),
         )
-        .into()
     }
 
     /// Gets the map of a branch
@@ -1163,11 +1162,7 @@ impl Grammar {
         Ok(())
     }
 
-    fn do_shift<E>(
-        &self,
-        symbol_iter: &mut dyn Iterator<Item = FormulaToken>,
-        rslv: &impl Resolver<E>,
-    ) {
+    fn do_shift(&self, symbol_iter: &mut dyn Iterator<Item = FormulaToken>, rslv: &impl Resolver) {
         if let Some(token) = symbol_iter.next() {
             if self.debug {
                 debug!("   SHIFT {:?}", rslv.symbol_name(token.symbol));
@@ -1175,7 +1170,7 @@ impl Grammar {
         }
     }
 
-    fn do_reduce<E>(formula_builder: &mut FormulaBuilder, reduce: Reduce, rslv: &impl Resolver<E>) {
+    fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, rslv: &impl Resolver) {
         let reduce_label = reduce.label;
         debug!("   REDUCE {:?}", rslv.label_name(reduce_label));
         formula_builder.reduce(
@@ -1194,13 +1189,13 @@ impl Grammar {
     }
 
     /// Parses the given list of symbols into a formula syntax tree.
-    pub fn parse_formula<E: From<StmtParseError>>(
+    pub fn parse_formula(
         &self,
         symbol_iter: &mut impl Iterator<Item = FormulaToken>,
         expected_typecodes: &[TypeCode],
         convert_to_provable: bool,
-        rslv: &impl Resolver<E>,
-    ) -> Result<Formula, E> {
+        rslv: &impl Resolver,
+    ) -> Result<Formula, StmtParseError> {
         struct StackElement {
             node_id: NodeId,
             expected_typecodes: Box<[TypeCode]>,
@@ -1334,9 +1329,7 @@ impl Grammar {
                             } else {
                                 // No matching constant, search among variables
                                 if map.is_empty() || e.node_id == self.root {
-                                    return Err(
-                                        StmtParseError::UnparseableStatement(token.span).into()
-                                    );
+                                    return Err(StmtParseError::UnparseableStatement(token.span));
                                 }
 
                                 debug!(
@@ -1379,17 +1372,17 @@ pub struct FormulaToken {
 }
 
 /// An iterator through the tokens of a string
-struct FormulaTokenIter<'a, E> {
+struct FormulaTokenIter<'a> {
     string: &'a str,
     chars: std::iter::Peekable<core::str::Chars<'a>>,
-    rslv: &'a dyn Resolver<E>,
+    rslv: &'a dyn Resolver,
     last_pos: usize,
 }
 
-impl<'a, E> FormulaTokenIter<'a, E> {
+impl<'a> FormulaTokenIter<'a> {
     /// Builds a `FormulaTokenIter` from a string.
     /// Characters are expected to be ASCII
-    fn from_str(string: &'a str, rslv: &'a impl Resolver<E>) -> Self {
+    fn from_str(string: &'a str, rslv: &'a impl Resolver) -> Self {
         Self {
             string,
             chars: string.chars().peekable(),
@@ -1399,8 +1392,8 @@ impl<'a, E> FormulaTokenIter<'a, E> {
     }
 }
 
-impl<E: From<StmtParseError>> Iterator for FormulaTokenIter<'_, E> {
-    type Item = Result<FormulaToken, E>;
+impl Iterator for FormulaTokenIter<'_> {
+    type Item = Result<FormulaToken, StmtParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.last_pos >= self.string.len() {
@@ -1420,7 +1413,7 @@ impl<E: From<StmtParseError>> Iterator for FormulaTokenIter<'_, E> {
             if let Some(symbol) = self.rslv.get_symbol(t.as_bytes()) {
                 Some(Ok(FormulaToken { symbol, span }))
             } else {
-                Some(Err(StmtParseError::UnknownToken(span).into()))
+                Some(Err(StmtParseError::UnknownToken(span)))
             }
         }
     }
@@ -1430,11 +1423,11 @@ impl Grammar {
     /// Parses a character string into a formula
     /// As a first math token, the string is expected to contain the typecode for the formula.
     /// Diagnostics mark the errors with [Span]s based on the position in the input string.
-    pub fn parse_string<E: From<StmtParseError>>(
+    pub fn parse_string(
         &self,
         formula_string: &str,
-        rslv: &impl Resolver<E>,
-    ) -> Result<Formula, E> {
+        rslv: &impl Resolver,
+    ) -> Result<Formula, StmtParseError> {
         let mut symbols = FormulaTokenIter::from_str(formula_string, rslv)
             .collect::<Result<Vec<_>, _>>()?
             .into_iter();

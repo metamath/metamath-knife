@@ -1190,7 +1190,6 @@ impl Diagnostic {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub enum StmtParseError {
-    NoWorkVariable,
     ParsedStatementTooShort(Span, Option<Token>),
     ParsedStatementNoTypeCode,
     ParsedStatementWrongTypeCode(Token),
@@ -1203,7 +1202,6 @@ impl StmtParseError {
     #[must_use]
     pub fn label<'a>(&self) -> Cow<'a, str> {
         match self {
-            StmtParseError::NoWorkVariable => "Work Variables are not implemented",
             StmtParseError::ParsedStatementTooShort(_, _) => "Parsed statement too short",
             StmtParseError::ParsedStatementWrongTypeCode(_) => {
                 "Parsed statement has wrong typecode"
@@ -1228,12 +1226,6 @@ impl StmtParseError {
         }
         let severity = self.severity();
         let info = match self {
-            StmtParseError::NoWorkVariable => (
-                AnnotationType::Error,
-                "Callers must implement their own resolvers to have this functionality".into(),
-                stmt,
-                stmt.span(),
-            ),
             StmtParseError::ParsedStatementTooShort(span, ref opt_tok) => (
                 severity,
                 match opt_tok {
