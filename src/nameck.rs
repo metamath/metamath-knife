@@ -328,7 +328,7 @@ impl Nameset {
             .get(name)
             .expect("please only use get_atom for local $v")
     }
-    
+
     /// Returns the last known atom
     #[must_use]
     pub fn last_atom(&self) -> Atom {
