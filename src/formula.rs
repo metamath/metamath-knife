@@ -19,6 +19,7 @@
 
 use crate::as_str;
 use crate::bit_set::Bitset;
+use crate::diag::StmtParseError;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
 use crate::scopeck::Hyp;
@@ -123,11 +124,71 @@ impl<'a> IntoIterator for &'a Substitutions {
     }
 }
 
-/// A provider for work variables
-/// Work variables are typically used when a new variable appears in an unification, which cannot be immediately assigned.
-pub trait WorkVariableProvider<E> {
+/// An interface for resolving symbol and label names into identifiers, and vice-versa,
+/// as well as a provider for work variables
+///
+/// Work variables are typically used when a new variable appears in an unification,
+/// which cannot be immediately assigned.
+pub trait Resolver<E> {
+    /// Gets the symbol with the given name
+    fn get_symbol(&self, name: &[u8]) -> Option<Symbol>;
+
+    /// Gets the token for the given symbol
+    fn symbol_token(&self, symbol: Symbol) -> crate::statement::TokenPtr<'_>;
+
+    /// Gets the name of the given symbol
+    fn symbol_name(&self, symbol: Symbol) -> &str {
+        as_str(self.symbol_token(symbol))
+    }
+
+    /// Gets the label with the given name
+    fn get_label(&self, name: &[u8]) -> Option<Label>;
+
+    /// Gets the name of the given label
+    fn label_name(&self, label: Label) -> &str;
+
+    /// Gets the label representing a virtual "float" statement for the given variable symbol,
+    /// As well as the corresponding type code
+    fn label_for_symbol(&self, symbol: Symbol) -> (Label, TypeCode);
+
     /// Provide a new work variable for the given typecode
     fn new_work_variable(&mut self, typecode: TypeCode) -> Result<Label, E>;
+
+    /// Assess whether the given symbol is a work variable.
+    fn is_work_variable(&self, symbol: Symbol) -> bool;
+}
+
+impl Resolver<StmtParseError> for Nameset {
+    fn get_symbol(&self, name: &[u8]) -> Option<Symbol> {
+        Some(self.lookup_symbol(name)?.atom)
+    }
+
+    fn symbol_token(&self, symbol: Symbol) -> crate::statement::TokenPtr<'_> {
+        self.atom_name(symbol)
+    }
+
+    fn get_label(&self, name: &[u8]) -> Option<Label> {
+        Some(self.lookup_label(name)?.atom)
+    }
+
+    fn label_name(&self, label: Label) -> &str {
+        as_str(self.atom_name(label))
+    }
+
+    fn label_for_symbol(&self, _: Symbol) -> (Label, TypeCode) {
+        panic!("Symbols in regular formulas shall only be regular symbols");
+    }
+
+    fn new_work_variable(&mut self, _typecode: TypeCode) -> Result<Label, StmtParseError> {
+        // Work variables are not implemented in Nameset,
+        // callers must implement their own resolvers to have this functionality.
+        Err(StmtParseError::NoWorkVariable)
+    }
+
+    fn is_work_variable(&self, _symbol: Symbol) -> bool {
+        // `Nameset` never provides work variables
+        false
+    }
 }
 
 /// A [`Substitutions`] reference in the context of a [`Database`].
@@ -498,7 +559,7 @@ impl<'a> FormulaRef<'a> {
     pub fn complete_substitutions<E>(
         &self,
         substitutions: &mut Substitutions,
-        wvp: &mut impl WorkVariableProvider<E>,
+        wvp: &mut impl Resolver<E>,
     ) -> Result<(), E> {
         self.sub_complete_substitutions(self.formula.root, substitutions, wvp)
     }
@@ -508,7 +569,7 @@ impl<'a> FormulaRef<'a> {
         &self,
         node_id: NodeId,
         substitutions: &mut Substitutions,
-        wvp: &mut impl WorkVariableProvider<E>,
+        wvp: &mut impl Resolver<E>,
     ) -> Result<(), E> {
         if self.is_variable(node_id) {
             let label = &self.tree[node_id];
