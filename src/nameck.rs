@@ -63,7 +63,7 @@ use std::u32;
 ///
 /// [INC]: https://github.com/sorear/smetamath-rs/issues/11
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Default, Hash)]
-pub struct Atom(u32);
+pub struct Atom(pub u32);
 
 // currently we use Vecs for a lot of things in the index.  we might consider
 // changing it to make it more compact in memory, to the end of making database
