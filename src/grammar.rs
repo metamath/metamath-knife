@@ -1184,16 +1184,15 @@ impl Grammar {
             node_id: self.root,
             expected_typecodes: expected_typecodes.to_vec().into_boxed_slice(),
         };
-        let mut next_node = self.nodes.get(self.root);
         let mut stack = vec![];
         loop {
-            match next_node {
+            match *self.nodes.get(e.node_id) {
                 GrammarNode::Leaf {
                     reduce,
                     mut typecode,
                 } => {
                     // We found a leaf: REDUCE
-                    Self::do_reduce(&mut formula_builder, *reduce, rslv);
+                    Self::do_reduce(&mut formula_builder, reduce, rslv);
 
                     if e.expected_typecodes.contains(&typecode) {
                         // We found an expected typecode, pop from the stack and continue
@@ -1216,7 +1215,6 @@ impl Grammar {
                                     }
 
                                     e.node_id = *next_node_id;
-                                    next_node = self.nodes.get(e.node_id);
                                     debug!("   Next Node: {:?}", e.node_id);
                                 }
                                 None => {
@@ -1238,7 +1236,6 @@ impl Grammar {
                                 Self::do_reduce(&mut formula_builder, reduce, rslv);
                             }
                             e.node_id = next_node_id;
-                            next_node = self.nodes.get(e.node_id);
                         }
                     } else {
                         // We have parsed everything but did not obtain an expected typecode, try a type conversion.
@@ -1268,10 +1265,9 @@ impl Grammar {
                             Self::do_reduce(&mut formula_builder, reduce, rslv);
                         }
                         e.node_id = next_node_id;
-                        next_node = self.nodes.get(e.node_id);
                     }
                 }
-                GrammarNode::Branch { map } => {
+                GrammarNode::Branch { ref map } => {
                     // We found a branch
                     if let Some(&token) = symbol_enum.peek() {
                         last_token = token;
@@ -1299,7 +1295,6 @@ impl Grammar {
                             // Found an atom matching one of our next nodes: SHIFT, to the next node
                             self.do_shift(&mut symbol_enum, rslv);
                             e.node_id = *next_node_id;
-                            next_node = self.nodes.get(e.node_id);
                             debug!("   Next Node: {:?}", e.node_id);
                         } else {
                             // No matching constant, search among variables
@@ -1322,7 +1317,6 @@ impl Grammar {
                                     })
                                     .collect(),
                             };
-                            next_node = self.nodes.get(e.node_id);
                         }
                     } else {
                         return Err(Grammar::too_short(last_token, map, rslv));
