@@ -63,7 +63,7 @@ use std::u32;
 ///
 /// [INC]: https://github.com/sorear/smetamath-rs/issues/11
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Default, Hash)]
-pub struct Atom(pub u32);
+pub struct Atom(u32);
 
 // currently we use Vecs for a lot of things in the index.  we might consider
 // changing it to make it more compact in memory, to the end of making database
@@ -329,10 +329,31 @@ impl Nameset {
             .expect("please only use get_atom for local $v")
     }
 
-    /// Returns the last known atom
+    /// Returns an atom uniquely identifiable by the given `u32`, 
+    /// and guaranteed to be different of any "regular" atom
+    /// previously allocated during parsing.
+    #[inline]
     #[must_use]
-    pub fn last_atom(&self) -> Atom {
-        Atom(self.atom_table.table.len() as u32)
+    pub fn create_extra_atom(&self, id: u32) -> Option<Atom> {
+        let intern = u32::MAX.saturating_sub(id);
+        if intern > self.atom_table.table.len() as u32 { Some(Atom(intern)) }
+        else { None }
+    }
+
+    /// Retrieves the unique `u32` identifier given when creating an "extra" atom,
+    /// typically for work variables
+    #[inline]
+    #[must_use]
+    pub fn extra_atom_id(&self, atom: Atom) -> Option<u32> {
+        if self.is_extra_atom(atom) { Some(u32::MAX.saturating_sub(atom.0)) }
+        else { None }
+    }
+
+    /// Tests whether an atom has been allocated using `create_extra_atom`.
+    #[inline]
+    #[must_use]
+    pub fn is_extra_atom(&self, atom: Atom) -> bool {
+        atom.0 > self.atom_table.table.len() as u32
     }
 
     /// Map atoms back to names.
