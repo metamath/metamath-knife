@@ -225,6 +225,14 @@ pub fn as_str(ptr: TokenPtr<'_>) -> &str {
     std::str::from_utf8(ptr).expect("TokenPtr is supposed to be UTF8")
 }
 
+/// Transmutes this token into a Rust string.
+/// This version of `as_str` is intended to be used on owned tokens,
+/// which might not have been contructed from the database buffers.
+#[must_use]
+pub fn as_string(token: Vec<u8>) -> String {
+    String::from_utf8(token).expect("TokenPtr is supposed to be UTF8")
+}
+
 /// Locate a span uniquely in the database by appending a segment ID.
 pub type GlobalSpan = (SegmentId, Span);
 

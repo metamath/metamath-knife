@@ -17,14 +17,13 @@
 //      to the same node if a substituted variable appears several times
 //      in the formula to be substituted.
 
-use itertools::Either;
-
 use crate::as_str;
 use crate::bit_set::Bitset;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
 use crate::scopeck::Hyp;
 use crate::segment_set::SegmentSet;
+use crate::statement::as_string;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
 use crate::tree::NodeId;
@@ -142,9 +141,7 @@ pub trait Resolver: Debug {
     fn symbol_name(&self, symbol: Symbol) -> Cow<'_, str> {
         match self.symbol_token(symbol) {
             Cow::Borrowed(token) => as_str(token).into(),
-            Cow::Owned(token) => String::from_utf8(token)
-                .expect("TokenPtr is supposed to be UTF8")
-                .into(),
+            Cow::Owned(token) => as_string(token).into(),
         }
     }
 
@@ -720,16 +717,19 @@ impl<'a> Debug for SubFormulaRef<'a> {
     }
 }
 
-type FlattenStack<'a> = Vec<(
-    Either<TokenIter<'a>, Symbol>,
-    Option<SiblingIter<'a, Label>>,
-)>;
+/// An item on the internal stack of the `Flatten` iterator
+#[allow(variant_size_differences)]
+#[derive(Debug)]
+enum FlattenStackItem<'a> {
+    WorkVariable(Symbol),
+    SubFormula(TokenIter<'a>, Option<SiblingIter<'a, Label>>),
+}
 
 /// An iterator going through each symbol in a formula
 #[derive(Debug)]
 pub struct Flatten<'a> {
     formula: &'a Formula,
-    stack: FlattenStack<'a>,
+    stack: Vec<FlattenStackItem<'a>>,
     sset: &'a SegmentSet,
     nset: &'a Nameset,
     rslv: &'a dyn Resolver,
@@ -739,8 +739,9 @@ impl<'a> Flatten<'a> {
     fn step_into(&mut self, node_id: NodeId) {
         let label = self.formula.tree[node_id];
         if self.rslv.is_work_variable(label) {
-            self.stack
-                .push((Either::Right(self.rslv.symbol_for_label(label)), None));
+            self.stack.push(FlattenStackItem::WorkVariable(
+                self.rslv.symbol_for_label(label),
+            ));
         } else {
             let sref = self.sset.statement(
                 self.nset
@@ -751,12 +752,13 @@ impl<'a> Flatten<'a> {
             let mut math_iter = sref.math_iter();
             math_iter.next(); // Always skip the typecode token.
             if self.formula.tree.has_children(node_id) {
-                self.stack.push((
-                    Either::Left(math_iter),
+                self.stack.push(FlattenStackItem::SubFormula(
+                    math_iter,
                     Some(self.formula.tree.children_iter(node_id)),
                 ));
             } else {
-                self.stack.push((Either::Left(math_iter), None));
+                self.stack
+                    .push(FlattenStackItem::SubFormula(math_iter, None));
             }
         }
     }
@@ -772,7 +774,7 @@ impl<'a> Iterator for Flatten<'a> {
         let stack_end = self.stack.len() - 1;
         #[allow(clippy::match_on_vec_items)]
         match self.stack[stack_end] {
-            (Either::Left(ref mut math_iter), ref mut sibling_iter) => {
+            FlattenStackItem::SubFormula(ref mut math_iter, ref mut sibling_iter) => {
                 if let Some(token) = math_iter.next() {
                     // Continue with next token of this syntax
                     let symbol = self.nset.lookup_symbol(token.slice).unwrap();
@@ -796,7 +798,7 @@ impl<'a> Iterator for Flatten<'a> {
                     self.next()
                 }
             }
-            (Either::Right(symbol), _) => {
+            FlattenStackItem::WorkVariable(symbol) => {
                 self.stack.pop();
                 Some(symbol)
             }
