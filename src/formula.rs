@@ -186,8 +186,9 @@ impl Resolver for Nameset {
         as_str(self.atom_name(label)).into()
     }
 
-    fn label_for_symbol(&self, _: Symbol) -> (Label, TypeCode) {
-        panic!("Symbols in regular formulas shall only be regular symbols");
+    fn label_for_symbol(&self, symbol: Symbol) -> (Label, TypeCode) {
+        let lookup = self.lookup_float_by_atom(symbol);
+        (lookup.statement_atom, lookup.typecode_atom)
     }
 
     fn symbol_for_label(&self, _: Label) -> Symbol {
