@@ -170,7 +170,7 @@ pub struct Grammar {
 /// - `label` is the syntax axiom being applied.
 /// - `var_count` is the number of variables this syntax axiom requires. This tells how many of the parse trees will be joined.
 /// - `offset` says how far in the stack of yet un-joined parse trees the reduce will join. The cases when this is non-zero are rare.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Reduce {
     label: Label,
     var_count: u8,
@@ -420,13 +420,13 @@ impl Grammar {
                     [Keyword(cmd), sort, Keyword(as_), logic]
                         if cmd.as_ref(buf) == b"syntax" && as_.as_ref(buf) == b"as" =>
                     {
-                        self.provable_type = nset.lookup_symbol(sort.value(buf)).unwrap().atom;
-                        self.logic_type = nset.lookup_symbol(logic.value(buf)).unwrap().atom;
+                        self.provable_type = nset.lookup_symbol(&sort.value(buf)).unwrap().atom;
+                        self.logic_type = nset.lookup_symbol(&logic.value(buf)).unwrap().atom;
                         self.typecodes.push(self.logic_type);
                     }
                     [Keyword(cmd), sort] if cmd.as_ref(buf) == b"syntax" => self
                         .typecodes
-                        .push(nset.lookup_symbol(sort.value(buf)).unwrap().atom),
+                        .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom),
                     _ => {}
                 }
             }
@@ -959,7 +959,7 @@ impl Grammar {
             if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
                 let prefix_symbol = db
                     .name_result()
-                    .lookup_symbol(prefix[index].value(buf))
+                    .lookup_symbol(&prefix[index].value(buf))
                     .ok_or_else(|| undefined_cmd(&prefix[index], buf))?
                     .atom;
                 let next_node = map
@@ -976,7 +976,7 @@ impl Grammar {
 
         // We note the typecode and next branch of the "shadowed" prefix
         let shadowed_typecode = names
-            .lookup_float(shadows[index].value(buf))
+            .lookup_float(&shadows[index].value(buf))
             .ok_or_else(|| undefined_cmd(&shadows[index], buf))?
             .typecode_atom;
         let (shadowed_next_node, _) =
@@ -992,11 +992,11 @@ impl Grammar {
         let mut missing_reduce = ReduceVec::new();
         for token in &prefix[index..] {
             let lookup_symbol = names
-                .lookup_symbol(token.value(buf))
-                .ok_or_else(|| undefined_cmd(&*token, buf))?;
+                .lookup_symbol(&token.value(buf))
+                .ok_or_else(|| undefined_cmd(token, buf))?;
             debug!(
                 "Following prefix {}, at {} / {}",
-                as_str(token.value(buf)),
+                as_str(&token.value(buf)),
                 node_id,
                 add_from_node_id
             );
@@ -1006,7 +1006,7 @@ impl Grammar {
                 SymbolType::Variable => {
                     increment_offsets(&mut missing_reduce);
                     names
-                        .lookup_float(token.value(buf))
+                        .lookup_float(&token.value(buf))
                         .ok_or_else(|| undefined_cmd(token, buf))?
                         .typecode_atom
                 }
@@ -1034,7 +1034,7 @@ impl Grammar {
             }
         }
 
-        debug!("Shadowed token: {}", as_str(shadows[index].value(buf)));
+        debug!("Shadowed token: {}", as_str(&shadows[index].value(buf)));
         debug!("Missing reduces: {}", missing_reduce.len());
         debug!(
             "Handle shadowed next node {}, typecode {:?}",
@@ -1106,11 +1106,11 @@ impl Grammar {
                             [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
                                 // syntax '|-' as 'wff';
                                 self.provable_type = nset
-                                    .lookup_symbol(ty.value(buf))
+                                    .lookup_symbol(&ty.value(buf))
                                     .ok_or((address, undefined_cmd(ty, buf)))?
                                     .atom;
                                 self.typecodes.push(
-                                    nset.lookup_symbol(code.value(buf))
+                                    nset.lookup_symbol(&code.value(buf))
                                         .ok_or((address, undefined_cmd(code, buf)))?
                                         .atom,
                                 );
@@ -1118,7 +1118,7 @@ impl Grammar {
                             [ty] => {
                                 // syntax 'setvar';
                                 self.typecodes.push(
-                                    nset.lookup_symbol(ty.value(buf))
+                                    nset.lookup_symbol(&ty.value(buf))
                                         .ok_or((address, undefined_cmd(ty, buf)))?
                                         .atom,
                                 );

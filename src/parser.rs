@@ -903,7 +903,11 @@ impl Iterator for CommandIter<'_> {
                     let ch = self.next_char();
                     self.index += 1;
                     if ch == quote {
-                        break;
+                        if self.has_more() && self.next_char() == quote {
+                            self.index += 1;
+                        } else {
+                            break;
+                        }
                     }
                 }
                 CommandToken::String(Span::new(token_start, self.index - 1))
@@ -1018,7 +1022,7 @@ impl SegmentSet {
 
             let sum = |mut rest: std::slice::Iter<'_, CommandToken>| {
                 let mut span_out = as_string(span, rest.next())?;
-                let mut accum: Vec<u8> = span_out.as_ref(buf).into();
+                let mut accum: Vec<u8> = CommandToken::unescape_string(buf, span_out).into();
                 span_out.start -= 1;
                 loop {
                     match rest.next() {
@@ -1030,7 +1034,7 @@ impl SegmentSet {
                         _ => return Err(Diagnostic::CommandIncomplete(span)),
                     }
                     let span2 = as_string(span, rest.next())?;
-                    accum.extend_from_slice(span2.as_ref(buf));
+                    CommandToken::append_unescaped_string(buf, span2, &mut accum);
                     span_out.end = span2.end
                 }
             };
@@ -1049,7 +1053,7 @@ impl SegmentSet {
                     MarkupKind::AltHtml => &mut data.alt_html_defs,
                     MarkupKind::Latex => &mut data.latex_defs,
                 };
-                match map.entry(sp.as_ref(buf).into()) {
+                match map.entry(CommandToken::unescape_string(buf, sp).into()) {
                     Entry::Occupied(e) => {
                         let (sp2, (id2, _), _) = *e.get();
                         data.diagnostics

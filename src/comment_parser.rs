@@ -19,7 +19,7 @@ use std::fmt::Display;
 use lazy_static::lazy_static;
 use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
 
-use crate::Span;
+use crate::{statement::unescape, Span};
 
 /// A comment markup item, which represents either a piece of text from the input
 /// or some kind of metadata item like the start or end of an italicized group.
@@ -71,22 +71,6 @@ pub enum CommentItem {
     EndItalic(usize),
     /// A bibliographic label `[foo]`. No escapes are needed inside the tag body.
     BibTag(Span),
-}
-
-#[inline]
-fn unescape(mut buf: &[u8], out: &mut Vec<u8>, is_escape: impl FnOnce(u8) -> bool + Copy) {
-    while let Some(n) = buf.iter().position(|&c| is_escape(c)) {
-        out.extend_from_slice(&buf[..=n]);
-        if buf.get(n + 1) == Some(&buf[n]) {
-            buf = &buf[n + 2..];
-        } else {
-            // this will not normally happen, but in some cases unescaped escapes
-            // are left uninterpreted because they appear in invalid position,
-            // and in that case they should be left as is
-            buf = &buf[n + 1..];
-        }
-    }
-    out.extend_from_slice(buf);
 }
 
 /// Returns true if this is a character that is escaped in [`CommentItem::Text`],
