@@ -33,7 +33,7 @@ type NodeId = usize;
 /// For the labels in DOT format
 #[cfg(feature = "dot")]
 fn as_string(node_id: NodeId) -> String {
-    format!("{}", node_id)
+    format!("{node_id}")
 }
 
 /// For the labels in DOT format
