@@ -90,7 +90,7 @@ impl Database {
             writeln!(out, "*{cstr}\n")?;
         }
 
-        match ProofTreeArray::new(self, stmt) {
+        match ProofTreeArray::from_stmt(self, stmt, true) {
             Ok(arr) => self.export_mmp_proof_tree(thm_label, &arr, out),
             Err(Diagnostic::ProofIncomplete) => self.export_incomplete_proof(stmt, out),
             Err(diag) => Err(diag.into()),
@@ -173,15 +173,14 @@ impl ProofTreeArray {
 
 impl Database {
     /// Export an mmp file for a given proof tree.
+    /// ## Panics
+    /// The `ProofTreeArray` must have `enable_exprs = true`.
     pub fn export_mmp_proof_tree<W: Write>(
         &self,
         thm_label: &[u8],
         arr: &ProofTreeArray,
         out: &mut W,
     ) -> Result<(), ExportError> {
-        let sset = self.parse_result();
-        let nset = self.name_result();
-
         // TODO(Mario): remove hardcoded logical step symbol
         let tc = b"|-";
         let mut lines = arr.with_logical_steps(self, |cur, ix, stmt, hyps| {
@@ -217,30 +216,20 @@ impl Database {
             .map(|&(cur, ref line)| line.len() as i16 - indent[cur] as i16)
             .max()
             .unwrap() as u16;
+        let exprs = arr
+            .exprs()
+            .expect("exporting MMP requires expressions enabled in the ProofTreeArray");
         for &mut (cur, ref mut line) in &mut lines {
             for _ in 0..(spaces + indent[cur] - line.len() as u16) {
                 line.push(' ')
             }
             line.push_str(str::from_utf8(tc).unwrap());
-            line.push_str(&String::from_utf8_lossy(&arr.exprs[cur]));
+            line.push_str(&String::from_utf8_lossy(&exprs[cur]));
             writeln!(out, "{line}")?;
         }
-        writeln!(
-            out,
-            "\n$={}",
-            ProofTreePrinter {
-                sset,
-                nset,
-                scope: self.scope_result(),
-                thm_label,
-                style: ProofStyle::Compressed,
-                arr,
-                initial_chr: 2,
-                indent: 6,
-                line_width: 79,
-            }
-        )?;
-
+        let mut printer = ProofTreePrinter::new(self, thm_label, ProofStyle::Compressed, arr);
+        printer.set_initial_chr(2);
+        writeln!(out, "\n$={printer}")?;
         writeln!(out, "\n$)")?;
         Ok(())
     }

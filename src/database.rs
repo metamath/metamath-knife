@@ -810,7 +810,7 @@ impl Database {
     /// in the form of a `ProofTreeArray`
     #[must_use]
     pub fn get_proof_tree(&self, sref: StatementRef<'_>) -> Option<ProofTreeArray> {
-        ProofTreeArray::new(self, sref).ok()
+        ProofTreeArray::from_stmt(self, sref, true).ok()
     }
 
     /// Returns the syntax proof tree for a given formula,

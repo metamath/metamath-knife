@@ -63,17 +63,24 @@ impl ProofTree {
 
 /// An array of proof trees, used to collect steps of a proof
 /// in proof order
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ProofTreeArray {
     map: HashMap<u64, usize>,
     /// The list of proof trees
     pub trees: Vec<ProofTree>,
-    /// The uncompressed strings for each proof tree
-    pub exprs: Vec<Vec<u8>>,
+    /// The uncompressed strings for each proof tree.
+    /// Set this to `None` to disable expression construction
+    exprs: Option<Vec<Vec<u8>>>,
     /// The QED step
     pub qed: usize,
     /// The distance from each step to the QED step
     indent: Vec<u16>,
+}
+
+impl Default for ProofTreeArray {
+    fn default() -> Self {
+        Self::new(true)
+    }
 }
 
 /// A strongly typed representation of the RPN proof style used by
@@ -108,6 +115,19 @@ pub enum RPNStep {
 }
 
 impl ProofTreeArray {
+    /// Constructs a new empty `ProofTreeArray`. If `enable_exprs` is true,
+    /// it will construct expressions for each step, used by [`Database::export_mmp_proof_tree`].
+    #[must_use]
+    pub fn new(enable_exprs: bool) -> Self {
+        Self {
+            map: HashMap::default(),
+            trees: vec![],
+            exprs: if enable_exprs { Some(vec![]) } else { None },
+            qed: 0,
+            indent: vec![],
+        }
+    }
+
     /// Get the index of a proof tree in the array
     #[must_use]
     pub fn index(&self, tree: &ProofTree) -> Option<usize> {
@@ -117,8 +137,12 @@ impl ProofTreeArray {
     /// Create a proof tree array from the proof a single $p statement,
     /// returning the result of the given proof builder, or an error if the
     /// proof is faulty
-    pub(crate) fn new(db: &Database, stmt: StatementRef<'_>) -> Result<ProofTreeArray, Diagnostic> {
-        let mut arr = ProofTreeArray::default();
+    pub(crate) fn from_stmt(
+        db: &Database,
+        stmt: StatementRef<'_>,
+        enable_exprs: bool,
+    ) -> Result<ProofTreeArray, Diagnostic> {
+        let mut arr = ProofTreeArray::new(enable_exprs);
         arr.qed = db.verify_one(&mut arr, stmt)?;
         arr.calc_indent();
         Ok(arr)
@@ -274,6 +298,12 @@ impl ProofTreeArray {
             stack: vec![(self.qed, 0)],
         }
     }
+
+    /// Returns the list of expressions corresponding to each proof tree.
+    #[must_use]
+    pub fn exprs(&self) -> Option<&[Vec<u8>]> {
+        self.exprs.as_deref()
+    }
 }
 
 /// An iterator which loops over the steps of the proof in tree order
@@ -340,17 +370,19 @@ impl ProofBuilder for ProofTreeArray {
             let ix = self.trees.len();
             self.map.insert(tree.hash, ix);
             self.trees.push(tree);
-            let mut u_expr = vec![b' '];
-            for &chr in &pool[expr] {
-                if chr & 0x80 == 0 {
-                    u_expr.push(chr);
-                } else {
-                    u_expr.push(chr & 0x7F);
-                    u_expr.push(b' ');
+            if let Some(exprs) = &mut self.exprs {
+                let mut u_expr = vec![b' '];
+                for &chr in &pool[expr] {
+                    if chr & 0x80 == 0 {
+                        u_expr.push(chr);
+                    } else {
+                        u_expr.push(chr & 0x7F);
+                        u_expr.push(b' ');
+                    }
                 }
+                u_expr.pop();
+                exprs.push(u_expr);
             }
-            u_expr.pop();
-            self.exprs.push(u_expr);
             ix
         })
     }
@@ -412,6 +444,44 @@ pub struct ProofTreePrinter<'a> {
     pub(crate) indent: u16,
     /// The number of characters to fit before going to a new line
     pub(crate) line_width: u16,
+}
+
+impl<'a> ProofTreePrinter<'a> {
+    /// Construct a new proof tree printer with all the options.
+    #[must_use]
+    pub fn new(
+        db: &'a Database,
+        thm_label: TokenPtr<'a>,
+        style: ProofStyle,
+        arr: &'a ProofTreeArray,
+    ) -> Self {
+        Self {
+            sset: db.parse_result(),
+            nset: db.name_result(),
+            scope: db.scope_result(),
+            thm_label,
+            style,
+            arr,
+            initial_chr: 0,
+            indent: 6,
+            line_width: 79,
+        }
+    }
+
+    /// Set the position of the first line of the proof. (The default is `0`.)
+    pub fn set_initial_chr(&mut self, initial_chr: u16) {
+        self.initial_chr = initial_chr;
+    }
+
+    /// Set the indentation before each line of proof. (The default is `6`.)
+    pub fn set_indent(&mut self, indent: u16) {
+        self.indent = indent;
+    }
+
+    /// Set the line width for the proof. (The default is `79`.)
+    pub fn set_line_width(&mut self, line_width: u16) {
+        self.line_width = line_width;
+    }
 }
 
 /// The local variables of `ProofTreePrinter::fmt()`, extracted into a struct
