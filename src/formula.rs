@@ -50,7 +50,7 @@ pub type Symbol = Atom;
 pub type Label = Atom;
 
 /// An error occurring during unification
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnificationError {
     /// Generic unification failure
     UnificationFailed,
@@ -482,14 +482,14 @@ impl<'a> FormulaRef<'a> {
     fn write_sub_sexpr(&self, node_id: NodeId, w: &mut impl std::fmt::Write) -> std::fmt::Result {
         let name = as_str(self.db.name_result().atom_name(self.formula.tree[node_id]));
         if self.formula.tree.has_children(node_id) {
-            write!(w, "({}", name)?;
+            write!(w, "({name}")?;
             for i in self.formula.tree.children_iter(node_id) {
                 write!(w, " ")?;
                 self.write_sub_sexpr(i, w)?;
             }
             write!(w, ")")
         } else {
-            write!(w, "{}", name)
+            write!(w, "{name}")
         }
     }
 

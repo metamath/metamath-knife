@@ -603,7 +603,7 @@ fn construct_full_frame<'a>(
     // any variables added for DV are not mandatory
     iframe.mandatory_count = iframe.var_list.len();
 
-    for &(_, ref vars) in state.gnames.lookup_global_dv() {
+    for (_, vars) in state.gnames.lookup_global_dv() {
         scan_dv(&mut iframe, vars)
     }
 
@@ -731,10 +731,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let const_tok = sref.math_at(0);
     let var_tok = sref.math_at(1);
 
-    let l_atom = match check_label_dup(state, sref) {
-        None => return,
-        Some(a) => a,
-    };
+    let Some(l_atom) = check_label_dup(state, sref) else { return };
 
     // $f must be one constant and one variable - parser can't check this
     let mut const_at = Atom::default();
@@ -1091,7 +1088,7 @@ impl<'a> FrameRef<'a> {
                 let label = db
                     .name_result()
                     .lookup_label(sref.label())
-                    .map_or(Label::default(), |l| l.atom);
+                    .map_or_else(Label::default, |l| l.atom);
                 let formula = db.stmt_parse_result().get_formula(&sref)?;
                 Some((label, formula))
             } else {
@@ -1107,7 +1104,7 @@ impl<'a> FrameRef<'a> {
             self.db
                 .name_result()
                 .lookup_label(sref.label())
-                .map_or(Label::default(), |l| l.atom)
+                .map_or_else(Label::default, |l| l.atom)
         })
     }
 }

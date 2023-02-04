@@ -205,7 +205,7 @@ impl SegmentSet {
     pub(crate) fn segment_opt(&self, seg_id: SegmentId) -> Option<SegmentRef<'_>> {
         self.segments
             .get(&seg_id)
-            .map(|&(ref seg, ref _srcinfo)| SegmentRef {
+            .map(|(seg, _srcinfo)| SegmentRef {
                 id: seg_id,
                 segment: seg,
             })

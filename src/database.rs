@@ -796,10 +796,10 @@ impl Database {
     pub fn export(&self, stmt: &str) {
         time(&self.options, "export", || {
             let sref = self.statement(stmt.as_bytes()).unwrap_or_else(|| {
-                panic!("Label {} did not correspond to an existing statement", stmt)
+                panic!("Label {stmt} did not correspond to an existing statement")
             });
 
-            File::create(format!("{}.mmp", stmt))
+            File::create(format!("{stmt}.mmp"))
                 .map_err(export::ExportError::Io)
                 .and_then(|mut file| self.export_mmp(sref, &mut file))
                 .unwrap()

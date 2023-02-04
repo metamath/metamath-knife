@@ -81,7 +81,7 @@ fn test_stref_v() {
     assert_eq!(vyz.span(), Span::new(11, 20));
     let tli: Vec<_> = vyz.math_iter().map(TokenRef::index).collect();
     assert_eq!(tli, vec![0i32, 1i32]);
-    let zz: Vec<Vec<u8>> = vyz.math_iter().map(|z| (&*z).to_owned()).collect();
+    let zz: Vec<Vec<u8>> = vyz.math_iter().map(|z| (*z).to_owned()).collect();
     assert_eq!(zz, vec![b"Y", b"Z"]);
 }
 

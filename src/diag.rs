@@ -225,7 +225,7 @@ use self::Diagnostic::*;
 
 impl From<io::Error> for Diagnostic {
     fn from(err: io::Error) -> Diagnostic {
-        IoError(format!("{}", err))
+        IoError(format!("{err}"))
     }
 }
 
@@ -356,7 +356,7 @@ impl Diagnostic {
             BadCharacter(pos, byte) => ("Invalid character".into(), vec![(
                 AnnotationType::Error,
                 format!("Invalid character (byte value {byte}); Metamath source files are limited to \
-                        US-ASCII with controls TAB, CR, LF, FF)", byte = byte).into(),
+                        US-ASCII with controls TAB, CR, LF, FF)").into(),
                 stmt,
                 Span::new(*pos, *pos + 1),
             )]),
@@ -743,9 +743,9 @@ impl Diagnostic {
                 stmt.span(),
             )]),
             &MissingMarkupDef([html, alt_html, latex], span) => {
-                let msg = html.then(|| "htmldef").into_iter()
-                    .chain(alt_html.then(|| "althtmldef").into_iter())
-                    .chain(latex.then(|| "latexdef").into_iter());
+                let msg = html.then_some("htmldef").into_iter()
+                    .chain(alt_html.then_some("althtmldef").into_iter())
+                    .chain(latex.then_some("latexdef").into_iter());
                 (format!("Missing {} for token", msg.format(", ")).into(), vec![(
                     AnnotationType::Warning,
                     "This token has not been declared in the $t comment".into(),

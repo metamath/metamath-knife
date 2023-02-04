@@ -45,10 +45,10 @@ impl From<fmt::Error> for ExportError {
 
 impl fmt::Display for ExportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            ExportError::Io(ref err) => write!(f, "IO error: {}", err),
-            ExportError::Verify(ref err) => write!(f, "{:?}", err),
-            ExportError::Format(ref err) => write!(f, "Format error: {:?}", err),
+        match self {
+            ExportError::Io(err) => write!(f, "IO error: {err}"),
+            ExportError::Verify(err) => write!(f, "{err:?}"),
+            ExportError::Format(err) => write!(f, "Format error: {err:?}"),
         }
     }
 }
@@ -87,7 +87,7 @@ impl Database {
                 as_str(span.as_ref(&comment.segment().segment.buffer)),
                 "\n  ",
             );
-            writeln!(out, "*{}\n", cstr)?;
+            writeln!(out, "*{cstr}\n")?;
         }
 
         match ProofTreeArray::new(self, stmt) {
@@ -187,7 +187,7 @@ impl Database {
         let mut lines = arr.with_logical_steps(self, |cur, ix, stmt, hyps| {
             let mut line = match stmt.statement_type() {
                 // Floating will not happen unless we don't recognize the grammar
-                StatementType::Essential | StatementType::Floating => format!("h{}", ix),
+                StatementType::Essential | StatementType::Floating => format!("h{ix}"),
                 _ => {
                     if cur == arr.qed {
                         "qed".to_string()
@@ -223,7 +223,7 @@ impl Database {
             }
             line.push_str(str::from_utf8(tc).unwrap());
             line.push_str(&String::from_utf8_lossy(&arr.exprs[cur]));
-            writeln!(out, "{}", line)?;
+            writeln!(out, "{line}")?;
         }
         writeln!(
             out,
