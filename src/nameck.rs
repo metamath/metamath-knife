@@ -133,7 +133,7 @@ struct AtomTable {
 
 fn intern(table: &mut AtomTable, tok: TokenPtr<'_>) -> Atom {
     let next = Atom(table.table.len() as u32 + 1);
-    assert!(next.0 < u32::max_value(), "atom table overflowed");
+    assert!(next.0 < u32::MAX, "atom table overflowed");
     if let Some(&atom) = table.table.get(tok) {
         return atom;
     }

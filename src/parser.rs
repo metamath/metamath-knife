@@ -960,7 +960,7 @@ pub fn parse_segments(input: &BufferRef) -> Vec<Arc<Segment>> {
         buffer: input,
         ..Scanner::default()
     };
-    assert!(input.len() < FilePos::max_value() as usize);
+    assert!(input.len() < FilePos::MAX as usize);
 
     loop {
         let (seg, last) = scanner.get_segment();

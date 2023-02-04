@@ -709,7 +709,7 @@ fn verify_proof<'a, P: ProofBuilder>(
                 } else if (b'U'..=b'Y').contains(&ch) {
                     k = k * 5 + 1 + (ch - b'U') as usize;
                     try_assert!(
-                        k < (u32::max_value() as usize / 20) - 1,
+                        k < (u32::MAX as usize / 20) - 1,
                         Diagnostic::ProofMalformedVarint
                     );
                     can_save = false;
