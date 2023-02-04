@@ -334,12 +334,13 @@ pub type Command = (Span, Vec<CommandToken>);
 
 /// An enumeration of statement types, most of which correspond to statements as
 /// defined in the Metamath spec.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 pub enum StatementType {
     /// Psuedo statement used only to record end-of-file whitespace.
     Eof,
     /// Statement which is damaged enough that there's no sense passing it to
     /// later stages.
+    #[default]
     Invalid,
     /// Comments between statements are recorded as statements in their own
     /// right to facilitate handling of date comments and other metadata.
@@ -378,12 +379,6 @@ pub enum StatementType {
     Variable,
 }
 use self::StatementType::*;
-
-impl Default for StatementType {
-    fn default() -> StatementType {
-        Invalid
-    }
-}
 
 impl StatementType {
     /// Returns true if this statement is an `Axiom` (`$a`) or `Provable` (`$p`) statement.

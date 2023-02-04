@@ -15,9 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
-    u32::from_str(&val)
-        .map(|_| ())
-        .map_err(|e| format!("{}", e))
+    u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
 }
 
 fn main() {
@@ -160,7 +158,7 @@ fn main() {
                 .len();
         }
 
-        println!("{} diagnostics issued.", count);
+        println!("{count} diagnostics issued.");
 
         if matches.is_present("print_grammar") {
             db.print_grammar();

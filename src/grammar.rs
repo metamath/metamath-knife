@@ -484,7 +484,7 @@ impl Grammar {
         if let GrammarNode::Branch { map } = &self.nodes.get(node_id) {
             map
         } else {
-            panic!("Expected branch for node {}!", node_id);
+            panic!("Expected branch for node {node_id}!");
         }
     }
 
@@ -993,7 +993,7 @@ impl Grammar {
         for token in &prefix[index..] {
             let lookup_symbol = names
                 .lookup_symbol(token.value(buf))
-                .ok_or_else(|| undefined_cmd(&*token, buf))?;
+                .ok_or_else(|| undefined_cmd(token, buf))?;
             debug!(
                 "Following prefix {}, at {} / {}",
                 as_str(token.value(buf)),
@@ -1738,8 +1738,8 @@ struct StmtParseSegment {
 }
 
 /// Runs statement parsing for a single segment.
-fn parse_statements_single<'a>(
-    sset: &'a SegmentSet,
+fn parse_statements_single(
+    sset: &SegmentSet,
     nset: &Nameset,
     names: &mut NameReader<'_>,
     grammar: &Grammar,

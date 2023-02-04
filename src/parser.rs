@@ -88,10 +88,11 @@ const fn is_mm_space(byte: u8) -> bool {
     byte <= 32 && is_mm_space_c0(byte)
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
+#[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
 /// The different types of heading markers, as defined in the Metamath book, section 4.4.1
 pub enum HeadingLevel {
     /// Virtual top-level heading, used as a root node
+    #[default]
     Database,
     /// Major part
     MajorPart,
@@ -103,12 +104,6 @@ pub enum HeadingLevel {
     SubSubSection,
     /// Statement
     Statement,
-}
-
-impl Default for HeadingLevel {
-    fn default() -> Self {
-        HeadingLevel::Database
-    }
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -762,14 +757,9 @@ fn collect_definitions(seg: &mut Segment) {
 
 /// Metamath spec valid label characters are `[-._a-zA-Z0-9]`
 fn is_valid_label(label: &[u8]) -> bool {
-    label.iter().all(|&c| {
-        c == b'.'
-            || c == b'-'
-            || c == b'_'
-            || (b'a'..=b'z').contains(&c)
-            || (b'0'..=b'9').contains(&c)
-            || (b'A'..=b'Z').contains(&c)
-    })
+    label
+        .iter()
+        .all(|&c| c == b'.' || c == b'-' || c == b'_' || c.is_ascii_alphanumeric())
 }
 
 /// Extract a section name from a comment

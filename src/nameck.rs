@@ -416,7 +416,7 @@ impl Nameset {
     pub fn statement_name(&self, sref: &StatementRef<'_>) -> TokenPtr<'_> {
         self.atom_name(
             self.lookup_label(sref.label())
-                .map_or(Atom::default(), |l| l.atom),
+                .map_or_else(Atom::default, |l| l.atom),
         )
     }
 }
