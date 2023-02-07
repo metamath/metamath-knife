@@ -355,6 +355,40 @@ impl Formula {
         );
     }
 
+    /// Replace all instances of `old_sub_fmla` in this formula by `new_sub_fmla`.
+    /// Where `substitute` works on variables only, this
+    #[must_use]
+    pub fn replace(&self, old_sub_fmla: &Formula, new_sub_fmla: &Formula) -> Formula {
+        let mut formula_builder = FormulaBuilder::default();
+        self.sub_replace(self.root, old_sub_fmla, new_sub_fmla, &mut formula_builder);
+        formula_builder.build(self.typecode)
+    }
+
+    /// Perform "replace" on a sub-formula, starting from the given `node_id`
+    fn sub_replace(
+        &self,
+        node_id: NodeId,
+        old_sub_fmla: &Formula,
+        new_sub_fmla: &Formula,
+        formula_builder: &mut FormulaBuilder,
+    ) {
+        if self.sub_eq(node_id, old_sub_fmla, old_sub_fmla.root) {
+            new_sub_fmla.copy_sub_formula(new_sub_fmla.root, formula_builder);
+        } else {
+            let mut children_count = 0;
+            for child_node_id in self.tree.children_iter(node_id) {
+                self.sub_replace(child_node_id, old_sub_fmla, new_sub_fmla, formula_builder);
+                children_count += 1;
+            }
+            formula_builder.reduce(
+                self.tree[node_id],
+                children_count,
+                0,
+                self.is_variable(node_id),
+            );
+        }
+    }
+
     // Copy a sub-formula of this formula to a formula builder
     fn copy_sub_formula(&self, node_id: NodeId, formula_builder: &mut FormulaBuilder) {
         let mut children_count = 0;
