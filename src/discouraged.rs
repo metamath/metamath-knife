@@ -9,10 +9,10 @@ use crate::{as_str, comment_parser::Discouragements, database::time, Database};
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Database {
-    /// Regenerates the `discouraged` file in the current directory
-    pub fn regen_discouraged(&self) -> Result<(), std::io::Error> {
+    /// Regenerates a `discouraged` file with the given filename
+    pub fn regen_discouraged(&self, path: &str) -> Result<(), std::io::Error> {
         time(&self.options.clone(), "discouraged", || {
-            self.output_discouraged(&mut File::create("discouraged")?)
+            self.output_discouraged(&mut File::create(path)?)
         })
     }
 
