@@ -10,7 +10,8 @@ use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::SourceInfo;
 use simple_logger::SimpleLogger;
-use std::io;
+use std::fs::File;
+use std::io::{self, BufWriter};
 use std::mem;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -96,7 +97,11 @@ fn main() {
     loop {
         db.parse(start.clone(), data.clone());
 
-        let mut types = vec![DiagnosticClass::Parse, DiagnosticClass::Scope];
+        let mut types = vec![DiagnosticClass::Parse];
+
+        if !matches.is_present("discouraged") {
+            types.push(DiagnosticClass::Scope);
+        }
 
         if matches.is_present("verify") {
             types.push(DiagnosticClass::Verify);
@@ -122,8 +127,11 @@ fn main() {
         let mut diags = db.diag_notations(&types);
 
         if matches.is_present("discouraged") {
-            db.regen_discouraged(matches.value_of("discouraged").unwrap())
-                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag.into())));
+            (|| {
+                let file = File::create(matches.value_of("discouraged").unwrap())?;
+                db.write_discouraged(&mut BufWriter::new(file))
+            })()
+            .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag.into())));
         }
 
         let mut count = db
