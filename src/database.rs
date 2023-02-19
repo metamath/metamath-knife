@@ -385,7 +385,7 @@ impl<T> Promise<T> {
 /// without affecting the other.
 #[derive(Clone, Debug)]
 pub struct Database {
-    options: Arc<DbOptions>,
+    pub(crate) options: Arc<DbOptions>,
     segments: Arc<SegmentSet>,
     /// We track the "current" and "previous" for all known passes, so that each
     /// pass can use its most recent results for optimized incremental
@@ -409,7 +409,7 @@ impl Default for Database {
     }
 }
 
-fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
+pub(crate) fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
     let now = Instant::now();
     let ret = f();
     if opts.timing {

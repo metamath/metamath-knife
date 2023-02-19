@@ -6,6 +6,7 @@ use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::{BibError, DiagnosticClass};
+use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::SourceInfo;
 use simple_logger::SimpleLogger;
@@ -29,6 +30,7 @@ fn main() {
         (@arg timing: --timing "Print milliseconds after each stage")
         (@arg verify: -v --verify "Check proof validity")
         (@arg verify_markup: -m --("verify-markup") "Check comment markup")
+        (@arg discouraged: -D --discouraged "Regenerate `discouraged` file")
         (@arg outline: -O --outline "Show database outline")
         (@arg print_typesetting: --("dump-typesetting") "Show typesetting information")
         (@arg parse_typesetting: -t --("parse-typesetting") "Parse typesetting information")
@@ -117,7 +119,13 @@ fn main() {
             db.verify_parse_stmt();
         }
 
-        let diags = db.diag_notations(&types);
+        let mut diags = db.diag_notations(&types);
+
+        if matches.is_present("discouraged") {
+            db.regen_discouraged()
+                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag.into())));
+        }
+
         let mut count = db
             .render_diags(diags, |snippet| {
                 println!("{}", DisplayList::from(snippet));

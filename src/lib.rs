@@ -59,6 +59,7 @@ mod util;
 pub mod comment_parser;
 pub mod database;
 pub mod diag;
+pub mod discouraged;
 pub mod export;
 pub mod formula;
 pub mod grammar;
