@@ -127,11 +127,9 @@ fn main() {
         let mut diags = db.diag_notations(&types);
 
         if matches.is_present("discouraged") {
-            (|| {
-                let file = File::create(matches.value_of("discouraged").unwrap())?;
-                db.write_discouraged(&mut BufWriter::new(file))
-            })()
-            .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag.into())));
+            File::create(matches.value_of("discouraged").unwrap())
+                .and_then(|file| db.write_discouraged(&mut BufWriter::new(file)))
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
         let mut count = db
