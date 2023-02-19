@@ -123,7 +123,7 @@ fn main() {
 
         if matches.is_present("discouraged") {
             db.regen_discouraged()
-                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
+                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag.into())));
         }
 
         let mut count = db
