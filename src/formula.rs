@@ -25,9 +25,6 @@ use crate::scopeck::Hyp;
 use crate::segment_set::SegmentSet;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
-use crate::tree::NodeId;
-use crate::tree::SiblingIter;
-use crate::tree::Tree;
 use crate::util::fast_extend;
 use crate::util::HashMap;
 use crate::verify::ProofBuilder;
@@ -39,6 +36,10 @@ use std::fmt::Display;
 use std::iter::FromIterator;
 use std::ops::Range;
 use std::sync::Arc;
+
+pub use crate::tree::NodeId;
+pub use crate::tree::SiblingIter;
+pub use crate::tree::Tree;
 
 /// An atom representing a typecode (for "set.mm", that's one of 'wff', 'class', 'setvar' or '|-')
 pub type TypeCode = Atom;
@@ -163,8 +164,10 @@ impl<'a> Debug for SubstitutionsRef<'a> {
 #[derive(Clone, Default, Debug)]
 pub struct Formula {
     typecode: TypeCode,
-    tree: Arc<Tree<Label>>,
-    root: NodeId,
+    /// The underlying tree structure.
+    pub tree: Arc<Tree<Label>>,
+    /// The root of the tree
+    pub root: NodeId,
     variables: Bitset,
 }
 

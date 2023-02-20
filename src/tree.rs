@@ -3,7 +3,8 @@
 use core::ops::Index;
 use core::ops::IndexMut;
 
-pub(crate) type NodeId = usize;
+/// An index into the tree.
+pub type NodeId = usize;
 
 #[derive(Debug)]
 struct TreeNode<TreeItem> {
@@ -14,7 +15,7 @@ struct TreeNode<TreeItem> {
 
 /// A tree implementation, hopefully efficient for representing formulas
 #[derive(Debug)]
-pub(crate) struct Tree<TreeItem> {
+pub struct Tree<TreeItem> {
     nodes: Vec<TreeNode<TreeItem>>,
 }
 
@@ -50,7 +51,7 @@ impl<TreeItem> Tree<TreeItem> {
 
     /// Checked accessor to a tree node
     #[inline]
-    fn node(&self, node_id: NodeId) -> &'_ TreeNode<TreeItem> {
+    fn node(&self, node_id: NodeId) -> &TreeNode<TreeItem> {
         assert!(node_id > 0, "Cannot index null node!");
         assert!(node_id <= self.nodes.len(), "Cannot index outside of tree!");
         &self.nodes[node_id - 1]
@@ -65,7 +66,8 @@ impl<TreeItem> Tree<TreeItem> {
     }
 
     /// iterator through the children of the given node
-    pub(crate) fn children_iter(&self, node_id: NodeId) -> SiblingIter<'_, TreeItem> {
+    #[must_use]
+    pub fn children_iter(&self, node_id: NodeId) -> SiblingIter<'_, TreeItem> {
         SiblingIter {
             tree: self,
             current_id: self.first_child(node_id),
@@ -74,7 +76,8 @@ impl<TreeItem> Tree<TreeItem> {
 
     /// returns the next sibling node id, or `None` if this is the last sibling.
     /// This executes in O(1)
-    pub(crate) fn next_sibling(&self, node_id: NodeId) -> Option<NodeId> {
+    #[must_use]
+    pub fn next_sibling(&self, node_id: NodeId) -> Option<NodeId> {
         match self.node(node_id).next_sibling {
             0 => None,
             node_id => Some(node_id),
@@ -82,7 +85,8 @@ impl<TreeItem> Tree<TreeItem> {
     }
 
     /// returns the first child node, if any
-    pub(crate) fn first_child(&self, node_id: NodeId) -> Option<NodeId> {
+    #[must_use]
+    pub fn first_child(&self, node_id: NodeId) -> Option<NodeId> {
         match self.node(node_id).first_child {
             0 => None,
             node_id => Some(node_id),
@@ -92,12 +96,14 @@ impl<TreeItem> Tree<TreeItem> {
     /// returns the child node with the given index among children nodes
     /// Indices starts with 0, so querying index 0 will return the first child node, if any.
     /// This executes in O(n)
-    pub(crate) fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
+    #[must_use]
+    pub fn nth_child(&self, node_id: NodeId, index: usize) -> Option<NodeId> {
         self.children_iter(node_id).nth(index)
     }
 
     /// returns whether the given node has children or not
-    pub(crate) fn has_children(&self, node_id: NodeId) -> bool {
+    #[must_use]
+    pub fn has_children(&self, node_id: NodeId) -> bool {
         self.node(node_id).first_child != 0
     }
 
@@ -153,7 +159,7 @@ impl<TreeItem: Clone> Clone for Tree<TreeItem> {
 
 /// An iterator through sibling nodes
 #[derive(Debug)]
-pub(crate) struct SiblingIter<'a, TreeItem> {
+pub struct SiblingIter<'a, TreeItem> {
     tree: &'a Tree<TreeItem>,
     current_id: Option<NodeId>,
 }
