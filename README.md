@@ -38,10 +38,10 @@ Alternatively using `cargo install`:
     git clone https://github.com/metamath/set.mm
 
     # One-shot verification using 4 threads
-    target/release/metamath-knife --timing --jobs 4 --split --verify set.mm/set.mm
+    target/release/metamath-knife --time --jobs 4 --split --verify set.mm/set.mm
 
     # Incremental verification
-    (while sleep 5; do echo; done) | target/release/metamath-knife --timing --jobs 4 --split --repeat --trace-recalc --verify set.mm/set.mm
+    (while sleep 5; do echo; done) | target/release/metamath-knife --time --jobs 4 --split --repeat --trace-recalc --verify set.mm/set.mm
     # then make small changes to the beginning, end, or middle of the DB and observe how behavior changes
 
 Here is the command line help, which gives an idea of the options available:
