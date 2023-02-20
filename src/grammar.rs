@@ -1430,7 +1430,8 @@ impl Grammar {
         )
     }
 
-    fn parse_statement(
+    /// Parse a statement into a formula. Returns None if the statement is a syntactic axiom.
+    pub fn parse_statement(
         &self,
         sref: &StatementRef<'_>,
         nset: &Nameset,
