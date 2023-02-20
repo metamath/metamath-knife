@@ -53,18 +53,18 @@ USAGE:
 
 FLAGS:
         --debug                Activates debug logs, including for the grammar building and statement parsing
+    -F, --dump-formula         Dumps the formulas of this database
+    -G, --dump-grammar         Dumps the database's grammar
+    -T, --dump-typesetting     Dumps typesetting information
         --free                 Explicitly deallocates working memory before exit
     -g, --grammar              Checks grammar
     -h, --help                 Prints help information
     -O, --outline              Shows database outline
     -p, --parse-stmt           Parses all statements according to the database's grammar
     -t, --parse-typesetting    Parses typesetting information
-    -F, --print-formula        Dumps the formulas of this database
-    -G, --print-grammar        Prints the database's grammar
-        --dump-typesetting     Shows typesetting information
         --repeat               Demonstrates incremental verifier
         --split                Processes files > 1 MiB in multiple segments
-        --timing               Prints milliseconds after each stage
+        --time                 Prints milliseconds after each stage
         --trace-recalc         Prints segments as they are recalculated
     -V, --version              Prints version information
     -v, --verify               Checks proof validity
