@@ -72,6 +72,7 @@ pub mod scopeck;
 pub mod statement;
 pub mod typesetting;
 pub mod verify;
+pub mod verify_definitions;
 pub mod verify_markup;
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::{BibError, DiagnosticClass};
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
+// use metamath_knife::verify_definitions; // ::verify_definitions;
 use metamath_knife::SourceInfo;
 use simple_logger::SimpleLogger;
 use std::fs::File;
@@ -31,6 +32,8 @@ fn main() {
         (@arg timing: --timing "Print milliseconds after each stage")
         (@arg verify: -v --verify "Check proof validity")
         (@arg verify_markup: -m --("verify-markup") "Check comment markup")
+        (@arg verify_definitions: --("verify-definitions") [EXCLUSIONS]
+            "Check definitions except for exclusions list")
         (@arg discouraged: -D --discouraged [FILE] "Regenerate `discouraged` file")
         (@arg outline: -O --outline "Show database outline")
         (@arg print_typesetting: --("dump-typesetting") "Show typesetting information")
@@ -137,6 +140,16 @@ fn main() {
                 println!("{}", DisplayList::from(snippet));
             })
             .len();
+
+        if matches.is_present("verify_definitions") {
+            let list = matches.value_of("verify_definitions").unwrap();
+            let diags = db.verify_definitions(&list);
+            count += db
+                .render_diags(diags, |snippet| {
+                    println!("{}", DisplayList::from(snippet));
+                })
+                .len();
+        }
 
         if matches.is_present("verify_markup") {
             db.scope_pass();
