@@ -842,16 +842,16 @@ impl Database {
 
     /// Dump the grammar of this database.
     /// Requires: [`Database::name_pass`], [`Database::grammar_pass`]
-    pub fn print_grammar(&self) {
-        time(&self.options, "print_grammar", || {
+    pub fn dump_grammar(&self) {
+        time(&self.options, "dump_grammar", || {
             self.grammar_result().dump(self);
         })
     }
 
     /// Dump the formulas of this database.
     /// Requires: [`Database::name_pass`], [`Database::stmt_parse_pass`]
-    pub fn print_formula(&self) {
-        time(&self.options, "print_formulas", || {
+    pub fn dump_formula(&self) {
+        time(&self.options, "dump_formulas", || {
             self.stmt_parse_result().dump(self);
         })
     }
