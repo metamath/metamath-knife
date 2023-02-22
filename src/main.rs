@@ -26,31 +26,31 @@ fn main() {
         (about: "A Metamath database verifier and processing tool")
         (@arg DATABASE: required_unless("TEXT") "Database file to load")
         (@arg TEXT: --text value_names(&["NAME", "TEXT"]) ...
-            "Provide raw database content on the command line")
-        (@arg split: --split "Process files > 1 MiB in multiple segments")
-        (@arg timing: --timing "Print milliseconds after each stage")
-        (@arg verify: -v --verify "Check proof validity")
-        (@arg verify_markup: -m --("verify-markup") "Check comment markup")
-        (@arg discouraged: -D --discouraged [FILE] "Regenerate `discouraged` file")
-        (@arg outline: -O --outline "Show database outline")
-        (@arg print_typesetting: --("dump-typesetting") "Show typesetting information")
-        (@arg parse_typesetting: -t --("parse-typesetting") "Parse typesetting information")
-        (@arg grammar: -g --grammar "Check grammar")
+            "Provides raw database content on the command line")
+        (@arg split: --split "Processes files > 1 MiB in multiple segments")
+        (@arg timing: --time "Prints milliseconds after each stage")
+        (@arg verify: -v --verify "Checks proof validity")
+        (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
+        (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
+        (@arg outline: -O --outline "Shows database outline")
+        (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
+        (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")
+        (@arg grammar: -g --grammar "Checks grammar")
         (@arg parse_stmt: -p --("parse-stmt")
-            "Parse all statements according to the database's grammar")
+            "Parses all statements according to the database's grammar")
         (@arg verify_parse_stmt: --("verify-parse-stmt")
-            "Check that printing parsed statements gives back the original formulas")
-        (@arg print_grammar: -G --("print-grammar") "Print the database's grammar")
-        (@arg print_formula: -F --("print-formula") "Dump the formulas of this database")
+            "Checks that printing parsed statements gives back the original formulas")
+        (@arg dump_grammar: -G --("dump-grammar") "Dumps the database's grammar")
+        (@arg dump_formula: -F --("dump-formula") "Dumps the formulas of this database")
         (@arg debug: --debug
-            "Activate debug logs, including for the grammar building and statement parsing")
-        (@arg trace_recalc: --("trace-recalc") "Print segments as they are recalculated")
-        (@arg free: --free "Explicitly deallocate working memory before exit")
-        (@arg repeat: --repeat "Demonstrate incremental verifier")
+            "Activates debug logs, including for the grammar building and statement parsing")
+        (@arg trace_recalc: --("trace-recalc") "Prints segments as they are recalculated")
+        (@arg free: --free "Explicitly deallocates working memory before exit")
+        (@arg repeat: --repeat "Demonstrates incremental verifier")
         (@arg jobs: -j --jobs +takes_value validator(positive_integer)
             "Number of threads to use for verification")
-        (@arg export: -e --export [LABEL] ... "Output a proof file")
-        (@arg biblio: --biblio [FILE] ... "Supply a bibliography file for verify-markup\n\
+        (@arg export: -e --export [LABEL] ... "Outputs a proof file")
+        (@arg biblio: --biblio [FILE] ... "Supplies a bibliography file for verify-markup\n\
             Can be used one or two times; the second is for exthtml processing")
     );
 
@@ -71,8 +71,8 @@ fn main() {
             || matches.is_present("parse_stmt")
             || matches.is_present("verify_parse_stmt")
             || matches.is_present("export_grammar_dot")
-            || matches.is_present("print_grammar")
-            || matches.is_present("print_formula"),
+            || matches.is_present("dump_grammar")
+            || matches.is_present("dump_formula"),
         jobs: usize::from_str(matches.value_of("jobs").unwrap_or("1"))
             .expect("validator should check this"),
     };
@@ -174,8 +174,9 @@ fn main() {
 
         println!("{count} diagnostics issued.");
 
-        if matches.is_present("print_grammar") {
-            db.print_grammar();
+        if matches.is_present("dump_grammar") {
+            db.grammar_pass();
+            db.dump_grammar();
         }
 
         #[cfg(feature = "dot")]
@@ -183,8 +184,9 @@ fn main() {
             db.export_grammar_dot();
         }
 
-        if matches.is_present("print_formula") {
-            db.print_formula();
+        if matches.is_present("dump_formula") {
+            db.stmt_parse_pass();
+            db.dump_formula();
         }
 
         if matches.is_present("outline") {
