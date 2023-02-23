@@ -23,7 +23,7 @@ Metamath-knife is a friendly fork of
 
 ## Building
 
-Install Rust, "Rust 2018" (version 1.31.0) or later, then check out this repository and run:
+Install Rust, "Rust 2021" (version 1.56.0) or later, preferably using (rustup)[https://rustup.rs], then check out this repository and run:
 
     cargo build --release
 
@@ -38,11 +38,50 @@ Alternatively using `cargo install`:
     git clone https://github.com/metamath/set.mm
 
     # One-shot verification using 4 threads
-    target/release/metamath-knife --timing --jobs 4 --split --verify set.mm/set.mm
+    target/release/metamath-knife --time --jobs 4 --split --verify set.mm/set.mm
 
     # Incremental verification
-    (while sleep 5; do echo; done) | target/release/metamath-knife --timing --jobs 4 --split --repeat --trace-recalc --verify set.mm/set.mm
+    (while sleep 5; do echo; done) | target/release/metamath-knife --time --jobs 4 --split --repeat --trace-recalc --verify set.mm/set.mm
     # then make small changes to the beginning, end, or middle of the DB and observe how behavior changes
+
+Here is the command line help, which gives an idea of the options available:
+```
+A Metamath database verifier and processing tool
+
+USAGE:
+    metamath-knife [FLAGS] [OPTIONS] <DATABASE>
+
+FLAGS:
+        --debug                Activates debug logs, including for the grammar building and statement parsing
+    -F, --dump-formula         Dumps the formulas of this database
+    -G, --dump-grammar         Dumps the database's grammar
+    -T, --dump-typesetting     Dumps typesetting information
+        --free                 Explicitly deallocates working memory before exit
+    -g, --grammar              Checks grammar
+    -h, --help                 Prints help information
+    -O, --outline              Shows database outline
+    -p, --parse-stmt           Parses all statements according to the database's grammar
+    -t, --parse-typesetting    Parses typesetting information
+        --repeat               Demonstrates incremental verifier
+        --split                Processes files > 1 MiB in multiple segments
+        --time                 Prints milliseconds after each stage
+        --trace-recalc         Prints segments as they are recalculated
+    -V, --version              Prints version information
+    -v, --verify               Checks proof validity
+    -m, --verify-markup        Checks comment markup
+        --verify-parse-stmt    Checks that printing parsed statements gives back the original formulas
+
+OPTIONS:
+        --text <NAME> <TEXT>    Provides raw database content on the command line
+        --biblio <FILE>...      Supplies a bibliography file for verify-markup
+                                Can be used one or two times; the second is for exthtml processing
+    -D, --discouraged <FILE>    Regenerates `discouraged` file
+    -e, --export <LABEL>...     Outputs a proof file
+    -j, --jobs <jobs>           Number of threads to use for verification
+
+ARGS:
+    <DATABASE>    Database file to load
+```
 
 ## License
 

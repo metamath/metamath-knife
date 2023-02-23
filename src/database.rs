@@ -527,7 +527,7 @@ impl Database {
     #[must_use]
     pub fn name_result(&self) -> &Arc<Nameset> {
         self.nameset.as_ref().expect(
-            "The database has not run `name_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `name_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -560,7 +560,7 @@ impl Database {
     #[must_use]
     pub fn scope_result(&self) -> &Arc<ScopeResult> {
         self.scopes.as_ref().expect(
-            "The database has not run `scope_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `scope_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -594,7 +594,7 @@ impl Database {
     #[must_use]
     pub fn verify_result(&self) -> &Arc<VerifyResult> {
         self.verify.as_ref().expect(
-            "The database has not run `verify_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `verify_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -615,7 +615,7 @@ impl Database {
     #[must_use]
     pub fn typesetting_result(&self) -> &Arc<TypesettingData> {
         self.typesetting.as_ref().expect(
-            "The database has not run `typesetting_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `typesetting_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -636,7 +636,7 @@ impl Database {
     #[must_use]
     pub fn outline_result(&self) -> &Arc<Outline> {
         self.outline.as_ref().expect(
-            "The database has not run `outline_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `outline_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -658,7 +658,7 @@ impl Database {
     #[must_use]
     pub fn grammar_result(&self) -> &Arc<Grammar> {
         self.grammar.as_ref().expect(
-            "The database has not run `grammar_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `grammar_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -686,7 +686,7 @@ impl Database {
     #[must_use]
     pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
         self.stmt_parse.as_ref().expect(
-            "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depdending methods."
+            "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depending methods."
         )
     }
 
@@ -842,16 +842,16 @@ impl Database {
 
     /// Dump the grammar of this database.
     /// Requires: [`Database::name_pass`], [`Database::grammar_pass`]
-    pub fn print_grammar(&self) {
-        time(&self.options, "print_grammar", || {
+    pub fn dump_grammar(&self) {
+        time(&self.options, "dump_grammar", || {
             self.grammar_result().dump(self);
         })
     }
 
     /// Dump the formulas of this database.
     /// Requires: [`Database::name_pass`], [`Database::stmt_parse_pass`]
-    pub fn print_formula(&self) {
-        time(&self.options, "print_formulas", || {
+    pub fn dump_formula(&self) {
+        time(&self.options, "dump_formulas", || {
             self.stmt_parse_result().dump(self);
         })
     }
