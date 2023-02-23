@@ -31,7 +31,7 @@ fn main() {
         (@arg timing: --time "Prints milliseconds after each stage")
         (@arg verify: -v --verify "Checks proof validity")
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
-        (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
+        (@arg discouraged: -D --discouraged [FILE] default_value("discouraged") "Regenerates `discouraged` file")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
         (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")

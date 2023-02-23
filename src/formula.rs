@@ -762,6 +762,17 @@ pub(crate) struct FormulaBuilder {
 
 /// A utility to build a formula.
 impl FormulaBuilder {
+    pub(crate) fn from_formula(fmla: Formula) -> Self {
+        let stack = vec![fmla.root];
+        let tree = (*fmla.tree).clone();
+        let variables = fmla.variables;
+        FormulaBuilder {
+            stack,
+            variables,
+            tree,
+        }
+    }
+
     /// Every REDUCE pops `var_count` subformula items on the stack,
     /// and pushes one single new item, with the popped subformulas as children
     pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {

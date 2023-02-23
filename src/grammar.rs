@@ -1506,6 +1506,21 @@ impl Grammar {
         self.logic_type
     }
 
+    /// Converts the given formula to the tatget typecode,
+    /// provided there is a suitable type conversion.
+    #[must_use]
+    pub fn convert_typecode(&self, fmla: Formula, target_tc: TypeCode) -> Option<Formula> {
+        let source_tc = fmla.get_typecode();
+        self.type_conversions
+            .iter()
+            .find(|(from_tc, to_tc, _)| *from_tc == source_tc && *to_tc == target_tc)
+            .map(|(_, _, label)| {
+                let mut builder = FormulaBuilder::from_formula(fmla);
+                builder.reduce(*label, 1, 0, false);
+                builder.build(target_tc)
+            })
+    }
+
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
     pub fn dump(&self, db: &Database) {
         println!("Grammar tree has {:?} nodes.", self.nodes.len());
