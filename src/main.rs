@@ -143,7 +143,7 @@ fn main() {
 
         if matches.is_present("verify_definitions") {
             let list = matches.value_of("verify_definitions").unwrap();
-            let diags = db.verify_definitions(&list);
+            let diags = db.verify_definitions(list);
             count += db
                 .render_diags(diags, |snippet| {
                     println!("{}", DisplayList::from(snippet));

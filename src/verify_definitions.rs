@@ -3,11 +3,11 @@
 //! Implement verification of definitions per the set.mm/iset.mm conventions.
 //! If the "exceptions" string is empty we use the "typical" set.mm values.
 //! The current typical values are "ax-*,df-bi,df-clab,df-cleq,df-clel".
-//! For glob syntax see: https://docs.rs/globset/latest/globset/
+//! For glob syntax see: <https://docs.rs/globset/latest/globset/>
 //! but in the future we may reduce the glob language sophistication.
 //! For more information see:
-//! https://us.metamath.org/mpeuni/conventions.html
-//! https://github.com/digama0/mmj2/blob/master/mmj2jar/macros/definitionCheck.js
+//! <https://us.metamath.org/mpeuni/conventions.html>
+//! <https://github.com/digama0/mmj2/blob/master/mmj2jar/macros/definitionCheck.js>
 //! and "Metamath: A Computer Language for Mathematical Proofs" by
 //! Norman Megill and David A. Wheeler, 2019, page 155.
 
@@ -22,7 +22,7 @@ fn verify_definition_statement(stmt: &StatementRef<'_>) -> Option<Diagnostic> {
     // Rule 1: New definitions must be introduced using = or <->
     // TODO
     if let Ok(label) = std::str::from_utf8(stmt.label()) {
-        println!(" Need to check: $a statement {}", label);
+        println!(" Need to check: $a statement {label}");
     }
 
     None
@@ -39,7 +39,7 @@ impl Database {
         } else {
             exceptions
         };
-        let vector_exceptions: Vec<&str> = exceptions_str.split(",").collect();
+        let vector_exceptions: Vec<&str> = exceptions_str.split(',').collect();
 
         // Compile the glob patterns before using them in a loop.
         // The Rust glob libraries only support &str, not [u8] byte arrays,
@@ -55,26 +55,26 @@ impl Database {
         }
         let compiled_exceptions = builder.build().unwrap();
 
-        let typecode_provable = "|-".as_bytes();
+        let typecode_provable = b"|-";
 
         for stmt in self.statements() {
-            match stmt.statement_type() {
-                StatementType::Axiom => {
-                    if let Some(typecode) = stmt.math_iter().next() {
-                        if *typecode == *typecode_provable { // Typecode is |-
-                            if let Ok(label) = std::str::from_utf8(stmt.label()) {
-                                if !compiled_exceptions.is_match(label) {
-                                    // println!("DEBUG: Processing $a {}", label);
-                                    let result = verify_definition_statement(&stmt);
-                                    if let Some(problem) = result {
-                                        diags.push((stmt.address(), problem));
-                                    }
+            // match stmt.statement_type() { StatementType::Axiom => { .. } }
+
+            if stmt.statement_type() == StatementType::Axiom {
+                if let Some(typecode) = stmt.math_iter().next() {
+                    if *typecode == *typecode_provable {
+                        // Typecode is |-
+                        if let Ok(label) = std::str::from_utf8(stmt.label()) {
+                            if !compiled_exceptions.is_match(label) {
+                                // println!("DEBUG: Processing $a {}", label);
+                                let result = verify_definition_statement(&stmt);
+                                if let Some(problem) = result {
+                                    diags.push((stmt.address(), problem));
                                 }
                             }
                         }
                     }
                 }
-                _ => {} // TODO: Non-axioms
             }
         }
         diags
