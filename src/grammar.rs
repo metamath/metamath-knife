@@ -1506,7 +1506,7 @@ impl Grammar {
         self.logic_type
     }
 
-    /// Converts the given formula to the tatget typecode,
+    /// Converts the given formula to the target typecode,
     /// provided there is a suitable type conversion.
     #[must_use]
     pub fn convert_typecode(&self, fmla: Formula, target_tc: TypeCode) -> Option<Formula> {
