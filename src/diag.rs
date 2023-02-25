@@ -25,6 +25,8 @@ use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, Sou
 use itertools::Itertools;
 use std::borrow::Borrow;
 use std::borrow::Cow;
+use std::error::Error;
+use std::fmt::Display;
 use std::io;
 use typed_arena::Arena;
 
@@ -1277,6 +1279,18 @@ impl StmtParseError {
 impl From<StmtParseError> for Diagnostic {
     fn from(err: StmtParseError) -> Self {
         Diagnostic::StmtParseError(err)
+    }
+}
+
+impl Display for StmtParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label())
+    }
+}
+
+impl Error for StmtParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
     }
 }
 
