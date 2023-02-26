@@ -20,6 +20,7 @@ tinyvec = "1.5"
 log = "0.4"
 annotate-snippets = "0.9"
 typed-arena = "2.0"
+# TODO: Globset will probably be removed once other capabilities are in place.
 globset = "0.4.10"
 
 # Dependencies for standalone executable, not needed for a library

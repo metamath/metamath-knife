@@ -31,9 +31,12 @@ fn main() {
         (@arg timing: --time "Prints milliseconds after each stage")
         (@arg verify: -v --verify "Checks proof validity")
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
-        (@arg verify_definitions: --("verify-definitions") [EXCLUSIONS]
-            default_value("ax-*,df-bi,df-clab,df-cleq,df-clel")
-            "Checks definitions except for exclusions list")
+        (@arg verify_definitions: --("verify-definitions")
+               "Verifies definitions per the conventions of set.mm")
+        // TODO: Used for early testing, eventually this option will disappear:
+        (@arg definition_exclusions: --("definition-exclusions") [EXCLUSIONS]
+           default_value("ax-*,df-bi,df-clab,df-cleq,df-clel")
+           "Changes the definition exclusions from their set.mm defaults")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
@@ -142,7 +145,7 @@ fn main() {
             .len();
 
         if matches.is_present("verify_definitions") {
-            let list = matches.value_of("verify_definitions").unwrap();
+            let list = matches.value_of("definition_exclusions").unwrap();
             let diags = db.verify_definitions(list);
             count += db
                 .render_diags(diags, |snippet| {
