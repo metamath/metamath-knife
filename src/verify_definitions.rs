@@ -11,6 +11,7 @@
 //! and "Metamath: A Computer Language for Mathematical Proofs" by
 //! Norman Megill and David A. Wheeler, 2019, page 155.
 
+use crate::as_str;
 use crate::diag::Diagnostic;
 use crate::statement::StatementAddress;
 use crate::{Database, StatementRef, StatementType};
@@ -21,9 +22,8 @@ use globset::{Glob, GlobSetBuilder};
 fn verify_definition_statement(stmt: &StatementRef<'_>) -> Option<Diagnostic> {
     // Rule 1: New definitions must be introduced using = or <->
     // TODO
-    if let Ok(label) = std::str::from_utf8(stmt.label()) {
-        println!(" Need to check: $a statement {label}");
-    }
+    let label = as_str(stmt.label());
+    println!(" Need to check: $a statement {label}");
 
     None
 }
@@ -68,13 +68,12 @@ impl Database {
                 let typecode = stmt.typecode();
                 if *typecode == *typecode_provable {
                     // Typecode is |-
-                    if let Ok(label) = std::str::from_utf8(stmt.label()) {
-                        if !compiled_exceptions.is_match(label) {
-                            // println!("DEBUG: Processing $a {}", label);
-                            let result = verify_definition_statement(&stmt);
-                            if let Some(problem) = result {
-                                diags.push((stmt.address(), problem));
-                            }
+                    let label = as_str(stmt.label());
+                    if !compiled_exceptions.is_match(label) {
+                        // println!("DEBUG: Processing $a {}", label);
+                        let result = verify_definition_statement(&stmt);
+                        if let Some(problem) = result {
+                            diags.push((stmt.address(), problem));
                         }
                     }
                 }
