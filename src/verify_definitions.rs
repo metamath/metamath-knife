@@ -31,23 +31,20 @@ fn verify_definition_statement(stmt: &StatementRef<'_>) -> Option<Diagnostic> {
 impl Database {
     /// Verify that definitions meet set.mm/iset.mm conventions;
     /// exclude *exceptions* from this check.
+    /// TODO: Eventually we'll eliminate the "exceptions" glob pattern list,
+    /// but this gets us started.
     #[must_use]
     pub fn verify_definitions(&self, exceptions: &str) -> Vec<(StatementAddress, Diagnostic)> {
         let mut diags = vec![];
-        let exceptions_str = if exceptions.is_empty() {
-            "ax-*,df-bi,df-clab,df-cleq,df-clel" // Default for set.mm.
-        } else {
-            exceptions
-        };
-        let vector_exceptions: Vec<&str> = exceptions_str.split(',').collect();
+        let vector_exceptions: Vec<&str> = exceptions.split(',').collect();
 
         // Compile the glob patterns before using them in a loop.
         // The Rust glob libraries only support &str, not [u8] byte arrays,
         // so we will convert every label to &str to use a glob library.
         // This causes some unnecessary overhead, but it's less code to write.
         // The Rust glob libraries are absurdly over-featured for our use case
-        // *and* can't handle [u8]. In the future we might replace this with
-        // a function that meets our needs and stop using this library.
+        // *and* can't handle [u8]. In the future the plan is to stop using
+        // globs entirely, and use data from $j statements.
         let mut builder = GlobSetBuilder::new();
         for exception in vector_exceptions {
             let glob = Glob::new(exception).expect("Failed to compile pattern");
@@ -55,22 +52,28 @@ impl Database {
         }
         let compiled_exceptions = builder.build().unwrap();
 
+        // TODO: Eventually this should be acquired from the database.
+        // The grammar pass is getting the provable type code from the
+        // ˋ$j` comment. However, the grammar pass is not always required
+        // when the provable type code is.
+        // Maybe a more suitable place would be directly in database?
+        // Maybe there should be centralized and buffered accessors for
+        // all $j commands?
         let typecode_provable = b"|-";
 
         for stmt in self.statements() {
             // match stmt.statement_type() { StatementType::Axiom => { .. } }
 
             if stmt.statement_type() == StatementType::Axiom {
-                if let Some(typecode) = stmt.math_iter().next() {
-                    if *typecode == *typecode_provable {
-                        // Typecode is |-
-                        if let Ok(label) = std::str::from_utf8(stmt.label()) {
-                            if !compiled_exceptions.is_match(label) {
-                                // println!("DEBUG: Processing $a {}", label);
-                                let result = verify_definition_statement(&stmt);
-                                if let Some(problem) = result {
-                                    diags.push((stmt.address(), problem));
-                                }
+                let typecode = stmt.typecode();
+                if *typecode == *typecode_provable {
+                    // Typecode is |-
+                    if let Ok(label) = std::str::from_utf8(stmt.label()) {
+                        if !compiled_exceptions.is_match(label) {
+                            // println!("DEBUG: Processing $a {}", label);
+                            let result = verify_definition_statement(&stmt);
+                            if let Some(problem) = result {
+                                diags.push((stmt.address(), problem));
                             }
                         }
                     }

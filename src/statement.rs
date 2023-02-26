@@ -633,6 +633,14 @@ impl<'a> StatementRef<'a> {
         }
     }
 
+    /// Return the statement's typecode (the first token in the math string).
+    /// This function is only useful if there is a math string!
+    #[inline]
+    #[must_use]
+    pub fn typecode(&self) -> TokenRef<'a> {
+        self.math_at(0)
+    }
+
     /// Obtains textual proof data by token index.
     #[inline]
     #[must_use]
