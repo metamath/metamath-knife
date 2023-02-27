@@ -98,6 +98,7 @@
 //! estimated runtime.  This requires an additional argument when queueing.
 
 use crate::as_str;
+use crate::commands::Commands;
 use crate::diag;
 use crate::diag::Diagnostic;
 use crate::diag::DiagnosticClass;
@@ -401,6 +402,7 @@ pub struct Database {
     outline: Option<Arc<Outline>>,
     grammar: Option<Arc<Grammar>>,
     stmt_parse: Option<Arc<StmtParse>>,
+    commands: Option<Arc<Commands>>,
 }
 
 impl Default for Database {
@@ -454,6 +456,7 @@ impl Database {
             outline: None,
             grammar: None,
             stmt_parse: None,
+            commands: None,
             prev_nameset: None,
             prev_scopes: None,
             prev_verify: None,
@@ -823,6 +826,24 @@ impl Database {
             .build_syntax_proof::<usize, Vec<usize>>(&mut vec![], &mut arr);
         arr.calc_indent();
         arr
+    }
+
+    /// Returns the parser commands for this database
+    pub fn commands_pass(&mut self) -> &Arc<Commands> {
+        if self.commands.is_none() {
+            self.name_pass();
+            self.commands = Some(Arc::new(Commands::new(&self.segments, self.name_result())));
+        }
+        self.commands()
+    }
+
+    /// Returns the parser commands for this database
+    /// Requires: [`Database::commands_pass`]
+    #[must_use]
+    pub fn commands(&self) -> &Arc<Commands> {
+        self.commands.as_ref().expect(
+            "The database has not run `commands_pass()`. Please ensure it is run before calling depending methods."
+        )
     }
 
     /// Export the grammar of this database in DOT format.
