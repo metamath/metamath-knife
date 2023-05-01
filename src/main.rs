@@ -97,10 +97,6 @@ fn main() {
     loop {
         db.parse(start.clone(), data.clone());
 
-        if !matches.is_present("discouraged") {
-            db.scope_pass();
-        }
-
         if matches.is_present("verify") {
             db.verify_pass();
         }
