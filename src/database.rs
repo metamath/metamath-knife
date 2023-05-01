@@ -225,6 +225,7 @@ fn queue_work(exec: &Executor, estimate: usize, mut f: Box<dyn FnMut() + Send>) 
     let mut wq = exec.mutex.lock().unwrap();
     wq.push(Job(estimate, f));
     exec.work_cv.notify_one();
+    drop(wq);
 }
 
 impl Executor {
@@ -290,6 +291,7 @@ impl Executor {
                     panic::AssertUnwindSafe(task_o.take().expect("should only be called once"));
                 *g = Some(panic::catch_unwind(task_f));
                 partsc.1.notify_one();
+                drop(g);
             }),
         );
 
