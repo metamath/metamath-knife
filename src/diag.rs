@@ -30,27 +30,6 @@ use std::fmt::Display;
 use std::io;
 use typed_arena::Arena;
 
-/// List of passes that generate diagnostics, for use with the
-/// `Database::diag_notations` filter.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum DiagnosticClass {
-    /// Parse errors, which can be observed from a single statement in
-    /// isolation.
-    Parse,
-    /// Scope errors are mostly inter-statement consistency checks which
-    /// invalidate the logical interpretation of a statement.
-    Scope,
-    /// Verify errors do not invalidate the interpretation of statements, but
-    /// affect only proofs.
-    Verify,
-    /// Grammar errors reflect whether the database is unambiguous
-    Grammar,
-    /// Statement Parsing result
-    StmtParse,
-    /// $t statement parsing result
-    Typesetting,
-}
-
 /// The three kinds of markup supported by `$t` typesetting comments.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MarkupKind {
