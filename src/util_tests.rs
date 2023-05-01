@@ -40,7 +40,7 @@ fn test_copy_portion() {
 
 #[test]
 #[should_panic(expected = "out of range")]
-#[allow(clippy::collection_is_never_read)]
+// #[allow(clippy::collection_is_never_read)]
 fn test_copy_portion_oob() {
     let mut s = Vec::from(b"Hello world" as &[u8]);
     s.extend_from_within(11..12);

@@ -35,6 +35,7 @@
     clippy::enum_glob_use,
     clippy::if_not_else,
     clippy::inline_always,
+    clippy::let_underscore_untyped,
     clippy::missing_errors_doc,
     clippy::module_name_repetitions,
     clippy::needless_range_loop,
