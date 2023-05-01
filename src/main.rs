@@ -32,6 +32,7 @@ fn main() {
         (@arg verify: -v --verify "Checks proof validity")
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
+        (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
         (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")
@@ -99,7 +100,7 @@ fn main() {
 
         let mut types = vec![DiagnosticClass::Parse];
 
-        if !matches.is_present("discouraged") {
+        if !matches.is_present("discouraged") && !matches.is_present("axiom_use") {
             types.push(DiagnosticClass::Scope);
         }
 
@@ -129,6 +130,12 @@ fn main() {
         if matches.is_present("discouraged") {
             File::create(matches.value_of("discouraged").unwrap())
                 .and_then(|file| db.write_discouraged(&mut BufWriter::new(file)))
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        if matches.is_present("axiom_use") {
+            File::create(matches.value_of("axiom_use").unwrap())
+                .and_then(|file| db.write_axiom_use(&mut BufWriter::new(file)))
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
