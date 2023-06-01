@@ -194,6 +194,7 @@ fn main() {
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
+            db.scope_pass();
             for file in exps {
                 db.export(&file);
             }
