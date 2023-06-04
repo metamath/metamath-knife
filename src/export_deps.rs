@@ -26,7 +26,7 @@ impl Database {
                         "http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd",
                     ),
             )?;
-            writer.write(XmlEvent::start_element("grpah").attr("id", "dependencies"))?;
+            writer.write(XmlEvent::start_element("graph").attr("id", "dependencies"))?;
             for sref in self.statements().filter(|stmt| stmt.is_assertion()) {
                 let label = sref.label();
                 writer.write(XmlEvent::start_element("node").attr("id", as_str(label)))?;
