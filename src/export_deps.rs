@@ -14,7 +14,8 @@ impl From<xml::writer::Error> for Diagnostic {
 
 impl Database {
     /// Writes down all dependencies in a `GraphML` file format to the given writer.
-    pub fn export_graphml_deps(&self, out: &mut impl std::io::Write) -> Result<(), Diagnostic> {
+    pub fn export_graphml_deps(&mut self, out: &mut impl std::io::Write) -> Result<(), Diagnostic> {
+        self.name_pass();
         time(&self.options.clone(), "export_graphml_deps", || {
             let mut writer = EmitterConfig::new().perform_indent(true).create_writer(out);
             writer.write(
@@ -39,12 +40,17 @@ impl Database {
                         if tk == b")" {
                             break;
                         }
-                        writer.write(
-                            XmlEvent::start_element("edge")
-                                .attr("source", as_str(label))
-                                .attr("target", as_str(tk)),
-                        )?;
-                        writer.write(XmlEvent::end_element())?;
+                        let sref = self
+                            .statement(tk)
+                            .ok_or_else(|| Diagnostic::UnknownLabel(sref.proof_span(i)))?;
+                        if sref.statement_type() == StatementType::Provable {
+                            writer.write(
+                                XmlEvent::start_element("edge")
+                                    .attr("source", as_str(label))
+                                    .attr("target", as_str(tk)),
+                            )?;
+                            writer.write(XmlEvent::end_element())?;
+                        }
                     }
                 }
             }
