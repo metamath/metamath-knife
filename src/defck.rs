@@ -32,6 +32,7 @@ pub struct DefResult {
 
 impl DefResult {
     /// Returns the definition axiom for the given syntax axiom.
+    #[must_use]
     pub fn definition_for(&self, syntax_axiom: Label) -> Option<&Label> {
         self.def_map.get(&syntax_axiom)
     }
@@ -56,15 +57,15 @@ impl Database {
                     [Keyword(cmd), ..] 
                         if cmd.as_ref(buf) == b"primitive" => 
                     {
-                        for label in command[1..].into_iter()
+                        for label in &command[1..]
                         {
                             println!("Found primitive {label:?}", label = as_str(label.value(buf)));
                             let primitive = self.name_result().lookup_label(label.value(buf)).unwrap().atom;
                             definitions.primitives.push(primitive);
                         }
                     }
-                    [Keyword(cmd), justif_label, Keyword(_for), label]
-                        if cmd.as_ref(buf) == b"justification" && _for.as_ref(buf) == b"for" =>
+                    [Keyword(cmd), justif_label, Keyword(for_), label]
+                        if cmd.as_ref(buf) == b"justification" && for_.as_ref(buf) == b"for" =>
                     {
                         println!("Found justification for {label:?}", label = as_str(label.value(buf)));
                         let theorem = self.name_result().lookup_label(justif_label.value(buf)).unwrap().atom;
@@ -83,6 +84,7 @@ impl Database {
         let names = self.name_result();
 
         // Fail the whole check if no equality has been defined
+        #[allow(clippy::manual_assert)]
         if definitions.equalities.is_empty() {
             panic!("No equality command found, definitional soundness check cannot be done in this database.");
         }
@@ -101,64 +103,65 @@ impl Database {
                     pending_definitions.push(syntax_axiom);
                 }
 
+            } else if pending_definitions.is_empty() {
+                // No definition to check, this is a regular axiom
+                // TODO Check that the axiom label starts with `ax-`.
+                println!("Regular axiom: {label}", label = as_str(sref.label()));
             } else {
-                if pending_definitions.is_empty() {
-                    // No definition to check, this is a regular axiom
-                    // TODO Check that the axiom label starts with `ax-`.
-                    println!("Regular axiom: {label}", label = as_str(sref.label()));
-                } else {
-                    println!("Definition: {label} ({count} pending)", label = as_str(sref.label()), count=pending_definitions.len());
-                    // TODO Check that the definition label starts with `df-`.
+                println!("Definition: {label} ({count} pending)", label = as_str(sref.label()), count=pending_definitions.len());
+                // TODO Check that the definition label starts with `df-`.
 
-                    let definition = names.lookup_label(sref.label()).ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?.atom;
-                    if definitions.justifications.contains_key(&definition) {
-                        // Skip definitional check for definitions having a justification.
-                        //
-                        // We normally don't know which syntax axiom this definition is for,
-                        // but we can make a guess if there is only one pending definition.
-                        // In set.mm, only `df-bi` is in this case.
-                        if pending_definitions.len() == 1 {
-                            println!("Skipped check because justification exists.");
-                            let syntax_axiom = pending_definitions.remove(0);
-
-                            // Store the validated definition
-                            definitions.definitions.insert(definition);
-                            definitions.def_map.insert(syntax_axiom, definition);
-                        } else {
-                            panic!("A justification was found for {label}, but there is no way to track it to a definiendum, since there are {count} pending definitions.", label = as_str(sref.label()), count = pending_definitions.len());
-                        }
-                    } else {
-                        // Check that the top level of the definition is an equality
-                        let fmla = self.stmt_parse_result().get_formula(&sref).ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?;
-                        let equality = &fmla.get_by_path(&[]).unwrap();
-                        if !definitions.equalities.contains(equality) {
-                            // TODO -  This fails at ~ax-hilex in set.mm.
-                            // panic!("Definition's top level syntax is {equality:?}, which is not an equality", equality=equality);
-                            println!("Skipping {label} because it's not a definition", label = as_str(sref.label()));
-                            continue;
-                        }
-
-                        let syntax_axiom = &fmla.get_by_path(&[0]).unwrap();
-                        if let Some(pending_index) = pending_definitions.iter().position(|x| *x == *syntax_axiom) {
-                            pending_definitions.swap_remove(pending_index);
-                        } else {
-                            //panic!("Definition {label} found for unknown syntax axiom {syntax_axiom:?}", label = as_str(sref.label()));
-                            println!("Skipping {label} because its definiendum has not been found.", label = as_str(sref.label()));
-                        }
-
-                        println!("Checked {label} OK", label = as_str(sref.label()));
+                let definition = names.lookup_label(sref.label()).ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?.atom;
+                if definitions.justifications.contains_key(&definition) {
+                    // Skip definitional check for definitions having a justification.
+                    //
+                    // We normally don't know which syntax axiom this definition is for,
+                    // but we can make a guess if there is only one pending definition.
+                    // In set.mm, only `df-bi` is in this case.
+                    if pending_definitions.len() == 1 {
+                        println!("Skipped check because justification exists.");
+                        let syntax_axiom = pending_definitions.remove(0);
 
                         // Store the validated definition
                         definitions.definitions.insert(definition);
-                        definitions.def_map.insert(*syntax_axiom, definition);
+                        definitions.def_map.insert(syntax_axiom, definition);
+                    } else {
+                        panic!("A justification was found for {label}, but there is no way to track it to a definiendum, since there are {count} pending definitions.", label = as_str(sref.label()), count = pending_definitions.len());
                     }
+                } else {
+                    // Check that the top level of the definition is an equality
+                    let fmla = self.stmt_parse_result().get_formula(&sref).ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?;
+                    let equality = &fmla.get_by_path(&[]).unwrap();
+                    if !definitions.equalities.contains(equality) {
+                        // TODO -  This fails at ~ax-hilex in set.mm.
+                        // panic!("Definition's top level syntax is {equality:?}, which is not an equality", equality=equality);
+                        println!("Skipping {label} because it's not a definition", label = as_str(sref.label()));
+                        continue;
+                    }
+
+                    let syntax_axiom = &fmla.get_by_path(&[0]).unwrap();
+                    if let Some(pending_index) = pending_definitions.iter().position(|x| *x == *syntax_axiom) {
+                        pending_definitions.swap_remove(pending_index);
+                    } else {
+                        //panic!("Definition {label} found for unknown syntax axiom {syntax_axiom:?}", label = as_str(sref.label()));
+                        println!("Skipping {label} because its definiendum has not been found.", label = as_str(sref.label()));
+                    }
+
+                    println!("Checked {label} OK", label = as_str(sref.label()));
+
+                    // Store the validated definition
+                    definitions.definitions.insert(definition);
+                    definitions.def_map.insert(*syntax_axiom, definition);
                 }
             }
         }
+        assert!(pending_definitions.is_empty(), "Some syntax axioms like {label:?} don't have definitions.", label = &pending_definitions[0]);
+
         Ok(())
     }
 
     /// Returns whether the given statement is a definition
+    #[must_use]
     pub fn is_definition(&self, sref: StatementRef<'_>) -> bool {
         sref.is_assertion() && {
             let label = self.name_result().lookup_label(sref.label()).unwrap().atom;
