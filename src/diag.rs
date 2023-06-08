@@ -107,6 +107,7 @@ pub enum Diagnostic {
     ConstantNotTopLevel,
     DefCkDuplicateDefinition(Token, StatementAddress),
     DefCkJustificationWithoutDef(Token, usize),
+    DefCkMalformedDefinition,
     DefCkMissingDefinition(Token),
     DefCkNoEquality,
     DefCkNotAnEquality(Token, Vec<Token>),
@@ -446,6 +447,12 @@ impl Diagnostic {
             DefCkJustificationWithoutDef(ref tok, count) => ("Justification without attributable definition".into(), vec![(
                 AnnotationType::Warning,
                 format!("A justification was found for {label}, but there is no way to track it to a definiendum, since there are {count} pending definitions.", label = t(tok), count=count).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DefCkMalformedDefinition => ("Malformed definition".into(), vec![(
+                AnnotationType::Error,
+                "Malformed definition".into(),
                 stmt,
                 stmt.span(),
             )]),
