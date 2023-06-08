@@ -249,6 +249,16 @@ impl Formula {
         }
     }
 
+    /// Returns the subformula rooted at the given path.
+    #[must_use]
+    pub fn sub_formula_by_path(&self, path: &[usize]) -> Option<Formula> {
+        let mut node_id = self.root;
+        for index in path {
+            node_id = self.tree.nth_child(node_id, *index)?;
+        }
+        Some(self.sub_formula(node_id))
+    }
+
     /// Check for equality of sub-formulas
     fn sub_eq(&self, node_id: NodeId, other: &Formula, other_node_id: NodeId) -> bool {
         (Arc::ptr_eq(&self.tree, &other.tree) && node_id == other_node_id)

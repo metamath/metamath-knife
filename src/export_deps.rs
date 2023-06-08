@@ -59,4 +59,51 @@ impl Database {
             Ok(())
         })
     }
+
+
+    /// Writes down all definition dependencies in a `GraphML` file format to the given writer.
+    pub fn export_graphml_defs(&mut self, out: &mut impl std::io::Write) -> Result<(), Diagnostic> {
+        self.definitions_pass();
+        time(&self.options.clone(), "export_graphml_defs", || {
+            let mut writer = EmitterConfig::new().perform_indent(true).create_writer(out);
+            writer.write(
+                XmlEvent::start_element("graphml")
+                    .attr("xmlns", "http://graphml.graphdrawing.org/xmlns")
+                    .attr("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
+                    .attr(
+                        "xsi:schemaLocation",
+                        "http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd",
+                    ),
+            )?;
+            writer.write(XmlEvent::start_element("graph").attr("id", "definitions"))?;
+            for sref in self.statements().filter(|stmt| self.is_definition(*stmt)) {
+                let label = sref.label();
+                writer.write(XmlEvent::start_element("node").attr("id", as_str(label)))?;
+                writer.write(XmlEvent::end_element())?; // node
+
+                println!("Writing {label}", label = as_str(label));
+                let fmla = self.stmt_parse_result().get_formula(&sref).ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?;
+                if let Some(definiens_fmla) = fmla.sub_formula_by_path(&[1]) {
+                    for (syntax_axiom, is_var) in definiens_fmla.labels_iter() {
+                        if !is_var {
+                            if let Some(definition_axiom) = self.definitions_result().definition_for(syntax_axiom) {
+                                let def_label = self.name_result().atom_name(*definition_axiom);
+                                writer.write(
+                                    XmlEvent::start_element("edge")
+                                        .attr("source", as_str(label))
+                                        .attr("target", as_str(def_label)),
+                                )?;
+                                writer.write(XmlEvent::end_element())?;
+                            } else {
+                                // primitive syntax like `-. ph`
+                            }
+                        }
+                    }
+                }
+            }
+            writer.write(XmlEvent::end_element())?; // graph
+            writer.write(XmlEvent::end_element())?; // graphml
+            Ok(())
+        })
+    }
 }

@@ -98,6 +98,7 @@
 //! estimated runtime.  This requires an additional argument when queueing.
 
 use crate::as_str;
+use crate::defck::DefResult;
 use crate::diag;
 use crate::diag::Diagnostic;
 use crate::export;
@@ -402,6 +403,7 @@ pub struct Database {
     outline: Option<Arc<Outline>>,
     grammar: Option<Arc<Grammar>>,
     stmt_parse: Option<Arc<StmtParse>>,
+    definitions: Option<Arc<DefResult>>,
 }
 
 impl Default for Database {
@@ -432,6 +434,7 @@ impl Drop for Database {
             Arc::make_mut(&mut self.segments).clear();
             self.typesetting = None;
             self.outline = None;
+            self.definitions = None;
         });
     }
 }
@@ -455,6 +458,7 @@ impl Database {
             outline: None,
             grammar: None,
             stmt_parse: None,
+            definitions: None,
             prev_nameset: None,
             prev_scopes: None,
             prev_verify: None,
@@ -499,6 +503,7 @@ impl Database {
             self.typesetting = None;
             self.outline = None;
             self.grammar = None;
+            self.definitions = None;
         });
     }
 
@@ -741,6 +746,30 @@ impl Database {
     #[must_use]
     pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
         self.try_stmt_parse_result().expect(
+            "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depending methods."
+        )
+    }
+
+    /// Checks all definitions soundness.
+    pub fn definitions_pass(&mut self)-> &Arc<DefResult> {
+        if self.definitions.is_none() {
+            self.stmt_parse_pass();
+            time(&self.options.clone(), "defck_pass", || {
+                let parse = self.parse_result();
+                let mut definitions = DefResult::default();
+                self.verify_definitions(parse, &mut definitions).unwrap();
+                self.definitions = Some(Arc::new(definitions));
+            })
+        }
+        self.definitions_result()
+    }
+
+    /// Returns the statements parsed using the grammar.
+    /// Panics if [`Database::definition_pass`] was not previously called.
+    #[inline]
+    #[must_use]
+    pub fn definitions_result(&self) -> &Arc<DefResult> {
+        self.definitions.as_ref().expect(
             "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depending methods."
         )
     }

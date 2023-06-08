@@ -59,6 +59,7 @@ mod util;
 
 pub mod comment_parser;
 pub mod database;
+pub mod defck;
 pub mod diag;
 pub mod discouraged;
 pub mod export;
