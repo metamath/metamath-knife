@@ -105,6 +105,11 @@ pub enum Diagnostic {
     CommandIncomplete(Span),
     CommentMarkerNotStart(Span),
     ConstantNotTopLevel,
+    DefCkDuplicateDefinition(Token, StatementAddress),
+    DefCkJustificationWithoutDef(Token, usize),
+    DefCkMissingDefinition(Token),
+    DefCkNoEquality,
+    DefCkNotAnEquality(Token, Vec<Token>),
     DisjointSingle,
     DjNotVariable(TokenIndex),
     DjRepeatedVariable(TokenIndex, TokenIndex),
@@ -427,6 +432,46 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            DefCkDuplicateDefinition(ref tok, prev_saddr) => (format!("Duplicate definition for '{label}'", label = t(tok)).into(), vec![(
+                AnnotationType::Warning,
+                format!("Definition Check : This axiom seems to introduce a definition for '{label}', however a definition already exists.", label = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            ),(
+                AnnotationType::Note,
+                "Definition was previously provided here.".into(),
+                sset.statement(*prev_saddr),
+                sset.statement(*prev_saddr).span(),
+            )]),
+            DefCkJustificationWithoutDef(ref tok, count) => ("Justification without attributable definition".into(), vec![(
+                AnnotationType::Warning,
+                format!("A justification was found for {label}, but there is no way to track it to a definiendum, since there are {count} pending definitions.", label = t(tok), count=count).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DefCkMissingDefinition(ref tok) => ("Missing definition".into(), vec![(
+                AnnotationType::Error,
+                format!("Definition Check : A symbol or syntax was declared in statement with label '{label}', but no definition was provided.", label = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DefCkNoEquality => ("No equality command found".into(), vec![(
+                AnnotationType::Warning,
+                "Definition Check : No equality command found, definitional soundness check cannot be done in this database.".into(),
+                stmt,
+                stmt.span(),
+            )]),
+            DefCkNotAnEquality(ref tok, equalities) => {
+                notes = &["No provable axioms should appear between definitions and the corresponding syntax declaration."];
+                ("Not an equality".into(), vec![(
+                AnnotationType::Error,
+                format!("Definition Check : This definition does not use an equality.  It is built using '{label}', but the only declared equalities are '{equalities}'", 
+                    label = t(tok),
+                    equalities = equalities.iter().map(t).join("', '"),
+                ).into(),
+                stmt,
+                stmt.span(),
+            )])},
             DisjointSingle => ("Disjoint statement with single variable".into(), vec![(
                 AnnotationType::Warning,
                 "A $d statement which lists only one variable is meaningless".into(),

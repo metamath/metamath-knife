@@ -757,19 +757,27 @@ impl Database {
             time(&self.options.clone(), "defck_pass", || {
                 let parse = self.parse_result();
                 let mut definitions = DefResult::default();
-                self.verify_definitions(parse, &mut definitions).unwrap();
+                self.verify_definitions(parse, &mut definitions);
                 self.definitions = Some(Arc::new(definitions));
             })
         }
         self.definitions_result()
     }
 
-    /// Returns the statements parsed using the grammar.
+    /// Returns the results of the definition check pass.
+    /// Returns `None` if [`Database::definitions_pass`] was not previously called.
+    #[inline]
+    #[must_use]
+    pub const fn try_definitions_result(&self) -> Option<&Arc<DefResult>> {
+        self.definitions.as_ref()
+    }
+
+    /// Returns the results of the definition check pass.
     /// Panics if [`Database::definition_pass`] was not previously called.
     #[inline]
     #[must_use]
     pub fn definitions_result(&self) -> &Arc<DefResult> {
-        self.definitions.as_ref().expect(
+        self.try_definitions_result().expect(
             "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depending methods."
         )
     }
@@ -996,6 +1004,9 @@ impl Database {
         }
         if let Some(pass) = self.try_typesetting_result() {
             diags.extend_from_slice(&pass.diagnostics)
+        }
+        if let Some(pass) = self.try_definitions_result() {
+            diags.extend(pass.diagnostics())
         }
         diags
     }
