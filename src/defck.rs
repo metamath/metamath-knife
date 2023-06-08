@@ -172,19 +172,16 @@ impl Database {
                     {
                         pending_definitions.swap_remove(pending_index);
                         Ok(())
+                    } else if let Some(previous_saddr) = definitions
+                        .definition_for(*syntax_axiom)
+                        .map(|a| names.lookup_label_by_atom(*a).address)
+                    {
+                        Err(Diagnostic::DefCkDuplicateDefinition(
+                            names.atom_name(*syntax_axiom).into(),
+                            previous_saddr,
+                        ))
                     } else {
-                        if let Some(previous_saddr) = definitions
-                            .definition_for(*syntax_axiom)
-                            .map(|a| {
-                                names.lookup_label_by_atom(*a).address
-                        }) {
-                            Err(Diagnostic::DefCkDuplicateDefinition(
-                                names.atom_name(*syntax_axiom).into(),
-                                previous_saddr,
-                            ))
-                        } else {
-                            Err(Diagnostic::DefCkMalformedDefinition)
-                        }
+                        Err(Diagnostic::DefCkMalformedDefinition)
                     };
 
                     // Store the validated definition
