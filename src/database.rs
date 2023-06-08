@@ -751,7 +751,7 @@ impl Database {
     }
 
     /// Checks all definitions soundness.
-    pub fn definitions_pass(&mut self)-> &Arc<DefResult> {
+    pub fn definitions_pass(&mut self) -> &Arc<DefResult> {
         if self.definitions.is_none() {
             self.stmt_parse_pass();
             time(&self.options.clone(), "defck_pass", || {

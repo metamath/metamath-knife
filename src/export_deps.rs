@@ -60,7 +60,6 @@ impl Database {
         })
     }
 
-
     /// Writes down all definition dependencies in a `GraphML` file format to the given writer.
     pub fn export_graphml_defs(&mut self, out: &mut impl std::io::Write) -> Result<(), Diagnostic> {
         self.definitions_pass();
@@ -82,11 +81,16 @@ impl Database {
                 writer.write(XmlEvent::end_element())?; // node
 
                 println!("Writing {label}", label = as_str(label));
-                let fmla = self.stmt_parse_result().get_formula(&sref).ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?;
+                let fmla = self
+                    .stmt_parse_result()
+                    .get_formula(&sref)
+                    .ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?;
                 if let Some(definiens_fmla) = fmla.sub_formula_by_path(&[1]) {
                     for (syntax_axiom, is_var) in definiens_fmla.labels_iter() {
                         if !is_var {
-                            if let Some(definition_axiom) = self.definitions_result().definition_for(syntax_axiom) {
+                            if let Some(definition_axiom) =
+                                self.definitions_result().definition_for(syntax_axiom)
+                            {
                                 let def_label = self.name_result().atom_name(*definition_axiom);
                                 writer.write(
                                     XmlEvent::start_element("edge")
