@@ -5,7 +5,7 @@
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
-use metamath_knife::diag::{BibError, DiagnosticClass};
+use metamath_knife::diag::BibError;
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::SourceInfo;
@@ -98,26 +98,20 @@ fn main() {
     loop {
         db.parse(start.clone(), data.clone());
 
-        let mut types = vec![DiagnosticClass::Parse];
-
-        if !matches.is_present("discouraged") && !matches.is_present("axiom_use") {
-            types.push(DiagnosticClass::Scope);
-        }
-
         if matches.is_present("verify") {
-            types.push(DiagnosticClass::Verify);
+            db.verify_pass();
         }
 
         if matches.is_present("grammar") {
-            types.push(DiagnosticClass::Grammar);
+            db.grammar_pass();
         }
 
         if matches.is_present("parse_stmt") {
-            types.push(DiagnosticClass::StmtParse);
+            db.stmt_parse_pass();
         }
 
         if matches.is_present("parse_typesetting") {
-            types.push(DiagnosticClass::Typesetting);
+            db.typesetting_pass();
         }
 
         if matches.is_present("verify_parse_stmt") {
@@ -125,7 +119,7 @@ fn main() {
             db.verify_parse_stmt();
         }
 
-        let mut diags = db.diag_notations(&types);
+        let mut diags = db.diag_notations();
 
         if matches.is_present("discouraged") {
             File::create(matches.value_of("discouraged").unwrap())
@@ -207,6 +201,7 @@ fn main() {
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
+            db.scope_pass();
             for file in exps {
                 db.export(&file);
             }
