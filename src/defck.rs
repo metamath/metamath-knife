@@ -35,8 +35,8 @@ pub struct DefResult {
 impl DefResult {
     /// Returns the definition axiom for the given syntax axiom.
     #[must_use]
-    pub fn definition_for(&self, syntax_axiom: Label) -> Option<&Label> {
-        self.def_map.get(&syntax_axiom)
+    pub fn definition_for(&self, syntax_axiom: Label) -> Option<Label> {
+        self.def_map.get(&syntax_axiom).copied()
     }
 
     /// Returns the list of errors that were generated during the definition check pass.
@@ -54,44 +54,30 @@ impl Database {
     // Parses the 'equality', 'primitive', and 'justification' commmands in the database,
     // and store the result in the database for future fast access.
     fn parse_equality_commands(&self, sset: &SegmentSet, definitions: &mut DefResult) {
+        let nset = self.name_result();
         for sref in sset.segments(..) {
             let buf = &**sref.buffer;
             for (_, (_, command)) in &sref.j_commands {
                 use CommandToken::*;
                 match &**command {
-                    [Keyword(cmd), label, Keyword(from), _reflexivity_law, _commutativity_law, _transitivity_law]
+                    [Keyword(cmd), label, Keyword(from), _reflexivity_law, _symmetry_law, _transitivity_law]
                         if cmd.as_ref(buf) == b"equality" && from.as_ref(buf) == b"from" =>
                     {
-                        let equality = self
-                            .name_result()
-                            .lookup_label(label.value(buf))
-                            .unwrap()
-                            .atom;
+                        let equality = nset.lookup_label(label.value(buf)).unwrap().atom;
+                        // TODO check it's a valid equality
                         definitions.equalities.push(equality);
                     }
-                    [Keyword(cmd), ..] if cmd.as_ref(buf) == b"primitive" => {
-                        for label in &command[1..] {
-                            let primitive = self
-                                .name_result()
-                                .lookup_label(label.value(buf))
-                                .unwrap()
-                                .atom;
+                    [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"primitive" => {
+                        for label in rest {
+                            let primitive = nset.lookup_label(label.value(buf)).unwrap().atom;
                             definitions.primitives.push(primitive);
                         }
                     }
                     [Keyword(cmd), justif_label, Keyword(for_), label]
                         if cmd.as_ref(buf) == b"justification" && for_.as_ref(buf) == b"for" =>
                     {
-                        let theorem = self
-                            .name_result()
-                            .lookup_label(justif_label.value(buf))
-                            .unwrap()
-                            .atom;
-                        let definition = self
-                            .name_result()
-                            .lookup_label(label.value(buf))
-                            .unwrap()
-                            .atom;
+                        let theorem = nset.lookup_label(justif_label.value(buf)).unwrap().atom;
+                        let definition = nset.lookup_label(label.value(buf)).unwrap().atom;
                         definitions.justifications.insert(definition, theorem);
                     }
                     _ => {}
@@ -138,6 +124,8 @@ impl Database {
                 if pending_definitions.len() == 1 {
                     let syntax_axiom = pending_definitions.remove(0);
 
+                    // TODO check that the justification matches the definition
+
                     // Store the validated definition
                     definitions.definitions.insert(definition);
                     definitions.def_map.insert(syntax_axiom, definition);
@@ -154,40 +142,45 @@ impl Database {
                     .stmt_parse_result()
                     .get_formula(&sref)
                     .ok_or_else(|| Diagnostic::UnknownLabel(sref.label_span()))?;
-                let equality = &fmla.get_by_path(&[]).unwrap();
-                if !definitions.equalities.contains(equality) {
+                let root = fmla.root(self);
+                let equality = root.label();
+                if !definitions.equalities.contains(&equality) {
                     Err(Diagnostic::DefCkNotAnEquality(
-                        names.atom_name(*equality).into(),
+                        names.atom_name(equality).into(),
                         definitions
                             .equalities
                             .iter()
-                            .map(|label| names.atom_name(*label).into())
+                            .map(|&label| names.atom_name(label).into())
                             .collect(),
                     ))
                 } else {
-                    // Remove the definition from the pending list
-                    let syntax_axiom = &fmla.get_by_path(&[0]).unwrap();
-                    let result = if let Some(pending_index) =
-                        pending_definitions.iter().position(|x| *x == *syntax_axiom)
-                    {
-                        pending_definitions.swap_remove(pending_index);
-                        Ok(())
-                    } else if let Some(previous_saddr) = definitions
-                        .definition_for(*syntax_axiom)
-                        .map(|a| names.lookup_label_by_atom(*a).address)
-                    {
-                        Err(Diagnostic::DefCkDuplicateDefinition(
-                            names.atom_name(*syntax_axiom).into(),
-                            previous_saddr,
-                        ))
-                    } else {
-                        Err(Diagnostic::DefCkMalformedDefinition)
+                    let Some(lhs) = root.nth_child(0) else {
+                        return Err(Diagnostic::DefCkMalformedDefinition)
                     };
 
-                    // Store the validated definition
+                    let syntax_axiom = lhs.label();
+                    // push the definition to the validated list early, so that later definitions
+                    // aren't as messed up if this check fails
                     definitions.definitions.insert(definition);
-                    definitions.def_map.insert(*syntax_axiom, definition);
-                    result
+                    if let Some(prev) = definitions.def_map.insert(syntax_axiom, definition) {
+                        return Err(Diagnostic::DefCkDuplicateDefinition(
+                            names.atom_name(syntax_axiom).into(),
+                            names.lookup_label_by_atom(prev).address,
+                        ));
+                    }
+
+                    // Remove the definition from the pending list
+                    if let Some(pending_index) =
+                        pending_definitions.iter().position(|&x| x == syntax_axiom)
+                    {
+                        pending_definitions.swap_remove(pending_index);
+                    } else {
+                        return Err(Diagnostic::DefCkMalformedDefinition);
+                    }
+
+                    // TODO definition check
+
+                    Ok(())
                 }
             }
         }
@@ -198,15 +191,7 @@ impl Database {
         self.parse_equality_commands(sset, definitions);
         let names = self.name_result();
 
-        // Fail the whole check if no equality has been defined
-        #[allow(clippy::manual_assert)]
-        if definitions.equalities.is_empty() {
-            definitions
-                .diagnostics
-                .insert(StatementAddress::default(), Diagnostic::DefCkNoEquality);
-        }
-
-        // TODO verify that the reflexivity, associativity, and transivity laws are well-formed
+        // TODO verify that the reflexivity, symmetry, and transitivity laws are well-formed
 
         let mut pending_definitions = vec![];
         for sref in self

@@ -91,7 +91,7 @@ impl Database {
                             if let Some(definition_axiom) =
                                 self.definitions_result().definition_for(syntax_axiom)
                             {
-                                let def_label = self.name_result().atom_name(*definition_axiom);
+                                let def_label = self.name_result().atom_name(definition_axiom);
                                 writer.write(
                                     XmlEvent::start_element("edge")
                                         .attr("source", as_str(label))
