@@ -109,7 +109,6 @@ pub enum Diagnostic {
     DefCkJustificationWithoutDef(Token, usize),
     DefCkMalformedDefinition,
     DefCkMissingDefinition(Token),
-    DefCkNoEquality,
     DefCkNotAnEquality(Token, Vec<Token>),
     DisjointSingle,
     DjNotVariable(TokenIndex),
@@ -459,12 +458,6 @@ impl Diagnostic {
             DefCkMissingDefinition(ref tok) => ("Missing definition".into(), vec![(
                 AnnotationType::Error,
                 format!("Definition Check : A symbol or syntax was declared in statement with label '{label}', but no definition was provided.", label = t(tok)).into(),
-                stmt,
-                stmt.span(),
-            )]),
-            DefCkNoEquality => ("No equality command found".into(), vec![(
-                AnnotationType::Warning,
-                "Definition Check : No equality command found, definitional soundness check cannot be done in this database.".into(),
                 stmt,
                 stmt.span(),
             )]),
