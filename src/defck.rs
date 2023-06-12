@@ -455,7 +455,7 @@ impl DefinitionPass<'_> {
                         while let Some(&(index, (span, ref args))) =
                             j_commands.peeking_next(|i| i.0 == stmt.index)
                         {
-                            {
+                            if let Err(diag) = self.parse_command(sref, index, span, args) {
                                 self.result.diagnostics.push((stmt.address(), diag));
                             }
                         }
