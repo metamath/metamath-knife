@@ -107,6 +107,8 @@ pub enum Diagnostic {
     ConstantNotTopLevel,
     DefCkDuplicateDefinition(Token, StatementAddress),
     DefCkDuplicateEquality(Token, GlobalSpan, Span),
+    DefCkFreeDummyVars(Box<[Token]>),
+    DefCkFreeDummyVarsJustification(StatementAddress, Box<[Token]>),
     DefCkMalformedDefinition(StatementAddress),
     DefCkMisplacedPrimitive(Span),
     DefCkMalformedEquality(StatementAddress, Span),
@@ -470,6 +472,23 @@ impl Diagnostic {
                 sset.statement(syntax),
                 sset.statement(syntax).label_span(),
             )]),
+            DefCkFreeDummyVars(vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' are free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            DefCkFreeDummyVarsJustification(def, vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' are free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "while processing this definition".into(),
+                sset.statement(*def),
+                sset.statement(*def).label_span(),
+            )]),
             &DefCkMisplacedPrimitive(span) => ("Definition Check: Misplaced 'primitive' command".into(), vec![(
                 AnnotationType::Warning,
                 "there is no pending definition for this".into(),
@@ -530,14 +549,15 @@ impl Diagnostic {
             DefCkNotAnEquality(ref tok, equalities) => {
                 notes = &["No provable axioms should appear between definitions and the corresponding syntax declaration."];
                 ("Definition Check: Not an equality".into(), vec![(
-                AnnotationType::Error,
-                format!("This definition does not use an equality.  It is built using '{label}', but the only declared equalities are '{equalities}'", 
-                    label = t(tok),
-                    equalities = equalities.iter().map(t).join("', '"),
-                ).into(),
-                stmt,
-                stmt.label_span(),
-            )])},
+                    AnnotationType::Error,
+                    format!("This definition does not use an equality.  It is built using '{label}', but the only declared equalities are '{equalities}'", 
+                        label = t(tok),
+                        equalities = equalities.iter().map(t).join("', '"),
+                    ).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
             DisjointSingle => ("Disjoint statement with single variable".into(), vec![(
                 AnnotationType::Warning,
                 "A $d statement which lists only one variable is meaningless".into(),

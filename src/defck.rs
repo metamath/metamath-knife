@@ -94,23 +94,16 @@ fn check_lhs(syntax: Label, f: SubFormulaRef<'_>, params: &mut HashSet<Label>) -
             .all(|v| v.is_variable() && params.insert(v.label()))
 }
 
-fn find_lhs<'a>(
-    syntax: Label,
-    f: SubFormulaRef<'a>,
-    lhs: &mut Option<SubFormulaRef<'a>>,
-    params: &mut HashSet<Label>,
-) -> bool {
+fn find_lhs<'a>(syntax: Label, f: SubFormulaRef<'a>, lhs: &mut Option<SubFormulaRef<'a>>) -> bool {
     if f.label() == syntax {
         if let Some(lhs2) = lhs {
             f == *lhs2
         } else {
-            check_lhs(syntax, f, params) && {
-                *lhs = Some(f);
-                true
-            }
+            *lhs = Some(f);
+            true
         }
     } else {
-        f.children().all(|f| find_lhs(syntax, f, lhs, params))
+        f.children().all(|f| find_lhs(syntax, f, lhs))
     }
 }
 
@@ -119,16 +112,6 @@ struct JustificationSubst<'a> {
     rhs: Option<SubFormulaRef<'a>>,
 }
 
-fn _check_rhs(
-    syntax: Label,
-    f: SubFormulaRef<'_>,
-    params: &HashSet<Label>,
-    vars: &HashMap<Label, Label>,
-) -> bool {
-    f.labels_iter().all(|(label, var)| {
-        label != syntax && (!var || params.contains(&label) || !vars.contains_key(&label))
-    })
-}
 fn match_justification<'a>(
     syntax: Label,
     just: SubFormulaRef<'a>,
@@ -140,7 +123,7 @@ fn match_justification<'a>(
             just == *rhs2
         } else {
             subst.rhs = Some(just);
-            true
+            just.labels_iter().all(|(label, _)| label != syntax)
         }
     } else if just.is_variable() {
         match subst.vars.entry(just.label()) {
@@ -157,6 +140,11 @@ fn match_justification<'a>(
                 .zip(f.children())
                 .all(|(just, f)| match_justification(syntax, just, f, subst))
     }
+}
+
+fn get_free_vars(_body: SubFormulaRef<'_>) -> HashSet<Label> {
+    // TODO
+    HashSet::default()
 }
 
 struct DefinitionPass<'a> {
@@ -355,32 +343,55 @@ impl DefinitionPass<'_> {
         };
         let root = fmla.root(self.db);
         let mut params = HashSet::default();
+        let mut free_dummies = HashSet::default();
+        let lhs;
 
         if let Some(&(justification, span)) = self.result.justifications.get(&definition) {
             let mut opt_lhs = None;
-            if !find_lhs(syntax_axiom, root, &mut opt_lhs, &mut params) {
+            if !find_lhs(syntax_axiom, root, &mut opt_lhs) {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
-            let _lhs = opt_lhs.unwrap();
+            lhs = opt_lhs.unwrap();
+            if !check_lhs(syntax_axiom, lhs, &mut params) {
+                return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
+            }
 
             let just = self.db.statement_by_label(justification).unwrap();
-            let just = self.stmts.get_formula(&just).unwrap().root(self.db);
+            let just_body = self.stmts.get_formula(&just).unwrap().root(self.db);
             let mut subst = JustificationSubst {
                 vars: HashMap::default(),
                 rhs: None,
             };
-            if !match_justification(syntax_axiom, just, root, &mut subst) {
+            if !match_justification(syntax_axiom, just_body, root, &mut subst) {
                 return Err(Diagnostic::DefCkMalformedJustification(span));
             }
 
-            let _rhs = subst.rhs.unwrap();
+            // TODO Check DV condition for substitution
 
-            // check_rhs(..);
+            let rhs = subst.rhs.unwrap();
+            let fvars = get_free_vars(rhs);
 
-            // TODO check that lhs and rhs match modulo substitution
-            // TODO ...
+            for (label, var) in rhs.labels_iter() {
+                if var && !subst.vars.contains_key(&label) && fvars.contains(&label) {
+                    free_dummies.insert(label);
+                }
+            }
 
-            // Skip definitional check for definitions having a justification.
+            if !free_dummies.is_empty() {
+                let free_dummies = free_dummies
+                    .into_iter()
+                    .map(|atom| {
+                        let sref = self.db.statement_by_label(atom).unwrap();
+                        sref.math_at(1).slice.into()
+                    })
+                    .sorted()
+                    .collect();
+                self.result.diagnostics.push((
+                    just.address(),
+                    Diagnostic::DefCkFreeDummyVarsJustification(addr, free_dummies),
+                ));
+                return Ok(());
+            }
         } else {
             // Check that the top level of the definition is an equality
             let root = fmla.root(self.db);
@@ -401,15 +412,34 @@ impl DefinitionPass<'_> {
                 Some(true) => {}
             }
 
-            let Some(lhs) = root.nth_child(0) else {
-                return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
-            };
-            if lhs.label() != syntax_axiom {
+            lhs = root.nth_child(0).unwrap();
+
+            if !check_lhs(syntax_axiom, lhs, &mut params) {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
 
-            // TODO definition check
             // TODO Check that bound variables are distinct.
+
+            let rhs = root.nth_child(1).unwrap();
+            let fvars = get_free_vars(rhs);
+
+            for (label, var) in rhs.labels_iter() {
+                if var && !params.contains(&label) && fvars.contains(&label) {
+                    free_dummies.insert(label);
+                }
+            }
+
+            if !free_dummies.is_empty() {
+                let free_dummies = free_dummies
+                    .into_iter()
+                    .map(|atom| {
+                        let sref = self.db.statement_by_label(atom).unwrap();
+                        sref.math_at(1).slice.into()
+                    })
+                    .sorted()
+                    .collect();
+                return Err(Diagnostic::DefCkFreeDummyVars(free_dummies));
+            }
         }
         Ok(())
     }
