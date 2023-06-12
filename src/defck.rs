@@ -58,9 +58,14 @@ struct DefinitionPass<'a> {
     scope: &'a ScopeResult,
     stmts: &'a StmtParse,
     grammar: &'a Grammar,
-    pending_primitive: Vec<Label>,
+    /// These are most likely errors, but will be suppressed if there
+    /// turns out to be a `primitive` command later on.
+    pending_primitive: Vec<(Label, StatementAddress, Diagnostic)>,
+    /// These are syntax axioms which are pending a definition to claim them.
     pending_syntax: Vec<Label>,
-    pending_defn: Vec<StatementAddress>,
+    /// These are (definition addr, syntax axiom label) pairs pending processing.
+    /// (We don't process them immediately so that $j commands can apply.)
+    pending_defn: Vec<(StatementAddress, Label)>,
     /// The value is `true` if it is an equality in `equalities_by_tc`, and `false`
     /// if it is not a registered equality but we have already reported this error
     /// and are suppressing further errors about it.
@@ -120,12 +125,12 @@ impl DefinitionPass<'_> {
                 // TODO verify that the reflexivity, symmetry, and transitivity laws are well-formed
             }
             [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"primitive" => {
-                self.flush_pending_definitions();
+                self.flush_pending_syntax();
                 for label in rest {
                     let primitive = self.nset.lookup_label(label.value(buf)).unwrap().atom;
                     // Remove the definition from the pending list
                     if let Some(pending_index) =
-                        self.pending_primitive.iter().position(|&x| x == primitive)
+                        self.pending_primitive.iter().position(|x| x.0 == primitive)
                     {
                         self.pending_primitive.swap_remove(pending_index);
                         self.result.primitives.push(primitive)
@@ -153,104 +158,94 @@ impl DefinitionPass<'_> {
         Ok(())
     }
 
-    fn verify_definition_statement(&mut self, addr: StatementAddress) -> Result<(), Diagnostic> {
+    fn verify_definition_statement(
+        &mut self,
+        syntax_axiom: Label,
+        addr: StatementAddress,
+    ) -> Result<(), Diagnostic> {
         let stmt = self.db.statement_by_address(addr);
-        let definition = self
-            .nset
-            .lookup_label(stmt.label())
-            .ok_or_else(|| Diagnostic::UnknownLabel(stmt.label_span()))?
-            .atom;
+        let definition = self.nset.lookup_label(stmt.label()).unwrap().atom;
+
+        let syntax_addr = self.nset.lookup_label_by_atom(syntax_axiom).address;
+
+        // push the definition to the validated list early, so that later definitions
+        // aren't as messed up if this check fails
+        self.result.definitions.insert(definition);
+        if let Some(prev) = self.result.def_map.insert(syntax_axiom, definition) {
+            return Err(Diagnostic::DefCkDuplicateDefinition(
+                self.nset.atom_name(syntax_axiom).into(),
+                self.nset.lookup_label_by_atom(prev).address,
+            ));
+        }
+
         if self.result.justifications.contains_key(&definition) {
             // Skip definitional check for definitions having a justification.
-            //
-            // We normally don't know which syntax axiom this definition is for,
-            // but we can make a guess if there is only one pending definition.
-            // In set.mm, only `df-bi` is in this case.
-            if self.pending_syntax.len() == 1 {
-                let syntax_axiom = self.pending_syntax.remove(0);
 
-                // TODO check that the justification matches the definition
-
-                // Store the validated definition
-                self.result.definitions.insert(definition);
-                self.result.def_map.insert(syntax_axiom, definition);
-                Ok(())
-            } else {
-                Err(Diagnostic::DefCkJustificationWithoutDef(
-                    stmt.label().into(),
-                    self.pending_syntax.len(),
-                ))
-            }
+            // TODO check that the justification matches the definition
         } else {
             // Check that the top level of the definition is an equality
-            let fmla = self
-                .stmts
-                .get_formula(&stmt)
-                .ok_or_else(|| Diagnostic::UnknownLabel(stmt.label_span()))?;
+            let Some(fmla) = self.stmts.get_formula(&stmt) else {
+                // Ok because the error would have been reported already
+                return Ok(())
+            };
+
             let root = fmla.root(self.db);
             let equality = root.label();
             match self.equalities.get(&equality) {
                 None => {
-                    self.equalities.insert(equality, false);
-                    Err(Diagnostic::DefCkNotAnEquality(
+                    self.equalities.insert(equality, false); // suppress future errors
+                    return Err(Diagnostic::DefCkNotAnEquality(
                         self.nset.atom_name(equality).into(),
                         self.result
                             .equalities_by_tc
                             .iter()
                             .map(|(&label, _)| self.nset.atom_name(label).into())
                             .collect(),
-                    ))
+                    ));
                 }
-                Some(false) => Ok(()), // already reported the error
-                Some(true) => {
-                    let Some(lhs) = root.nth_child(0) else {
-                        return Err(Diagnostic::DefCkMalformedDefinition)
-                    };
-
-                    let syntax_axiom = lhs.label();
-                    // push the definition to the validated list early, so that later definitions
-                    // aren't as messed up if this check fails
-                    self.result.definitions.insert(definition);
-                    if let Some(prev) = self.result.def_map.insert(syntax_axiom, definition) {
-                        return Err(Diagnostic::DefCkDuplicateDefinition(
-                            self.nset.atom_name(syntax_axiom).into(),
-                            self.nset.lookup_label_by_atom(prev).address,
-                        ));
-                    }
-
-                    // Remove the definition from the pending list
-                    if let Some(pending_index) =
-                        self.pending_syntax.iter().position(|&x| x == syntax_axiom)
-                    {
-                        self.pending_syntax.swap_remove(pending_index);
-                    } else {
-                        return Err(Diagnostic::DefCkMalformedDefinition);
-                    }
-
-                    // TODO definition check
-
-                    Ok(())
-                }
+                Some(false) => return Ok(()), // already reported the error
+                Some(true) => {}
             }
+
+            let Some(lhs) = root.nth_child(0) else {
+                return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
+            };
+            if lhs.label() != syntax_axiom {
+                return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
+            }
+
+            // TODO definition check
         }
+        Ok(())
     }
 
     /// Called when something breaks a "definition block", forcing us to check the statements
     /// and purge them from the pending queue. We use this delayed checking mechanism
     /// to handle set.mm patterns like defining many syntax axioms followed by many definitions,
     /// or $j commands which come after the definitions they apply to.
-    fn flush_pending_definitions(&mut self) {
-        if self.pending_syntax.is_empty() {
-            return;
-        }
+    fn flush_pending_syntax(&mut self) {
+        if !self.pending_syntax.is_empty() {
+            self.flush_pending_definitions();
 
-        for addr in std::mem::take(&mut self.pending_defn) {
-            if let Err(diag) = self.verify_definition_statement(addr) {
-                self.result.diagnostics.push((addr, diag));
+            self.pending_primitive
+                .extend(self.pending_syntax.drain(..).map(|label| {
+                    (
+                        label,
+                        self.db.statement_by_label(label).unwrap().address(),
+                        Diagnostic::DefCkMissingDefinition,
+                    )
+                }));
+        }
+    }
+
+    fn flush_pending_definitions(&mut self) {
+        if !self.pending_defn.is_empty() {
+            for (addr, syntax) in std::mem::take(&mut self.pending_defn) {
+                if let Err(diag) = self.verify_definition_statement(syntax, addr) {
+                    self.result.diagnostics.push((addr, diag));
+                }
             }
         }
-
-        self.pending_primitive.append(&mut self.pending_syntax);
     }
 
     /// Verify that definitions meet set.mm/iset.mm conventions
@@ -274,33 +269,81 @@ impl DefinitionPass<'_> {
                             != self.grammar.provable_typecode()
                         {
                             // Non-provable typecodes are syntax axioms.
-                            if !self.pending_defn.is_empty() {
-                                self.flush_pending_definitions()
-                            }
                             // TODO Check that the axiom label does _not_ start with `df-`.
                             let syntax_axiom = self.nset.lookup_label(stmt.label()).unwrap().atom;
                             self.pending_syntax.push(syntax_axiom);
                         } else if self.pending_syntax.is_empty() {
                             // No definition to check, this is a regular axiom
                             // TODO Check that the axiom label starts with `ax-`.
-                        } else {
+                        } else if let Some(syntax) =
+                            self.ensure_frame_does_not_use_pending_syntax(&stmt, true)
+                        {
                             // Definition, push it to the pending list for later processing
-                            self.pending_defn.push(stmt.address());
+                            self.pending_defn.push((stmt.address(), syntax));
+                        } else {
+                            // Also a regular axiom, it uses no new definitions
                         }
                     }
-                    StatementType::Provable => self.flush_pending_definitions(),
+                    StatementType::Provable => {
+                        if !self.pending_syntax.is_empty() {
+                            self.flush_pending_definitions();
+                            self.ensure_frame_does_not_use_pending_syntax(&stmt, false);
+                        }
+                    }
                     _ => {}
                 }
             }
         }
 
-        self.flush_pending_definitions();
-        for missing_definition in self.pending_primitive.drain(..) {
-            self.result.diagnostics.push((
-                self.nset.lookup_label_by_atom(missing_definition).address,
-                Diagnostic::DefCkMissingDefinition,
-            ));
+        self.flush_pending_syntax();
+        for (_, addr, delayed_diag) in self.pending_primitive.drain(..) {
+            self.result.diagnostics.push((addr, delayed_diag));
         }
+    }
+
+    fn ensure_frame_does_not_use_pending_syntax(
+        &mut self,
+        stmt: &StatementRef<'_>,
+        except_for_one: bool,
+    ) -> Option<Label> {
+        let res = self.ensure_statement_does_not_use_pending_syntax(stmt, except_for_one);
+        if let Some(frame) = self.scope.get(stmt.label()) {
+            for hyp in &*frame.hypotheses {
+                if let Hyp::Essential(addr, _) = *hyp {
+                    let stmt = self.db.statement_by_address(addr);
+                    self.ensure_statement_does_not_use_pending_syntax(&stmt, false);
+                }
+            }
+        }
+        res
+    }
+
+    fn ensure_statement_does_not_use_pending_syntax(
+        &mut self,
+        stmt: &StatementRef<'_>,
+        except_for_one: bool,
+    ) -> Option<Label> {
+        let mut the_def = None;
+        if let Some(f) = self.stmts.get_formula(stmt) {
+            for (label, _) in f.labels_iter().filter(|(_, var)| !var) {
+                if let Some(i) = self.pending_syntax.iter().position(|&x| x == label) {
+                    self.pending_syntax.swap_remove(i);
+                    if except_for_one && the_def.map_or(true, |l| l == label) {
+                        the_def = Some(label)
+                    } else {
+                        self.pending_primitive.push((
+                            label,
+                            stmt.address(),
+                            Diagnostic::DefCkSyntaxUsedBeforeDefinition(
+                                self.nset.atom_name(label).into(),
+                                self.nset.lookup_label_by_atom(label).address,
+                            ),
+                        ))
+                    }
+                }
+            }
+        }
+        the_def
     }
 }
 

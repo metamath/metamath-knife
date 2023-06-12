@@ -107,11 +107,11 @@ pub enum Diagnostic {
     ConstantNotTopLevel,
     DefCkDuplicateDefinition(Token, StatementAddress),
     DefCkDuplicateEquality(Token, GlobalSpan, Span),
-    DefCkJustificationWithoutDef(Token, usize),
-    DefCkMalformedDefinition,
+    DefCkMalformedDefinition(StatementAddress),
     DefCkMisplacedPrimitive(Span),
     DefCkMalformedEquality(StatementAddress, Span),
     DefCkMissingDefinition,
+    DefCkSyntaxUsedBeforeDefinition(Token, StatementAddress),
     DefCkNotAnEquality(Token, Vec<Token>),
     DisjointSingle,
     DjNotVariable(TokenIndex),
@@ -457,20 +457,19 @@ impl Diagnostic {
                 sset.statement_or_dummy(StatementAddress::new(fst.0, NO_STATEMENT)),
                 fst.1,
             )]),
-            DefCkJustificationWithoutDef(ref tok, count) => ("Justification without attributable definition".into(), vec![(
-                AnnotationType::Warning,
-                format!("A justification was found for {label}, but there is no way to track it to a definiendum, since there are {count} pending definitions.", label = t(tok), count=count).into(),
-                stmt,
-                stmt.label_span(),
-            )]),
-            DefCkMalformedDefinition => ("Definition Check: Malformed definition".into(), vec![(
+            &DefCkMalformedDefinition(syntax) => ("Definition Check: Malformed definition".into(), vec![(
                 AnnotationType::Error,
                 "Malformed definition".into(),
                 stmt,
                 stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "Syntax axiom defined here".into(),
+                sset.statement(syntax),
+                sset.statement(syntax).label_span(),
             )]),
             &DefCkMisplacedPrimitive(span) => ("Definition Check: Misplaced 'primitive' command".into(), vec![(
-                AnnotationType::Error,
+                AnnotationType::Warning,
                 "there is no pending definition for this".into(),
                 stmt,
                 span,
@@ -486,11 +485,25 @@ impl Diagnostic {
                 sset.statement(prev_saddr),
                 sset.statement(prev_saddr).span(),
             )]),
-            DefCkMissingDefinition => ("Definition Check: Missing definition".into(), vec![(
+            DefCkMissingDefinition => {
+                notes = &["If this is intentional, consider adding a $( $j primitive ...; $) command"];
+                ("Definition Check: Missing definition or 'primitive'".into(), vec![(
+                    AnnotationType::Error,
+                    "this syntax axiom has no corresponding definition".into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkSyntaxUsedBeforeDefinition(tok, saddr) => (format!("Definition Check: '{label}' used before definition", label = t(tok)).into(), vec![(
                 AnnotationType::Error,
-                "this syntax axiom has no corresponding definition".into(),
+                format!("this expression contains an occurrence of '{label}'", label = t(tok)).into(),
                 stmt,
-                stmt.label_span(),
+                stmt.span(),
+            ), (
+                AnnotationType::Note,
+                "syntax declared here".into(),
+                sset.statement(*saddr),
+                sset.statement(*saddr).label_span(),
             )]),
             DefCkNotAnEquality(ref tok, equalities) => {
                 notes = &["No provable axioms should appear between definitions and the corresponding syntax declaration."];
