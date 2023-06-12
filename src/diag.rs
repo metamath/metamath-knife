@@ -474,16 +474,16 @@ impl Diagnostic {
                 stmt,
                 span,
             )]),
-            &DefCkMalformedEquality(prev_saddr, tok) => ("Definition Check: Malformed equality".into(), vec![(
+            &DefCkMalformedEquality(prev_saddr, tok) => ("Definition Check: Malformed equality or equality theorem".into(), vec![(
                 AnnotationType::Error,
                 "Malformed equality".into(),
                 stmt,
                 tok,
             ), (
                 AnnotationType::Note,
-                "declaration here is not an equality".into(),
+                "declaration here does not have the shape of an equality (theorem)".into(),
                 sset.statement(prev_saddr),
-                sset.statement(prev_saddr).span(),
+                sset.statement(prev_saddr).label_span(),
             )]),
             DefCkMissingDefinition => {
                 notes = &["If this is intentional, consider adding a $( $j primitive ...; $) command"];

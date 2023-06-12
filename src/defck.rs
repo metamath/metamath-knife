@@ -16,7 +16,7 @@ use std::sync::Arc;
 use itertools::PeekingNext;
 
 use crate::diag::Diagnostic;
-use crate::formula::TypeCode;
+use crate::formula::{SubFormulaChildren, SubFormulaRef, TypeCode};
 use crate::grammar::{Grammar, StmtParse};
 use crate::nameck::Nameset;
 use crate::scopeck::{Hyp, ScopeResult};
@@ -52,6 +52,44 @@ impl DefResult {
     }
 }
 
+fn app(
+    label: Label,
+    args: impl FnOnce(SubFormulaChildren<'_>) -> bool,
+) -> impl FnOnce(SubFormulaRef<'_>) -> bool {
+    move |c| c.label() == label && args(c.children())
+}
+fn cons(
+    f: impl FnOnce(SubFormulaRef<'_>) -> bool,
+    args: impl FnOnce(SubFormulaChildren<'_>) -> bool,
+) -> impl FnOnce(SubFormulaChildren<'_>) -> bool {
+    move |mut c| c.next().map_or(false, f) && args(c)
+}
+fn nil(mut c: SubFormulaChildren<'_>) -> bool {
+    c.next().is_none()
+}
+fn get_var(db: &Database, iter: &mut std::slice::Iter<'_, Hyp>) -> Option<Label> {
+    let Hyp::Floating(addr, _, _) = *iter.next()? else { return None };
+    let label = db.statement_by_address(addr).label();
+    Some(db.name_result().lookup_label(label)?.atom)
+}
+fn check(
+    db: &Database,
+    addr: StatementAddress,
+    f: impl FnOnce(SubFormulaRef<'_>) -> bool,
+) -> Option<()> {
+    let stmt = db.statement_by_address(addr);
+    let formula = db.stmt_parse_result().get_formula(&stmt)?;
+    f(formula.root(db)).then_some(())
+}
+fn check_hyp(
+    db: &Database,
+    iter: &mut std::slice::Iter<'_, Hyp>,
+    f: impl FnOnce(SubFormulaRef<'_>) -> bool,
+) -> Option<()> {
+    let Hyp::Essential(addr, _) = *iter.next()? else { return None };
+    check(db, addr, f)
+}
+
 struct DefinitionPass<'a> {
     db: &'a Database,
     nset: &'a Nameset,
@@ -74,6 +112,25 @@ struct DefinitionPass<'a> {
 }
 
 impl DefinitionPass<'_> {
+    fn check_equality_theorem_matches(
+        &mut self,
+        buf: &[u8],
+        span: Span,
+        f: impl FnOnce(StatementAddress, &mut std::slice::Iter<'_, Hyp>) -> Option<()>,
+    ) -> Result<(), Diagnostic> {
+        let tok = span.as_ref(buf);
+        let thm = self
+            .nset
+            .lookup_label(tok)
+            .ok_or_else(|| Diagnostic::UnknownLabel(span))?;
+        let frame = self
+            .scope
+            .get(tok)
+            .ok_or_else(|| Diagnostic::UnknownLabel(span))?;
+        f(thm.address, &mut frame.hypotheses.iter())
+            .ok_or_else(|| Diagnostic::DefCkMalformedEquality(thm.address, span))
+    }
+
     // Parses the 'equality', 'primitive', and 'justification' commmands in the database,
     // and store the result in the database for future fast access.
     fn parse_equality_command(
@@ -86,7 +143,7 @@ impl DefinitionPass<'_> {
         use CommandToken::*;
         let buf = &**sref.buffer;
         match args {
-            [Keyword(cmd), label, Keyword(from), _refl, _symm, _trans]
+            [Keyword(cmd), label, Keyword(from), refl, symm, trans]
                 if cmd.as_ref(buf) == b"equality" && from.as_ref(buf) == b"from" =>
             {
                 let tok = label.value(buf);
@@ -122,7 +179,35 @@ impl DefinitionPass<'_> {
                     }
                 };
 
-                // TODO verify that the reflexivity, symmetry, and transitivity laws are well-formed
+                let eq = equality.atom;
+                // TODO: macro?
+                self.check_equality_theorem_matches(buf, refl.span(), |addr, iter| {
+                    let x = get_var(self.db, iter)?;
+                    iter.next().is_none().then_some(())?;
+                    let f = app(eq, cons(app(x, nil), cons(app(x, nil), nil)));
+                    check(self.db, addr, f)
+                })?;
+                self.check_equality_theorem_matches(buf, symm.span(), |addr, iter| {
+                    let x = get_var(self.db, iter)?;
+                    let y = get_var(self.db, iter)?;
+                    let f = app(eq, cons(app(x, nil), cons(app(y, nil), nil)));
+                    check_hyp(self.db, iter, f)?;
+                    iter.next().is_none().then_some(())?;
+                    let f = app(eq, cons(app(y, nil), cons(app(x, nil), nil)));
+                    check(self.db, addr, f)
+                })?;
+                self.check_equality_theorem_matches(buf, trans.span(), |addr, iter| {
+                    let x = get_var(self.db, iter)?;
+                    let y = get_var(self.db, iter)?;
+                    let z = get_var(self.db, iter)?;
+                    let f = app(eq, cons(app(x, nil), cons(app(y, nil), nil)));
+                    check_hyp(self.db, iter, f)?;
+                    let f = app(eq, cons(app(y, nil), cons(app(z, nil), nil)));
+                    check_hyp(self.db, iter, f)?;
+                    iter.next().is_none().then_some(())?;
+                    let f = app(eq, cons(app(x, nil), cons(app(z, nil), nil)));
+                    check(self.db, addr, f)
+                })?;
             }
             [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"primitive" => {
                 self.flush_pending_syntax();
