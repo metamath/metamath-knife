@@ -1,10 +1,6 @@
 //! Verification of definitions
 //!
 //! Implement verification of definitions per the set.mm/iset.mm conventions.
-//! If the "exceptions" string is empty we use the "typical" set.mm values.
-//! The current typical values are "ax-*,df-bi,df-clab,df-cleq,df-clel".
-//! For glob syntax see: <https://docs.rs/globset/latest/globset/>
-//! but in the future we may reduce the glob language sophistication.
 //! For more information see:
 //! <https://us.metamath.org/mpeuni/conventions.html>
 //! <https://github.com/digama0/mmj2/blob/master/mmj2jar/macros/definitionCheck.js>
@@ -448,7 +444,9 @@ impl DefinitionPass<'_> {
     }
 
     /// Verify that definitions meet set.mm/iset.mm conventions
-    pub(crate) fn verify_definitions(&mut self, sset: &SegmentSet) {
+    /// All statements are scanned, and the checker expects to find, for each definition, first, a syntax axiom,
+    /// and then, either a `primitive` command, or the definition.
+    fn verify_definitions(&mut self, sset: &SegmentSet) {
         for sref in sset.segments(..) {
             let mut j_commands = sref.j_commands.iter();
             for stmt in sref.range(..) {

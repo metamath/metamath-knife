@@ -516,7 +516,7 @@ impl Diagnostic {
                     stmt.label_span(),
                 )])
             },
-            DefCkSyntaxUsedBeforeDefinition(tok, saddr) => (format!("Definition Check: '{label}' used before definition", label = t(tok)).into(), vec![(
+            DefCkSyntaxUsedBeforeDefinition(tok, saddr) => (format!("Definition Check: '{label}' used before definition, or missing definition, or missing definition.", label = t(tok)).into(), vec![(
                 AnnotationType::Error,
                 format!("this expression contains an occurrence of '{label}'", label = t(tok)).into(),
                 stmt,
