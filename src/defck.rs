@@ -34,6 +34,7 @@ pub struct DefResult {
     primitives: Vec<Label>,
     justifications: HashMap<Label, Label>,
     definitions: HashSet<Label>,
+    /// Maps syntax axioms to the corresponding definitions
     def_map: HashMap<Label, Label>,
     diagnostics: Vec<(StatementAddress, Diagnostic)>,
 }
@@ -300,6 +301,7 @@ impl DefinitionPass<'_> {
             }
 
             // TODO definition check
+            // TODO Check that bound variables are distinct.
         }
         Ok(())
     }
@@ -386,6 +388,10 @@ impl DefinitionPass<'_> {
         }
     }
 
+    /// Ensures the given frame does not use pending syntax.
+    /// If `except_for_one` is `True`, one occurrence of the syntax is allowed,
+    /// only in the main statement, and the label of that syntax axiom is returned.
+    /// Unallowed occurrences are added to the `pending_primitive` table.
     fn ensure_frame_does_not_use_pending_syntax(
         &mut self,
         stmt: &StatementRef<'_>,
@@ -403,6 +409,10 @@ impl DefinitionPass<'_> {
         res
     }
 
+    /// Ensures the given statement does not use pending syntax.
+    /// If `except_for_one` is `True`, one occurrence of the syntax is allowed,
+    /// and the label of that syntax axiom is returned.
+    /// Unallowed occurrences are added to the `pending_primitive` table.
     fn ensure_statement_does_not_use_pending_syntax(
         &mut self,
         stmt: &StatementRef<'_>,
