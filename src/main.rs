@@ -32,6 +32,7 @@ fn main() {
         (@arg verify: -v --verify "Checks proof validity")
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
+        (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
         (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")
@@ -138,6 +139,12 @@ fn main() {
                 .map_err(|err| err.into())
                 .and_then(|file| db.export_graphml_deps(&mut BufWriter::new(file)))
                 .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
+        }
+
+        if matches.is_present("axiom_use") {
+            File::create(matches.value_of("axiom_use").unwrap())
+                .and_then(|file| db.write_axiom_use(&mut BufWriter::new(file)))
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
         let mut count = db
