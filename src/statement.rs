@@ -311,12 +311,18 @@ pub enum CommandToken {
 }
 
 impl CommandToken {
+    /// Get the span of the token, excluding exterior quotes.
+    #[must_use]
+    pub const fn span(self) -> Span {
+        match self {
+            Self::Keyword(s) | Self::String(s) => s,
+        }
+    }
+
     /// Get the string corresponding to this token.
     #[must_use]
     pub fn value(self, buf: &[u8]) -> TokenPtr<'_> {
-        match self {
-            Self::Keyword(s) | Self::String(s) => s.as_ref(buf),
-        }
+        self.span().as_ref(buf)
     }
 
     /// Get the full span of the token, including exterior quotes.

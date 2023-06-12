@@ -106,9 +106,12 @@ pub enum Diagnostic {
     CommentMarkerNotStart(Span),
     ConstantNotTopLevel,
     DefCkDuplicateDefinition(Token, StatementAddress),
+    DefCkDuplicateEquality(Token, GlobalSpan, Span),
     DefCkJustificationWithoutDef(Token, usize),
     DefCkMalformedDefinition,
-    DefCkMissingDefinition(Token),
+    DefCkMisplacedPrimitive(Span),
+    DefCkMalformedEquality(StatementAddress, Span),
+    DefCkMissingDefinition,
     DefCkNotAnEquality(Token, Vec<Token>),
     DisjointSingle,
     DjNotVariable(TokenIndex),
@@ -432,45 +435,73 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
-            DefCkDuplicateDefinition(ref tok, prev_saddr) => (format!("Duplicate definition for '{label}'", label = t(tok)).into(), vec![(
+            DefCkDuplicateDefinition(ref tok, prev_saddr) => (format!("Definition Check: Duplicate definition for '{label}'", label = t(tok)).into(), vec![(
                 AnnotationType::Warning,
-                format!("Definition Check : This axiom seems to introduce a definition for '{label}', however a definition already exists.", label = t(tok)).into(),
+                format!("This axiom seems to introduce a definition for '{label}', however a definition already exists.", label = t(tok)).into(),
                 stmt,
-                stmt.span(),
-            ),(
+                stmt.label_span(),
+            ), (
                 AnnotationType::Note,
                 "Definition was previously provided here.".into(),
                 sset.statement(*prev_saddr),
-                sset.statement(*prev_saddr).span(),
+                sset.statement(*prev_saddr).label_span(),
+            )]),
+            &DefCkDuplicateEquality(ref tok, fst, snd) => (format!("Definition Check: Duplicate equality for typecode '{code}'", code = t(tok)).into(), vec![(
+                AnnotationType::Warning,
+                format!("This is the second equality introduced for typecode '{label}'. Each typecode must have a unique equality.", label = t(tok)).into(),
+                stmt,
+                snd,
+            ), (
+                AnnotationType::Note,
+                "Definition was previously provided here.".into(),
+                sset.statement_or_dummy(StatementAddress::new(fst.0, NO_STATEMENT)),
+                fst.1,
             )]),
             DefCkJustificationWithoutDef(ref tok, count) => ("Justification without attributable definition".into(), vec![(
                 AnnotationType::Warning,
                 format!("A justification was found for {label}, but there is no way to track it to a definiendum, since there are {count} pending definitions.", label = t(tok), count=count).into(),
                 stmt,
-                stmt.span(),
+                stmt.label_span(),
             )]),
-            DefCkMalformedDefinition => ("Malformed definition".into(), vec![(
+            DefCkMalformedDefinition => ("Definition Check: Malformed definition".into(), vec![(
                 AnnotationType::Error,
                 "Malformed definition".into(),
                 stmt,
-                stmt.span(),
+                stmt.label_span(),
             )]),
-            DefCkMissingDefinition(ref tok) => ("Missing definition".into(), vec![(
+            &DefCkMisplacedPrimitive(span) => ("Definition Check: Misplaced 'primitive' command".into(), vec![(
                 AnnotationType::Error,
-                format!("Definition Check : A symbol or syntax was declared in statement with label '{label}', but no definition was provided.", label = t(tok)).into(),
+                "there is no pending definition for this".into(),
                 stmt,
-                stmt.span(),
+                span,
+            )]),
+            &DefCkMalformedEquality(prev_saddr, tok) => ("Definition Check: Malformed equality".into(), vec![(
+                AnnotationType::Error,
+                "Malformed equality".into(),
+                stmt,
+                tok,
+            ), (
+                AnnotationType::Note,
+                "declaration here is not an equality".into(),
+                sset.statement(prev_saddr),
+                sset.statement(prev_saddr).span(),
+            )]),
+            DefCkMissingDefinition => ("Definition Check: Missing definition".into(), vec![(
+                AnnotationType::Error,
+                "this syntax axiom has no corresponding definition".into(),
+                stmt,
+                stmt.label_span(),
             )]),
             DefCkNotAnEquality(ref tok, equalities) => {
                 notes = &["No provable axioms should appear between definitions and the corresponding syntax declaration."];
-                ("Not an equality".into(), vec![(
+                ("Definition Check: Not an equality".into(), vec![(
                 AnnotationType::Error,
-                format!("Definition Check : This definition does not use an equality.  It is built using '{label}', but the only declared equalities are '{equalities}'", 
+                format!("This definition does not use an equality.  It is built using '{label}', but the only declared equalities are '{equalities}'", 
                     label = t(tok),
                     equalities = equalities.iter().map(t).join("', '"),
                 ).into(),
                 stmt,
-                stmt.span(),
+                stmt.label_span(),
             )])},
             DisjointSingle => ("Disjoint statement with single variable".into(), vec![(
                 AnnotationType::Warning,
