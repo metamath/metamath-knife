@@ -217,7 +217,7 @@ impl DefinitionPass<'_> {
 
     // Parses the 'equality', 'primitive', and 'justification' commmands in the database,
     // and store the result in the database for future fast access.
-    fn parse_equality_command(
+    fn parse_command(
         &mut self,
         sref: SegmentRef<'_>,
         index: StatementIndex,
@@ -455,7 +455,6 @@ impl DefinitionPass<'_> {
                         while let Some(&(index, (span, ref args))) =
                             j_commands.peeking_next(|i| i.0 == stmt.index)
                         {
-                            if let Err(diag) = self.parse_equality_command(sref, index, span, args)
                             {
                                 self.result.diagnostics.push((stmt.address(), diag));
                             }

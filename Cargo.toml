@@ -29,6 +29,9 @@ simple_logger = "1.13"
 dot-writer = { version = "0.1.2", optional = true }
 xml-rs = { version = "0.8.14", optional = true }
 
+[dev-dependencies]
+assert_matches = "1.5"
+
 [features]
 default = ["annotate-snippets/color"]
 dot = ["dot-writer"]
