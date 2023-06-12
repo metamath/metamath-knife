@@ -1,5 +1,5 @@
-use crate::grammar_tests::mkdb;
 use crate::diag::Diagnostic::*;
+use crate::grammar_tests::mkdb;
 use assert_matches::assert_matches;
 
 const DEFCK_DB: &[u8] = b"
@@ -33,7 +33,7 @@ $}
 #[test]
 fn test_defck() {
     let mut db = mkdb(DEFCK_DB);
-    assert_eq!(db.parse_result().parse_diagnostics(),vec![]);
+    assert_eq!(db.parse_result().parse_diagnostics(), vec![]);
     let names = db.name_pass().clone();
     let defck = db.definitions_pass();
     let diags = defck.diagnostics();
