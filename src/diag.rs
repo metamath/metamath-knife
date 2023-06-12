@@ -110,6 +110,8 @@ pub enum Diagnostic {
     DefCkMalformedDefinition(StatementAddress),
     DefCkMisplacedPrimitive(Span),
     DefCkMalformedEquality(StatementAddress, Span),
+    DefCkMalformedJustification(GlobalSpan),
+    DefCkMalformedSyntaxAxiom,
     DefCkMissingDefinition,
     DefCkSyntaxUsedBeforeDefinition(Token, StatementAddress),
     DefCkNotAnEquality(Token, Vec<Token>),
@@ -485,6 +487,26 @@ impl Diagnostic {
                 sset.statement(prev_saddr),
                 sset.statement(prev_saddr).label_span(),
             )]),
+            &DefCkMalformedJustification(span) => ("Definition Check: Malformed justification theorem".into(), vec![(
+                AnnotationType::Error,
+                "Malformed justification".into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "marked as justification here".into(),
+                sset.statement_or_dummy(StatementAddress::new(span.0, NO_STATEMENT)),
+                span.1,
+            )]),
+            &DefCkMalformedSyntaxAxiom => {
+                notes = &["syntax axioms must have no hypotheses, no repeated variables and no $d"];
+                ("Definition Check: Malformed syntax axiom".into(), vec![(
+                    AnnotationType::Error,
+                    "".into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
             DefCkMissingDefinition => {
                 notes = &["If this is intentional, consider adding a $( $j primitive ...; $) command"];
                 ("Definition Check: Missing definition or 'primitive'".into(), vec![(

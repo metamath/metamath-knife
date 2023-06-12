@@ -152,10 +152,10 @@ impl<TreeItem: Clone> Clone for Tree<TreeItem> {
 }
 
 /// An iterator through sibling nodes
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct SiblingIter<'a, TreeItem> {
-    tree: &'a Tree<TreeItem>,
-    current_id: Option<NodeId>,
+    pub(crate) tree: &'a Tree<TreeItem>,
+    pub(crate) current_id: Option<NodeId>,
 }
 
 impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {

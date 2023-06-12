@@ -11,9 +11,10 @@
 //! and "Metamath: A Computer Language for Mathematical Proofs" by
 //! Norman Megill and David A. Wheeler, 2019, page 155.
 
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
-use itertools::PeekingNext;
+use itertools::{Itertools, PeekingNext};
 
 use crate::diag::Diagnostic;
 use crate::formula::{SubFormulaChildren, SubFormulaRef, TypeCode};
@@ -32,7 +33,7 @@ use crate::{Database, Label, Span, StatementRef, StatementType};
 pub struct DefResult {
     equalities_by_tc: HashMap<TypeCode, (Label, GlobalSpan)>,
     primitives: Vec<Label>,
-    justifications: HashMap<Label, Label>,
+    justifications: HashMap<Label, (Label, GlobalSpan)>,
     definitions: HashSet<Label>,
     /// Maps syntax axioms to the corresponding definitions
     def_map: HashMap<Label, Label>,
@@ -91,6 +92,77 @@ fn check_hyp(
     check(db, addr, f)
 }
 
+fn check_lhs(syntax: Label, f: SubFormulaRef<'_>, params: &mut HashSet<Label>) -> bool {
+    syntax == f.label()
+        && f.children()
+            .all(|v| v.is_variable() && params.insert(v.label()))
+}
+
+fn find_lhs<'a>(
+    syntax: Label,
+    f: SubFormulaRef<'a>,
+    lhs: &mut Option<SubFormulaRef<'a>>,
+    params: &mut HashSet<Label>,
+) -> bool {
+    if f.label() == syntax {
+        if let Some(lhs2) = lhs {
+            f == *lhs2
+        } else {
+            check_lhs(syntax, f, params) && {
+                *lhs = Some(f);
+                true
+            }
+        }
+    } else {
+        f.children().all(|f| find_lhs(syntax, f, lhs, params))
+    }
+}
+
+struct JustificationSubst<'a> {
+    vars: HashMap<Label, SubFormulaRef<'a>>,
+    rhs: Option<SubFormulaRef<'a>>,
+}
+
+fn _check_rhs(
+    syntax: Label,
+    f: SubFormulaRef<'_>,
+    params: &HashSet<Label>,
+    vars: &HashMap<Label, Label>,
+) -> bool {
+    f.labels_iter().all(|(label, var)| {
+        label != syntax && (!var || params.contains(&label) || !vars.contains_key(&label))
+    })
+}
+fn match_justification<'a>(
+    syntax: Label,
+    just: SubFormulaRef<'a>,
+    f: SubFormulaRef<'a>,
+    subst: &mut JustificationSubst<'a>,
+) -> bool {
+    if f.label() == syntax {
+        if let Some(rhs2) = &subst.rhs {
+            just == *rhs2
+        } else {
+            subst.rhs = Some(just);
+            true
+        }
+    } else if just.is_variable() {
+        match subst.vars.entry(just.label()) {
+            Entry::Occupied(e) => *e.get() == f,
+            Entry::Vacant(e) => {
+                e.insert(f);
+                true
+            }
+        }
+    } else {
+        just.label() == f.label()
+            && just
+                .children()
+                .zip(f.children())
+                .all(|(just, f)| match_justification(syntax, just, f, subst))
+    }
+}
+
 struct DefinitionPass<'a> {
     db: &'a Database,
     nset: &'a Nameset,
@@ -130,6 +202,21 @@ impl DefinitionPass<'_> {
             .ok_or_else(|| Diagnostic::UnknownLabel(span))?;
         f(thm.address, &mut frame.hypotheses.iter())
             .ok_or_else(|| Diagnostic::DefCkMalformedEquality(thm.address, span))
+    }
+
+    fn check_syntax_axiom(&mut self, stmt: &StatementRef<'_>) -> Result<(), Diagnostic> {
+        let Some(frame) = self.scope.get(stmt.label()) else { return Ok(()) };
+        if frame
+            .hypotheses
+            .iter()
+            .all(|hyp| matches!(hyp, Hyp::Floating(..)))
+            && frame.mandatory_dv.is_empty()
+            && frame.target.tail.iter().map(|frag| frag.var).all_unique()
+        {
+            Ok(())
+        } else {
+            Err(Diagnostic::DefCkMalformedSyntaxAxiom)
+        }
     }
 
     // Parses the 'equality', 'primitive', and 'justification' commmands in the database,
@@ -237,7 +324,9 @@ impl DefinitionPass<'_> {
                     .unwrap()
                     .atom;
                 let definition = self.nset.lookup_label(label.value(buf)).unwrap().atom;
-                self.result.justifications.insert(definition, theorem);
+                self.result
+                    .justifications
+                    .insert(definition, (theorem, (sref.id, justif_label.span())));
             }
             _ => {}
         }
@@ -264,17 +353,40 @@ impl DefinitionPass<'_> {
             ));
         }
 
-        if self.result.justifications.contains_key(&definition) {
-            // Skip definitional check for definitions having a justification.
+        let Some(fmla) = self.stmts.get_formula(&stmt) else {
+            // Ok because the error would have been reported already
+            return Ok(())
+        };
+        let root = fmla.root(self.db);
+        let mut params = HashSet::default();
 
-            // TODO check that the justification matches the definition
+        if let Some(&(justification, span)) = self.result.justifications.get(&definition) {
+            let mut opt_lhs = None;
+            if !find_lhs(syntax_axiom, root, &mut opt_lhs, &mut params) {
+                return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
+            }
+            let _lhs = opt_lhs.unwrap();
+
+            let just = self.db.statement_by_label(justification).unwrap();
+            let just = self.stmts.get_formula(&just).unwrap().root(self.db);
+            let mut subst = JustificationSubst {
+                vars: HashMap::default(),
+                rhs: None,
+            };
+            if !match_justification(syntax_axiom, just, root, &mut subst) {
+                return Err(Diagnostic::DefCkMalformedJustification(span));
+            }
+
+            let _rhs = subst.rhs.unwrap();
+
+            // check_rhs(..);
+
+            // TODO check that lhs and rhs match modulo substitution
+            // TODO ...
+
+            // Skip definitional check for definitions having a justification.
         } else {
             // Check that the top level of the definition is an equality
-            let Some(fmla) = self.stmts.get_formula(&stmt) else {
-                // Ok because the error would have been reported already
-                return Ok(())
-            };
-
             let root = fmla.root(self.db);
             let equality = root.label();
             match self.equalities.get(&equality) {
@@ -356,6 +468,9 @@ impl DefinitionPass<'_> {
                             != self.grammar.provable_typecode()
                         {
                             // Non-provable typecodes are syntax axioms.
+                            if let Err(diag) = self.check_syntax_axiom(&stmt) {
+                                self.result.diagnostics.push((stmt.address(), diag));
+                            }
                             // TODO Check that the axiom label does _not_ start with `df-`.
                             let syntax_axiom = self.nset.lookup_label(stmt.label()).unwrap().atom;
                             self.pending_syntax.push(syntax_axiom);
