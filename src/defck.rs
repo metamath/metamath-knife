@@ -89,10 +89,15 @@ fn check_hyp(
     check(db, addr, f)
 }
 
-fn check_lhs(syntax: Label, f: SubFormulaRef<'_>, params: &mut HashSet<Label>) -> bool {
+fn check_lhs(
+    syntax: Label,
+    f: SubFormulaRef<'_>,
+    is_param: &mut Bitset,
+    to_index: &HashMap<Label, usize>,
+) -> bool {
     syntax == f.label()
         && f.children()
-            .all(|v| v.is_variable() && params.insert(v.label()))
+            .all(|v| v.is_variable() && !is_param.replace_bit(to_index[&v.label()]))
 }
 
 fn find_lhs<'a>(syntax: Label, f: SubFormulaRef<'a>, lhs: &mut Option<SubFormulaRef<'a>>) -> bool {
@@ -343,18 +348,18 @@ impl DefinitionPass<'_> {
             return Ok(())
         };
         let root = fmla.root(self.db);
-        let mut params = HashSet::default();
+        let mut is_param = Bitset::new();
         let mut free_dummies = HashSet::default();
         let lhs;
 
         let def_frame = self.scope.get(stmt.label()).unwrap();
         let mut to_index = HashMap::default();
-        for hyp in &*def_frame.hypotheses {
-            if let Hyp::Floating(addr, i, _) = *hyp {
-                let label = self.db.statement_by_address(addr).label();
-                let atom = self.nset.lookup_label(label).unwrap().atom;
-                to_index.insert(atom, i);
-            }
+        for (label, _) in root.labels_iter().filter(|&(_, var)| var) {
+            to_index.entry(label).or_insert_with(|| {
+                let atom = self.db.statement_by_label(label).unwrap().math_at(1).slice;
+                let atom = self.db.name_result().get_atom(atom);
+                def_frame.var_list.iter().position(|&i| i == atom).unwrap()
+            });
         }
 
         if let Some(&(justification, span)) = self.result.justifications.get(&definition) {
@@ -363,7 +368,7 @@ impl DefinitionPass<'_> {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
             lhs = opt_lhs.unwrap();
-            if !check_lhs(syntax_axiom, lhs, &mut params) {
+            if !check_lhs(syntax_axiom, lhs, &mut is_param, &to_index) {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
 
@@ -458,17 +463,53 @@ impl DefinitionPass<'_> {
 
             lhs = root.nth_child(0).unwrap();
 
-            if !check_lhs(syntax_axiom, lhs, &mut params) {
+            if !check_lhs(syntax_axiom, lhs, &mut is_param, &to_index) {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
 
-            // TODO Check that bound variables are distinct.
+            let mut all_vars = Bitset::new();
+            let mut dummy_dv_violations = Bitset::new();
+            for i in 0..def_frame.mandatory_count {
+                all_vars.set_bit(i)
+            }
+            for i in (0..def_frame.mandatory_count).filter(|&i| !is_param.has_bit(i)) {
+                let vars = &def_frame.optional_dv[i];
+                all_vars.unset_bit(i);
+                if !all_vars.is_subset_of(vars) {
+                    dummy_dv_violations.set_bit(i);
+                    for i in 0..def_frame.mandatory_count {
+                        if !vars.has_bit(i) {
+                            dummy_dv_violations.set_bit(i)
+                        }
+                    }
+                }
+                all_vars.set_bit(i);
+            }
+
+            if !dummy_dv_violations.is_empty() {
+                let mut params = vec![];
+                let mut dummies = vec![];
+                for i in &dummy_dv_violations {
+                    let var = self.nset.atom_name(def_frame.var_list[i]).into();
+                    if is_param.has_bit(i) {
+                        params.push(var)
+                    } else {
+                        dummies.push(var)
+                    }
+                }
+                params.sort();
+                dummies.sort();
+                return Err(Diagnostic::DefCkDummyDj(
+                    params.into_boxed_slice(),
+                    dummies.into_boxed_slice(),
+                ));
+            }
 
             let rhs = root.nth_child(1).unwrap();
             let fvars = get_free_vars(rhs);
 
             for (label, var) in rhs.labels_iter() {
-                if var && !params.contains(&label) && fvars.contains(&label) {
+                if var && !is_param.has_bit(to_index[&label]) && fvars.contains(&label) {
                     free_dummies.insert(label);
                 }
             }
@@ -484,11 +525,6 @@ impl DefinitionPass<'_> {
                     .collect();
                 return Err(Diagnostic::DefCkFreeDummyVars(free_dummies));
             }
-        }
-
-        let mut is_param = Bitset::new();
-        for label in params {
-            is_param.set_bit(to_index[&label]);
         }
 
         let mut dv_params = HashSet::default();

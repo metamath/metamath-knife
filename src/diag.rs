@@ -110,6 +110,7 @@ pub enum Diagnostic {
     DefCkFreeDummyVars(Box<[Token]>),
     DefCkFreeDummyVarsJustification(StatementAddress, Box<[Token]>),
     DefCkParameterDj(Box<[Token]>),
+    DefCkDummyDj(Box<[Token]>, Box<[Token]>),
     DefCkJustificationDjViolation(StatementAddress, Box<[Token]>),
     DefCkMalformedDefinition(StatementAddress),
     DefCkMisplacedPrimitive(Span),
@@ -554,6 +555,29 @@ impl Diagnostic {
                 stmt,
                 stmt.label_span(),
             )]),
+            DefCkDummyDj(params, dummies) if params.is_empty() => {
+                ("Definition Check: Dummies must be disjoint".into(), vec![(
+                    AnnotationType::Error,
+                    format!(
+                        "dummies '{dummies}' must have a $d condition",
+                        dummies = dummies.iter().map(t).join("', '"),
+                    ).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkDummyDj(params, dummies) => {
+                ("Definition Check: Parameters and dummies must be disjoint".into(), vec![(
+                    AnnotationType::Error,
+                    format!(
+                        "parameters '{params}' and dummies '{dummies}' must have a $d condition",
+                        params = params.iter().map(t).join("', '"),
+                        dummies = dummies.iter().map(t).join("', '"),
+                    ).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
             DefCkSyntaxUsedBeforeDefinition(tok, saddr) => (format!("Definition Check: '{label}' used before definition, or missing definition.", label = t(tok)).into(), vec![(
                 AnnotationType::Error,
                 format!("this expression contains an occurrence of '{label}'", label = t(tok)).into(),
