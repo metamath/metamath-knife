@@ -288,14 +288,16 @@ impl DefinitionPass<'_> {
                 })?;
             }
             [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"primitive" => {
-                self.flush_pending_syntax();
                 for label in rest {
                     let primitive = self.nset.lookup_label(label.value(buf)).unwrap().atom;
                     // Remove the definition from the pending list
-                    if let Some(pending_index) =
+                    if let Some(i) = self.pending_syntax.iter().position(|&x| x == primitive) {
+                        self.pending_syntax.swap_remove(i);
+                        self.result.primitives.push(primitive)
+                    } else if let Some(i) =
                         self.pending_primitive.iter().position(|x| x.0 == primitive)
                     {
-                        self.pending_primitive.swap_remove(pending_index);
+                        self.pending_primitive.swap_remove(i);
                         self.result.primitives.push(primitive)
                     } else {
                         self.result.diagnostics.push((
@@ -558,9 +560,12 @@ impl DefinitionPass<'_> {
     fn flush_pending_syntax(&mut self) {
         if !self.pending_syntax.is_empty() {
             self.flush_pending_definitions();
-
             self.pending_primitive
                 .extend(self.pending_syntax.drain(..).map(|label| {
+                    println!(
+                        "pop {}",
+                        crate::as_str(self.db.statement_by_label(label).unwrap().label())
+                    );
                     (
                         label,
                         self.db.statement_by_label(label).unwrap().address(),
@@ -605,19 +610,36 @@ impl DefinitionPass<'_> {
                             if let Err(diag) = self.check_syntax_axiom(&stmt) {
                                 self.result.diagnostics.push((stmt.address(), diag));
                             }
-                            // TODO Check that the axiom label does _not_ start with `df-`.
+                            if stmt.label().starts_with(b"ax-") || stmt.label().starts_with(b"df-")
+                            {
+                                self.result
+                                    .diagnostics
+                                    .push((stmt.address(), Diagnostic::DefCkMisnamedSyntaxAxiom));
+                            }
                             let syntax_axiom = self.nset.lookup_label(stmt.label()).unwrap().atom;
                             self.pending_syntax.push(syntax_axiom);
                         } else if self.pending_syntax.is_empty() {
                             // No definition to check, this is a regular axiom
-                            // TODO Check that the axiom label starts with `ax-`.
+                            if !stmt.label().starts_with(b"ax-") {
+                                self.result
+                                    .diagnostics
+                                    .push((stmt.address(), Diagnostic::DefCkMisnamedAxiom));
+                            }
                         } else if let Some(syntax) =
                             self.ensure_frame_does_not_use_pending_syntax(&stmt, true)
                         {
                             // Definition, push it to the pending list for later processing
+                            if !stmt.label().starts_with(b"df-") {
+                                self.result
+                                    .diagnostics
+                                    .push((stmt.address(), Diagnostic::DefCkMisnamedDefinition));
+                            }
                             self.pending_defn.push((stmt.address(), syntax));
-                        } else {
+                        } else if !stmt.label().starts_with(b"ax-") {
                             // Also a regular axiom, it uses no new definitions
+                            self.result
+                                .diagnostics
+                                .push((stmt.address(), Diagnostic::DefCkMisnamedAxiom));
                         }
                     }
                     StatementType::Provable => {
