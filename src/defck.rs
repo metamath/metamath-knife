@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use itertools::{Itertools, PeekingNext};
 
+use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
 use crate::formula::{SubFormulaChildren, SubFormulaRef, TypeCode};
 use crate::grammar::{Grammar, StmtParse};
@@ -346,6 +347,16 @@ impl DefinitionPass<'_> {
         let mut free_dummies = HashSet::default();
         let lhs;
 
+        let def_frame = self.scope.get(stmt.label()).unwrap();
+        let mut to_index = HashMap::default();
+        for hyp in &*def_frame.hypotheses {
+            if let Hyp::Floating(addr, i, _) = *hyp {
+                let label = self.db.statement_by_address(addr).label();
+                let atom = self.nset.lookup_label(label).unwrap().atom;
+                to_index.insert(atom, i);
+            }
+        }
+
         if let Some(&(justification, span)) = self.result.justifications.get(&definition) {
             let mut opt_lhs = None;
             if !find_lhs(syntax_axiom, root, &mut opt_lhs) {
@@ -372,15 +383,6 @@ impl DefinitionPass<'_> {
                 if let Hyp::Floating(addr, i, _) = *hyp {
                     let label = self.db.statement_by_address(addr).label();
                     subst2[i] = subst.vars.get(&self.nset.lookup_label(label).unwrap().atom);
-                }
-            }
-
-            let def_frame = self.scope.get(stmt.label()).unwrap();
-            let mut to_index = HashMap::default();
-            for hyp in &*just_frame.hypotheses {
-                if let Hyp::Floating(addr, i, _) = *hyp {
-                    let label = self.db.statement_by_address(addr).label();
-                    to_index.insert(self.nset.lookup_label(label).unwrap().atom, i);
                 }
             }
 
@@ -483,6 +485,29 @@ impl DefinitionPass<'_> {
                 return Err(Diagnostic::DefCkFreeDummyVars(free_dummies));
             }
         }
+
+        let mut is_param = Bitset::new();
+        for label in params {
+            is_param.set_bit(to_index[&label]);
+        }
+
+        let mut dv_params = HashSet::default();
+        for &(i1, i2) in &*def_frame.mandatory_dv {
+            if is_param.has_bit(i1) && is_param.has_bit(i2) {
+                dv_params.insert(i1);
+                dv_params.insert(i2);
+            }
+        }
+
+        if !dv_params.is_empty() {
+            let dv_params = dv_params
+                .into_iter()
+                .map(|i| self.nset.atom_name(def_frame.var_list[i]).into())
+                .sorted()
+                .collect();
+            return Err(Diagnostic::DefCkParameterDj(dv_params));
+        }
+
         Ok(())
     }
 

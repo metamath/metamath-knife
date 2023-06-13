@@ -109,6 +109,7 @@ pub enum Diagnostic {
     DefCkDuplicateEquality(Token, GlobalSpan, Span),
     DefCkFreeDummyVars(Box<[Token]>),
     DefCkFreeDummyVarsJustification(StatementAddress, Box<[Token]>),
+    DefCkParameterDj(Box<[Token]>),
     DefCkJustificationDjViolation(StatementAddress, Box<[Token]>),
     DefCkMalformedDefinition(StatementAddress),
     DefCkMisplacedPrimitive(Span),
@@ -492,7 +493,7 @@ impl Diagnostic {
             )]),
             DefCkJustificationDjViolation(just, vars) => ("Definition Check: Disjoint variable violation while applying justification".into(), vec![(
                 AnnotationType::Error,
-                format!("variable(s) '{vars}' need to be disjoint", vars = vars.iter().map(t).join("', '")).into(),
+                format!("variables '{vars}' need to be disjoint", vars = vars.iter().map(t).join("', '")).into(),
                 stmt,
                 stmt.label_span(),
             ), (
@@ -547,6 +548,12 @@ impl Diagnostic {
                     stmt.label_span(),
                 )])
             },
+            DefCkParameterDj(vars) => ("Definition Check: Parameters must not have $d conditions".into(), vec![(
+                AnnotationType::Error,
+                format!("parameters '{vars}' have a $d condition", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            )]),
             DefCkSyntaxUsedBeforeDefinition(tok, saddr) => (format!("Definition Check: '{label}' used before definition, or missing definition.", label = t(tok)).into(), vec![(
                 AnnotationType::Error,
                 format!("this expression contains an occurrence of '{label}'", label = t(tok)).into(),
