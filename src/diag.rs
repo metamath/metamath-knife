@@ -479,23 +479,29 @@ impl Diagnostic {
                 sset.statement(syntax),
                 sset.statement(syntax).label_span(),
             )]),
-            DefCkFreeDummyVars(vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
-                AnnotationType::Error,
-                format!("variable(s) '{vars}' are free in this statement", vars = vars.iter().map(t).join("', '")).into(),
-                stmt,
-                stmt.label_span(),
-            )]),
-            DefCkFreeDummyVarsJustification(def, vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
-                AnnotationType::Error,
-                format!("variable(s) '{vars}' are free in this statement", vars = vars.iter().map(t).join("', '")).into(),
-                stmt,
-                stmt.label_span(),
-            ), (
-                AnnotationType::Note,
-                "while processing this definition".into(),
-                sset.statement(*def),
-                sset.statement(*def).label_span(),
-            )]),
+            DefCkFreeDummyVars(vars) => {
+                notes = &["this is a known false positive, as the required check has not yet been implemented"];
+                ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                    AnnotationType::Error,
+                    format!("variable(s) '{vars}' are possibly free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkFreeDummyVarsJustification(def, vars) => {
+                notes = &["this is a known false positive, as the required check has not yet been implemented"];
+                ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                    AnnotationType::Error,
+                    format!("variable(s) '{vars}' are possibly free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                    stmt,
+                    stmt.label_span(),
+                ), (
+                    AnnotationType::Note,
+                    "while processing this definition".into(),
+                    sset.statement(*def),
+                    sset.statement(*def).label_span(),
+                )])
+            },
             DefCkJustificationDjViolation(just, vars) => ("Definition Check: Disjoint variable violation while applying justification".into(), vec![(
                 AnnotationType::Error,
                 format!("variables '{vars}' need to be disjoint", vars = vars.iter().map(t).join("', '")).into(),

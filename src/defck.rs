@@ -152,10 +152,10 @@ fn match_justification<'a>(
     }
 }
 
-fn get_free_vars(_body: SubFormulaRef<'_>) -> HashSet<Label> {
-    // TODO
-    HashSet::default()
-}
+// fn get_free_vars(_body: SubFormulaRef<'_>) -> HashSet<Label> {
+//     // TODO
+//     HashSet::default()
+// }
 
 struct DefinitionPass<'a> {
     db: &'a Database,
@@ -426,10 +426,12 @@ impl DefinitionPass<'_> {
             }
 
             let rhs = subst.rhs.unwrap();
-            let fvars = get_free_vars(rhs);
+            // let fvars = get_free_vars(rhs);
 
             for (label, var) in rhs.labels_iter() {
-                if var && !subst.vars.contains_key(&label) && fvars.contains(&label) {
+                if var && !subst.vars.contains_key(&label)
+                /* && fvars.contains(&label) */
+                {
                     free_dummies.insert(label);
                 }
             }
@@ -518,10 +520,12 @@ impl DefinitionPass<'_> {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
 
-            let fvars = get_free_vars(rhs);
+            // let fvars = get_free_vars(rhs);
 
             for (label, var) in rhs.labels_iter() {
-                if var && !is_param.has_bit(to_index[&label]) && fvars.contains(&label) {
+                if var && !is_param.has_bit(to_index[&label])
+                /* && fvars.contains(&label) */
+                {
                     free_dummies.insert(label);
                 }
             }
