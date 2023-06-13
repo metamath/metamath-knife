@@ -109,6 +109,7 @@ pub enum Diagnostic {
     DefCkDuplicateEquality(Token, GlobalSpan, Span),
     DefCkFreeDummyVars(Box<[Token]>),
     DefCkFreeDummyVarsJustification(StatementAddress, Box<[Token]>),
+    DefCkJustificationDjViolation(StatementAddress, Box<[Token]>),
     DefCkMalformedDefinition(StatementAddress),
     DefCkMisplacedPrimitive(Span),
     DefCkMalformedEquality(StatementAddress, Span),
@@ -488,6 +489,17 @@ impl Diagnostic {
                 "while processing this definition".into(),
                 sset.statement(*def),
                 sset.statement(*def).label_span(),
+            )]),
+            DefCkJustificationDjViolation(just, vars) => ("Definition Check: Disjoint variable violation while applying justification".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' need to be disjoint", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "justification theorem here".into(),
+                sset.statement(*just),
+                sset.statement(*just).label_span(),
             )]),
             &DefCkMisplacedPrimitive(span) => ("Definition Check: Misplaced 'primitive' command".into(), vec![(
                 AnnotationType::Warning,

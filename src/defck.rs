@@ -366,7 +366,49 @@ impl DefinitionPass<'_> {
                 return Err(Diagnostic::DefCkMalformedJustification(span));
             }
 
-            // TODO Check DV condition for substitution
+            let just_frame = self.scope.get(just.label()).unwrap();
+            let mut subst2 = vec![None; just_frame.mandatory_count];
+            for hyp in &*just_frame.hypotheses {
+                if let Hyp::Floating(addr, i, _) = *hyp {
+                    let label = self.db.statement_by_address(addr).label();
+                    subst2[i] = subst.vars.get(&self.nset.lookup_label(label).unwrap().atom);
+                }
+            }
+
+            let def_frame = self.scope.get(stmt.label()).unwrap();
+            let mut to_index = HashMap::default();
+            for hyp in &*just_frame.hypotheses {
+                if let Hyp::Floating(addr, i, _) = *hyp {
+                    let label = self.db.statement_by_address(addr).label();
+                    to_index.insert(self.nset.lookup_label(label).unwrap().atom, i);
+                }
+            }
+
+            let mut violated_dv = HashSet::default();
+            for &(i1, i2) in &*just_frame.mandatory_dv {
+                if let (Some(f1), Some(f2)) = (subst2[i1], subst2[i2]) {
+                    for &a1 in f1.labels_iter().filter_map(|(lab, _)| to_index.get(&lab)) {
+                        for &a2 in f2.labels_iter().filter_map(|(lab, _)| to_index.get(&lab)) {
+                            if !def_frame.optional_dv[a1].has_bit(a2) {
+                                violated_dv.insert(a1);
+                                violated_dv.insert(a2);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !violated_dv.is_empty() {
+                let violated_dv = violated_dv
+                    .into_iter()
+                    .map(|i| self.nset.atom_name(def_frame.var_list[i]).into())
+                    .sorted()
+                    .collect();
+                return Err(Diagnostic::DefCkFreeDummyVarsJustification(
+                    just.address(),
+                    violated_dv,
+                ));
+            }
 
             let rhs = subst.rhs.unwrap();
             let fvars = get_free_vars(rhs);
