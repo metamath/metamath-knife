@@ -506,6 +506,10 @@ impl DefinitionPass<'_> {
             }
 
             let rhs = root.nth_child(1).unwrap();
+            if rhs.labels_iter().any(|(label, _)| label == syntax_axiom) {
+                return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
+            }
+
             let fvars = get_free_vars(rhs);
 
             for (label, var) in rhs.labels_iter() {
