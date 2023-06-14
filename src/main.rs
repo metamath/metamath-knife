@@ -61,6 +61,12 @@ fn main() {
             "Export the database's grammar in Graphviz DOT format for visualization")
     );
 
+    #[cfg(feature = "xml")]
+    let app = clap_app!(@app (app)
+        (@arg export_graphml_deps: --("export-graphml-deps") [FILE]
+        "Exports all theorem dependencies in the GraphML file format")
+    );
+
     let matches = app.get_matches();
 
     let options = DbOptions {
@@ -125,6 +131,14 @@ fn main() {
             File::create(matches.value_of("discouraged").unwrap())
                 .and_then(|file| db.write_discouraged(&mut BufWriter::new(file)))
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        #[cfg(feature = "xml")]
+        if matches.is_present("export_graphml_deps") {
+            File::create(matches.value_of("export_graphml_deps").unwrap())
+                .map_err(|err| err.into())
+                .and_then(|file| db.export_graphml_deps(&mut BufWriter::new(file)))
+                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
         }
 
         if matches.is_present("axiom_use") {

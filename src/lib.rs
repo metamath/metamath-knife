@@ -76,6 +76,9 @@ pub mod typesetting;
 pub mod verify;
 pub mod verify_markup;
 
+#[cfg(feature = "xml")]
+pub mod export_deps;
+
 #[cfg(test)]
 mod comment_parser_tests;
 #[cfg(test)]
