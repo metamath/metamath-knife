@@ -18,7 +18,7 @@ use crate::{as_str, database::time, Database};
 pub struct UsageResult(Vec<(StatementAddress, Diagnostic)>);
 
 impl UsageResult {
-    /// Returns the list of errors that were generated during the definition check pass.
+    /// Returns the list of errors that were generated during the usage check pass.
     #[must_use]
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         self.0.clone()
