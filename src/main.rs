@@ -68,7 +68,6 @@ fn main() {
             "Exports all theorem dependencies in the GraphML file format")
         (@arg export_graphml_defs: --("export-graphml-defs") [FILE]
             "Exports all definition dependencies in the GraphML file format")
-        "Exports all theorem dependencies in the GraphML file format")
     );
 
     let matches = app.get_matches();
