@@ -98,6 +98,7 @@
 //! estimated runtime.  This requires an additional argument when queueing.
 
 use crate::as_str;
+use crate::axiom_use::UsageResult;
 use crate::diag;
 use crate::diag::Diagnostic;
 use crate::export;
@@ -398,6 +399,7 @@ pub struct Database {
     scopes: Option<Arc<ScopeResult>>,
     prev_verify: Option<Arc<VerifyResult>>,
     verify: Option<Arc<VerifyResult>>,
+    usage: Option<Arc<UsageResult>>,
     typesetting: Option<Arc<TypesettingData>>,
     outline: Option<Arc<Outline>>,
     grammar: Option<Arc<Grammar>>,
@@ -451,6 +453,7 @@ impl Database {
             nameset: None,
             scopes: None,
             verify: None,
+            usage: None,
             typesetting: None,
             outline: None,
             grammar: None,
@@ -496,6 +499,7 @@ impl Database {
             self.nameset = None;
             self.scopes = None;
             self.verify = None;
+            self.usage = None;
             self.typesetting = None;
             self.outline = None;
             self.grammar = None;
@@ -619,6 +623,34 @@ impl Database {
         self.try_verify_result().expect(
             "The database has not run `verify_pass()`. Please ensure it is run before calling depending methods."
         )
+    }
+
+    /// Calculates and returns axiom usage information for the database.
+    ///
+    /// This is an optimized verifier which returns no useful information other
+    /// than error diagnostics.  It does not save any parsed proof data.
+    pub fn verify_usage_pass(&mut self) -> &Arc<UsageResult> {
+        if self.usage.is_none() {
+            self.stmt_parse_pass();
+            time(&self.options.clone(), "usage", || {
+                let parse = self.parse_result();
+                let mut usage = UsageResult::default();
+                crate::axiom_use::verify_usage(parse, &mut usage);
+                self.usage = Some(Arc::new(usage));
+            });
+        }
+        self.usage.as_ref().unwrap()
+    }
+
+    /// Returns axiom usage verification information for the database.
+    /// Returns `None` if [`Database::usage_pass`] was not previously called.
+    ///
+    /// This is an optimized verifier which returns no useful information other
+    /// than error diagnostics.  It does not save any parsed proof data.
+    #[inline]
+    #[must_use]
+    pub const fn try_usage_result(&self) -> Option<&Arc<UsageResult>> {
+        self.usage.as_ref()
     }
 
     /// Computes and returns the typesetting data.
@@ -958,6 +990,9 @@ impl Database {
         }
         if let Some(pass) = self.try_verify_result() {
             diags.extend(pass.diagnostics())
+        }
+        if let Some(pass) = self.try_usage_result() {
+            diags.extend_from_slice(&pass.diagnostics())
         }
         if let Some(pass) = self.try_grammar_result() {
             diags.extend(pass.diagnostics())
