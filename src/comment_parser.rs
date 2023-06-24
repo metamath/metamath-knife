@@ -266,7 +266,7 @@ impl<'a> CommentParser<'a> {
         self.buf[last_nl? + 1..self.pos]
             .iter()
             .all(u8::is_ascii_whitespace)
-            .then(|| ())
+            .then_some(())
     }
 
     fn parse_label(&mut self) -> CommentItem {
@@ -412,7 +412,7 @@ impl Discouragements {
     #[must_use]
     pub fn new(buf: &[u8]) -> Self {
         lazy_static! {
-            static ref MODIFICATION: RegexSet = RegexSet::new(&[
+            static ref MODIFICATION: RegexSet = RegexSet::new([
                 r"\(Proof[ \n]+modification[ \n]+is[ \n]+discouraged\.\)",
                 r"\(New[ \n]+usage[ \n]+is[ \n]+discouraged\.\)"
             ])

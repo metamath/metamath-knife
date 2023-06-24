@@ -33,7 +33,7 @@ type NodeId = usize;
 /// For the labels in DOT format
 #[cfg(feature = "dot")]
 fn as_string(node_id: NodeId) -> String {
-    format!("{}", node_id)
+    format!("{node_id}")
 }
 
 /// For the labels in DOT format
@@ -484,7 +484,7 @@ impl Grammar {
         if let GrammarNode::Branch { map } = &self.nodes.get(node_id) {
             map
         } else {
-            panic!("Expected branch for node {}!", node_id);
+            panic!("Expected branch for node {node_id}!");
         }
     }
 
@@ -1506,6 +1506,21 @@ impl Grammar {
         self.logic_type
     }
 
+    /// Converts the given formula to the target typecode,
+    /// provided there is a suitable type conversion.
+    #[must_use]
+    pub fn convert_typecode(&self, fmla: Formula, target_tc: TypeCode) -> Option<Formula> {
+        let source_tc = fmla.get_typecode();
+        self.type_conversions
+            .iter()
+            .find(|(from_tc, to_tc, _)| *from_tc == source_tc && *to_tc == target_tc)
+            .map(|(_, _, label)| {
+                let mut builder = FormulaBuilder::from_formula(fmla);
+                builder.reduce(*label, 1, 0, false);
+                builder.build(target_tc)
+            })
+    }
+
     /// Lists the contents of the grammar's parse table. This can be used for debugging.
     pub fn dump(&self, db: &Database) {
         println!("Grammar tree has {:?} nodes.", self.nodes.len());
@@ -1738,8 +1753,8 @@ struct StmtParseSegment {
 }
 
 /// Runs statement parsing for a single segment.
-fn parse_statements_single<'a>(
-    sset: &'a SegmentSet,
+fn parse_statements_single(
+    sset: &SegmentSet,
     nset: &Nameset,
     names: &mut NameReader<'_>,
     grammar: &Grammar,

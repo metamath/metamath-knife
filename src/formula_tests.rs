@@ -89,3 +89,21 @@ fn test_substitute() {
     let result = stmt.substitute(&subst);
     assert_eq!(result, *formula);
 }
+
+#[test]
+/// Substitution of ` ( 1 + ( A + 1 ) ) = ( ( A + 1 ) + 2 ) ` with ` ( A + 1 ) := ( 2 + B ) `
+/// Shall result in ` ( 1 + ( 2 + B ) ) = ( ( 2 + B ) + 2 ) `
+fn test_replace() {
+    let mut db = mkdb(FORMULA_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let formula = grammar
+        .parse_string("|- ( 1 + ( A + 1 ) ) = ( ( A + 1 ) + 2 )", &names)
+        .unwrap();
+    let old_sub_fmla = grammar.parse_string("class ( A + 1 )", &names).unwrap();
+    let new_sub_fmla = grammar.parse_string("class ( 2 + B )", &names).unwrap();
+    let expected = grammar
+        .parse_string("|- ( 1 + ( 2 + B ) ) = ( ( 2 + B ) + 2 )", &names)
+        .unwrap();
+    assert_eq!(expected, formula.replace(&old_sub_fmla, &new_sub_fmla));
+}

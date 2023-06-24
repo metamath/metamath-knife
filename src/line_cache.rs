@@ -23,7 +23,7 @@ pub struct LineCache {
 
 #[inline(never)]
 fn make_index(mut buf: &[u8]) -> Vec<u32> {
-    assert!(buf.len() < u32::max_value() as usize - 1);
+    assert!(buf.len() < u32::MAX as usize - 1);
     let mut out = Vec::with_capacity(buf.len() / PAGE + 1);
     out.push(0);
     let mut count = 0u32;

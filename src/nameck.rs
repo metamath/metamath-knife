@@ -133,7 +133,7 @@ struct AtomTable {
 
 fn intern(table: &mut AtomTable, tok: TokenPtr<'_>) -> Atom {
     let next = Atom(table.table.len() as u32 + 1);
-    assert!(next.0 < u32::max_value(), "atom table overflowed");
+    assert!(next.0 < u32::MAX, "atom table overflowed");
     if let Some(&atom) = table.table.get(tok) {
         return atom;
     }
@@ -416,7 +416,7 @@ impl Nameset {
     pub fn statement_name(&self, sref: &StatementRef<'_>) -> TokenPtr<'_> {
         self.atom_name(
             self.lookup_label(sref.label())
-                .map_or(Atom::default(), |l| l.atom),
+                .map_or_else(Atom::default, |l| l.atom),
         )
     }
 }

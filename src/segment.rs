@@ -54,7 +54,7 @@ impl SegmentOrder {
 
     fn alloc_id(&mut self) -> SegmentId {
         let index = self.high_water;
-        assert!(index < u32::max_value());
+        assert!(index < u32::MAX);
         self.high_water += 1;
         SegmentId(index)
     }

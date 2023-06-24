@@ -45,10 +45,10 @@ impl From<fmt::Error> for ExportError {
 
 impl fmt::Display for ExportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            ExportError::Io(ref err) => write!(f, "IO error: {}", err),
-            ExportError::Verify(ref err) => write!(f, "{:?}", err),
-            ExportError::Format(ref err) => write!(f, "Format error: {:?}", err),
+        match self {
+            ExportError::Io(err) => write!(f, "IO error: {err}"),
+            ExportError::Verify(err) => write!(f, "{err:?}"),
+            ExportError::Format(err) => write!(f, "Format error: {err:?}"),
         }
     }
 }
@@ -87,10 +87,10 @@ impl Database {
                 as_str(span.as_ref(&comment.segment().segment.buffer)),
                 "\n  ",
             );
-            writeln!(out, "*{}\n", cstr)?;
+            writeln!(out, "*{cstr}\n")?;
         }
 
-        match ProofTreeArray::new(self, stmt) {
+        match ProofTreeArray::from_stmt(self, stmt, true) {
             Ok(arr) => self.export_mmp_proof_tree(thm_label, &arr, out),
             Err(Diagnostic::ProofIncomplete) => self.export_incomplete_proof(stmt, out),
             Err(diag) => Err(diag.into()),
@@ -173,21 +173,20 @@ impl ProofTreeArray {
 
 impl Database {
     /// Export an mmp file for a given proof tree.
+    /// ## Panics
+    /// The `ProofTreeArray` must have `enable_exprs = true`.
     pub fn export_mmp_proof_tree<W: Write>(
         &self,
         thm_label: &[u8],
         arr: &ProofTreeArray,
         out: &mut W,
     ) -> Result<(), ExportError> {
-        let sset = self.parse_result();
-        let nset = self.name_result();
-
         // TODO(Mario): remove hardcoded logical step symbol
         let tc = b"|-";
         let mut lines = arr.with_logical_steps(self, |cur, ix, stmt, hyps| {
             let mut line = match stmt.statement_type() {
                 // Floating will not happen unless we don't recognize the grammar
-                StatementType::Essential | StatementType::Floating => format!("h{}", ix),
+                StatementType::Essential | StatementType::Floating => format!("h{ix}"),
                 _ => {
                     if cur == arr.qed {
                         "qed".to_string()
@@ -217,30 +216,20 @@ impl Database {
             .map(|&(cur, ref line)| line.len() as i16 - indent[cur] as i16)
             .max()
             .unwrap() as u16;
+        let exprs = arr
+            .exprs()
+            .expect("exporting MMP requires expressions enabled in the ProofTreeArray");
         for &mut (cur, ref mut line) in &mut lines {
             for _ in 0..(spaces + indent[cur] - line.len() as u16) {
                 line.push(' ')
             }
             line.push_str(str::from_utf8(tc).unwrap());
-            line.push_str(&String::from_utf8_lossy(&arr.exprs[cur]));
-            writeln!(out, "{}", line)?;
+            line.push_str(&String::from_utf8_lossy(&exprs[cur]));
+            writeln!(out, "{line}")?;
         }
-        writeln!(
-            out,
-            "\n$={}",
-            ProofTreePrinter {
-                sset,
-                nset,
-                scope: self.scope_result(),
-                thm_label,
-                style: ProofStyle::Compressed,
-                arr,
-                initial_chr: 2,
-                indent: 6,
-                line_width: 79,
-            }
-        )?;
-
+        let mut printer = ProofTreePrinter::new(self, thm_label, ProofStyle::Compressed, arr);
+        printer.set_initial_chr(2);
+        writeln!(out, "\n$={printer}")?;
         writeln!(out, "\n$)")?;
         Ok(())
     }

@@ -50,7 +50,7 @@ pub type Symbol = Atom;
 pub type Label = Atom;
 
 /// An error occurring during unification
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnificationError {
     /// Generic unification failure
     UnificationFailed,
@@ -355,6 +355,40 @@ impl Formula {
         );
     }
 
+    /// Replace all instances of `old_sub_fmla` in this formula by `new_sub_fmla`.
+    /// Where `substitute` works on variables only, this
+    #[must_use]
+    pub fn replace(&self, old_sub_fmla: &Formula, new_sub_fmla: &Formula) -> Formula {
+        let mut formula_builder = FormulaBuilder::default();
+        self.sub_replace(self.root, old_sub_fmla, new_sub_fmla, &mut formula_builder);
+        formula_builder.build(self.typecode)
+    }
+
+    /// Perform "replace" on a sub-formula, starting from the given `node_id`
+    fn sub_replace(
+        &self,
+        node_id: NodeId,
+        old_sub_fmla: &Formula,
+        new_sub_fmla: &Formula,
+        formula_builder: &mut FormulaBuilder,
+    ) {
+        if self.sub_eq(node_id, old_sub_fmla, old_sub_fmla.root) {
+            new_sub_fmla.copy_sub_formula(new_sub_fmla.root, formula_builder);
+        } else {
+            let mut children_count = 0;
+            for child_node_id in self.tree.children_iter(node_id) {
+                self.sub_replace(child_node_id, old_sub_fmla, new_sub_fmla, formula_builder);
+                children_count += 1;
+            }
+            formula_builder.reduce(
+                self.tree[node_id],
+                children_count,
+                0,
+                self.is_variable(node_id),
+            );
+        }
+    }
+
     // Copy a sub-formula of this formula to a formula builder
     fn copy_sub_formula(&self, node_id: NodeId, formula_builder: &mut FormulaBuilder) {
         let mut children_count = 0;
@@ -482,14 +516,14 @@ impl<'a> FormulaRef<'a> {
     fn write_sub_sexpr(&self, node_id: NodeId, w: &mut impl std::fmt::Write) -> std::fmt::Result {
         let name = as_str(self.db.name_result().atom_name(self.formula.tree[node_id]));
         if self.formula.tree.has_children(node_id) {
-            write!(w, "({}", name)?;
+            write!(w, "({name}")?;
             for i in self.formula.tree.children_iter(node_id) {
                 write!(w, " ")?;
                 self.write_sub_sexpr(i, w)?;
             }
             write!(w, ")")
         } else {
-            write!(w, "{}", name)
+            write!(w, "{name}")
         }
     }
 
@@ -728,6 +762,17 @@ pub(crate) struct FormulaBuilder {
 
 /// A utility to build a formula.
 impl FormulaBuilder {
+    pub(crate) fn from_formula(fmla: Formula) -> Self {
+        let stack = vec![fmla.root];
+        let tree = (*fmla.tree).clone();
+        let variables = fmla.variables;
+        FormulaBuilder {
+            stack,
+            variables,
+            tree,
+        }
+    }
+
     /// Every REDUCE pops `var_count` subformula items on the stack,
     /// and pushes one single new item, with the popped subformulas as children
     pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {

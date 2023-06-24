@@ -25,29 +25,10 @@ use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, Sou
 use itertools::Itertools;
 use std::borrow::Borrow;
 use std::borrow::Cow;
+use std::error::Error;
+use std::fmt::Display;
 use std::io;
 use typed_arena::Arena;
-
-/// List of passes that generate diagnostics, for use with the
-/// `Database::diag_notations` filter.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum DiagnosticClass {
-    /// Parse errors, which can be observed from a single statement in
-    /// isolation.
-    Parse,
-    /// Scope errors are mostly inter-statement consistency checks which
-    /// invalidate the logical interpretation of a statement.
-    Scope,
-    /// Verify errors do not invalidate the interpretation of statements, but
-    /// affect only proofs.
-    Verify,
-    /// Grammar errors reflect whether the database is unambiguous
-    Grammar,
-    /// Statement Parsing result
-    StmtParse,
-    /// $t statement parsing result
-    Typesetting,
-}
 
 /// The three kinds of markup supported by `$t` typesetting comments.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -225,7 +206,7 @@ use self::Diagnostic::*;
 
 impl From<io::Error> for Diagnostic {
     fn from(err: io::Error) -> Diagnostic {
-        IoError(format!("{}", err))
+        IoError(format!("{err}"))
     }
 }
 
@@ -356,7 +337,7 @@ impl Diagnostic {
             BadCharacter(pos, byte) => ("Invalid character".into(), vec![(
                 AnnotationType::Error,
                 format!("Invalid character (byte value {byte}); Metamath source files are limited to \
-                        US-ASCII with controls TAB, CR, LF, FF)", byte = byte).into(),
+                        US-ASCII with controls TAB, CR, LF, FF)").into(),
                 stmt,
                 Span::new(*pos, *pos + 1),
             )]),
@@ -743,9 +724,9 @@ impl Diagnostic {
                 stmt.span(),
             )]),
             &MissingMarkupDef([html, alt_html, latex], span) => {
-                let msg = html.then(|| "htmldef").into_iter()
-                    .chain(alt_html.then(|| "althtmldef").into_iter())
-                    .chain(latex.then(|| "latexdef").into_iter());
+                let msg = html.then_some("htmldef").into_iter()
+                    .chain(alt_html.then_some("althtmldef").into_iter())
+                    .chain(latex.then_some("latexdef").into_iter());
                 (format!("Missing {} for token", msg.format(", ")).into(), vec![(
                     AnnotationType::Warning,
                     "This token has not been declared in the $t comment".into(),
@@ -1277,6 +1258,18 @@ impl StmtParseError {
 impl From<StmtParseError> for Diagnostic {
     fn from(err: StmtParseError) -> Self {
         Diagnostic::StmtParseError(err)
+    }
+}
+
+impl Display for StmtParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label())
+    }
+}
+
+impl Error for StmtParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
     }
 }
 

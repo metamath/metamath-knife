@@ -5,19 +5,19 @@
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
-use metamath_knife::diag::{BibError, DiagnosticClass};
+use metamath_knife::diag::BibError;
+use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::SourceInfo;
 use simple_logger::SimpleLogger;
-use std::io;
+use std::fs::File;
+use std::io::{self, BufWriter};
 use std::mem;
 use std::str::FromStr;
 use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
-    u32::from_str(&val)
-        .map(|_| ())
-        .map_err(|e| format!("{}", e))
+    u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
 }
 
 fn main() {
@@ -26,30 +26,32 @@ fn main() {
         (about: "A Metamath database verifier and processing tool")
         (@arg DATABASE: required_unless("TEXT") "Database file to load")
         (@arg TEXT: --text value_names(&["NAME", "TEXT"]) ...
-            "Provide raw database content on the command line")
-        (@arg split: --split "Process files > 1 MiB in multiple segments")
-        (@arg timing: --timing "Print milliseconds after each stage")
-        (@arg verify: -v --verify "Check proof validity")
-        (@arg verify_markup: -m --("verify-markup") "Check comment markup")
-        (@arg outline: -O --outline "Show database outline")
-        (@arg print_typesetting: --("dump-typesetting") "Show typesetting information")
-        (@arg parse_typesetting: -t --("parse-typesetting") "Parse typesetting information")
-        (@arg grammar: -g --grammar "Check grammar")
+            "Provides raw database content on the command line")
+        (@arg split: --split "Processes files > 1 MiB in multiple segments")
+        (@arg timing: --time "Prints milliseconds after each stage")
+        (@arg verify: -v --verify "Checks proof validity")
+        (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
+        (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
+        (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
+        (@arg outline: -O --outline "Shows database outline")
+        (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
+        (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")
+        (@arg grammar: -g --grammar "Checks grammar")
         (@arg parse_stmt: -p --("parse-stmt")
-            "Parse all statements according to the database's grammar")
+            "Parses all statements according to the database's grammar")
         (@arg verify_parse_stmt: --("verify-parse-stmt")
-            "Check that printing parsed statements gives back the original formulas")
-        (@arg print_grammar: -G --("print-grammar") "Print the database's grammar")
-        (@arg print_formula: -F --("print-formula") "Dump the formulas of this database")
+            "Checks that printing parsed statements gives back the original formulas")
+        (@arg dump_grammar: -G --("dump-grammar") "Dumps the database's grammar")
+        (@arg dump_formula: -F --("dump-formula") "Dumps the formulas of this database")
         (@arg debug: --debug
-            "Activate debug logs, including for the grammar building and statement parsing")
-        (@arg trace_recalc: --("trace-recalc") "Print segments as they are recalculated")
-        (@arg free: --free "Explicitly deallocate working memory before exit")
-        (@arg repeat: --repeat "Demonstrate incremental verifier")
+            "Activates debug logs, including for the grammar building and statement parsing")
+        (@arg trace_recalc: --("trace-recalc") "Prints segments as they are recalculated")
+        (@arg free: --free "Explicitly deallocates working memory before exit")
+        (@arg repeat: --repeat "Demonstrates incremental verifier")
         (@arg jobs: -j --jobs +takes_value validator(positive_integer)
             "Number of threads to use for verification")
-        (@arg export: -e --export [LABEL] ... "Output a proof file")
-        (@arg biblio: --biblio [FILE] ... "Supply a bibliography file for verify-markup\n\
+        (@arg export: -e --export [LABEL] ... "Outputs a proof file")
+        (@arg biblio: --biblio [FILE] ... "Supplies a bibliography file for verify-markup\n\
             Can be used one or two times; the second is for exthtml processing")
     );
 
@@ -57,6 +59,12 @@ fn main() {
     let app = clap_app!(@app (app)
         (@arg export_grammar_dot: -E --("export-grammar-dot")
             "Export the database's grammar in Graphviz DOT format for visualization")
+    );
+
+    #[cfg(feature = "xml")]
+    let app = clap_app!(@app (app)
+        (@arg export_graphml_deps: --("export-graphml-deps") [FILE]
+        "Exports all theorem dependencies in the GraphML file format")
     );
 
     let matches = app.get_matches();
@@ -70,8 +78,8 @@ fn main() {
             || matches.is_present("parse_stmt")
             || matches.is_present("verify_parse_stmt")
             || matches.is_present("export_grammar_dot")
-            || matches.is_present("print_grammar")
-            || matches.is_present("print_formula"),
+            || matches.is_present("dump_grammar")
+            || matches.is_present("dump_formula"),
         jobs: usize::from_str(matches.value_of("jobs").unwrap_or("1"))
             .expect("validator should check this"),
     };
@@ -96,22 +104,20 @@ fn main() {
     loop {
         db.parse(start.clone(), data.clone());
 
-        let mut types = vec![DiagnosticClass::Parse, DiagnosticClass::Scope];
-
         if matches.is_present("verify") {
-            types.push(DiagnosticClass::Verify);
+            db.verify_pass();
         }
 
         if matches.is_present("grammar") {
-            types.push(DiagnosticClass::Grammar);
+            db.grammar_pass();
         }
 
         if matches.is_present("parse_stmt") {
-            types.push(DiagnosticClass::StmtParse);
+            db.stmt_parse_pass();
         }
 
         if matches.is_present("parse_typesetting") {
-            types.push(DiagnosticClass::Typesetting);
+            db.typesetting_pass();
         }
 
         if matches.is_present("verify_parse_stmt") {
@@ -119,7 +125,28 @@ fn main() {
             db.verify_parse_stmt();
         }
 
-        let diags = db.diag_notations(&types);
+        let mut diags = db.diag_notations();
+
+        if matches.is_present("discouraged") {
+            File::create(matches.value_of("discouraged").unwrap())
+                .and_then(|file| db.write_discouraged(&mut BufWriter::new(file)))
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        #[cfg(feature = "xml")]
+        if matches.is_present("export_graphml_deps") {
+            File::create(matches.value_of("export_graphml_deps").unwrap())
+                .map_err(|err| err.into())
+                .and_then(|file| db.export_graphml_deps(&mut BufWriter::new(file)))
+                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
+        }
+
+        if matches.is_present("axiom_use") {
+            File::create(matches.value_of("axiom_use").unwrap())
+                .and_then(|file| db.write_axiom_use(&mut BufWriter::new(file)))
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
         let mut count = db
             .render_diags(diags, |snippet| {
                 println!("{}", DisplayList::from(snippet));
@@ -160,10 +187,11 @@ fn main() {
                 .len();
         }
 
-        println!("{} diagnostics issued.", count);
+        println!("{count} diagnostics issued.");
 
-        if matches.is_present("print_grammar") {
-            db.print_grammar();
+        if matches.is_present("dump_grammar") {
+            db.grammar_pass();
+            db.dump_grammar();
         }
 
         #[cfg(feature = "dot")]
@@ -171,8 +199,9 @@ fn main() {
             db.export_grammar_dot();
         }
 
-        if matches.is_present("print_formula") {
-            db.print_formula();
+        if matches.is_present("dump_formula") {
+            db.stmt_parse_pass();
+            db.dump_formula();
         }
 
         if matches.is_present("outline") {
@@ -186,6 +215,7 @@ fn main() {
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
+            db.scope_pass();
             for file in exps {
                 db.export(&file);
             }

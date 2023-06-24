@@ -158,7 +158,7 @@ fn map_var<P: ProofBuilder>(state: &mut VerifyState<'_, P>, token: Atom) -> usiz
 // the initial hypotheses are accessed directly from the initial extended frame
 // to avoid having to look up their pseudo-frames by name; also, $e statements
 // no longer have pseudo-frames, so this is the only way to prepare an $e
-fn prepare_hypothesis<'a, P: ProofBuilder>(state: &mut VerifyState<'_, P>, hyp: &'a scopeck::Hyp) {
+fn prepare_hypothesis<P: ProofBuilder>(state: &mut VerifyState<'_, P>, hyp: &scopeck::Hyp) {
     let mut vars = Bitset::new();
     let tos = state.stack_buffer.len();
     match *hyp {
@@ -246,6 +246,7 @@ struct StepParse<'a> {
 /// Used for named step references.  For NORMAL proofs this is immediately
 /// before `execute_step`, but for COMPRESSED proofs all used steps are prepared
 /// ahead of time, and assigned sequential numbers for later use.
+#[allow(clippy::manual_let_else)] // false positive, clippy#10296
 fn prepare_step<'a, P: ProofBuilder>(
     state: &mut VerifyState<'_, P>,
     label: TokenPtr<'a>,
@@ -259,15 +260,12 @@ fn prepare_step<'a, P: ProofBuilder>(
     let frame = if let Some(fp) = state.scoper.get(label) {
         fp
     } else {
-        let label_span = match label_span {
-            None => {
-                try_assert!(
-                    prepare_named_hyp(state, label),
-                    Diagnostic::StepMissing(label.into())
-                );
-                return Ok(out);
-            }
-            Some(l) => l,
+        let Some(label_span) = label_span else {
+            try_assert!(
+                prepare_named_hyp(state, label),
+                Diagnostic::StepMissing(label.into())
+            );
+            return Ok(out);
         };
 
         // The above handles the "fast path", for normal and compressed proofs.
@@ -620,7 +618,7 @@ fn execute_step<P: ProofBuilder>(
 fn finalize_step<P: ProofBuilder>(state: &mut VerifyState<'_, P>) -> Result<P::Item> {
     // if we get here, it's a valid proof, but was it the _right_ valid proof?
     try_assert!(state.stack.len() <= 1, Diagnostic::ProofExcessEnd);
-    let &(ref data, ref tos) = state.stack.last().ok_or(Diagnostic::ProofNoSteps)?;
+    let (data, tos) = state.stack.last().ok_or(Diagnostic::ProofNoSteps)?;
 
     try_assert!(
         tos.code == state.cur_frame.target.typecode,
@@ -639,7 +637,7 @@ fn finalize_step<P: ProofBuilder>(state: &mut VerifyState<'_, P>) -> Result<P::I
 }
 
 fn save_step<P: ProofBuilder>(state: &mut VerifyState<'_, P>) {
-    let &(ref data, ref top) = state
+    let (data, top) = state
         .stack
         .last()
         .expect("can_save should prevent getting here");
@@ -711,7 +709,7 @@ fn verify_proof<'a, P: ProofBuilder>(
                 } else if (b'U'..=b'Y').contains(&ch) {
                     k = k * 5 + 1 + (ch - b'U') as usize;
                     try_assert!(
-                        k < (u32::max_value() as usize / 20) - 1,
+                        k < (u32::MAX as usize / 20) - 1,
                         Diagnostic::ProofMalformedVarint
                     );
                     can_save = false;

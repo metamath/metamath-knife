@@ -68,7 +68,7 @@ impl Bitset {
 
     fn tail_mut(&mut self) -> &mut Vec<usize> {
         if self.tail.is_none() {
-            self.tail = Some(Box::new(Vec::new()));
+            self.tail = Some(Box::default());
         }
         self.tail.as_mut().unwrap()
     }
