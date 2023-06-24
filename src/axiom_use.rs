@@ -41,7 +41,7 @@ impl<'a> UsagePass<'a> {
         use CommandToken::*;
         let buf = &**sref.buffer;
         match args {
-            [Keyword(cmd), label, Keyword(avoids), ..]
+            [Keyword(cmd), label, Keyword(avoids), axioms @ ..]
                 if cmd.as_ref(buf) == b"usage" && avoids.as_ref(buf) == b"avoids" =>
             {
                 let stmt = label.value(buf);
@@ -50,7 +50,7 @@ impl<'a> UsagePass<'a> {
                     .get(stmt)
                     .ok_or_else(|| vec![Diagnostic::UnknownLabel(label.full_span())])?;
                 let mut diags = vec![];
-                for cmd in &args[3..] {
+                for cmd in axioms {
                     let axiom = cmd.value(buf);
                     if let Some(index) = self.axioms.iter().position(|&x| x == axiom) {
                         if usage.has_bit(index) {
@@ -61,8 +61,6 @@ impl<'a> UsagePass<'a> {
                                 axiom.into(),
                             ));
                         }
-                    } else {
-                        diags.push(Diagnostic::UnknownLabel(cmd.full_span()));
                     }
                 }
                 Err(diags)
@@ -79,7 +77,6 @@ impl<'a> UsagePass<'a> {
             for stmt in sref.range(..) {
                 match stmt.statement_type() {
                     StatementType::AdditionalInfoComment => {
-                        eprintln!("$j!");
                         while let Some(&(_, (_, ref args))) =
                             j_commands.peeking_next(|i| i.0 == stmt.index)
                         {
@@ -103,8 +100,12 @@ impl<'a> UsagePass<'a> {
                             if let Some(usage2) = self.axiom_use_map.get(tk) {
                                 usage |= usage2
                             }
+                            if i == stmt.proof_len() {
+                                break;
+                            }
                         }
                         self.axiom_use_map.insert(label, usage);
+                        eprintln!("Done");
                     }
                     StatementType::Axiom => {
                         let label = stmt.label();
