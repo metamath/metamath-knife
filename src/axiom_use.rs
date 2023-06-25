@@ -105,7 +105,6 @@ impl<'a> UsagePass<'a> {
                             }
                         }
                         self.axiom_use_map.insert(label, usage);
-                        eprintln!("Done");
                     }
                     StatementType::Axiom => {
                         let label = stmt.label();
