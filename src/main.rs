@@ -5,7 +5,7 @@
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
-use metamath_knife::diag::{BibError, DiagnosticClass};
+use metamath_knife::diag::BibError;
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::SourceInfo;
@@ -32,6 +32,7 @@ fn main() {
         (@arg verify: -v --verify "Checks proof validity")
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
+        (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
         (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")
@@ -58,6 +59,12 @@ fn main() {
     let app = clap_app!(@app (app)
         (@arg export_grammar_dot: -E --("export-grammar-dot")
             "Export the database's grammar in Graphviz DOT format for visualization")
+    );
+
+    #[cfg(feature = "xml")]
+    let app = clap_app!(@app (app)
+        (@arg export_graphml_deps: --("export-graphml-deps") [FILE]
+        "Exports all theorem dependencies in the GraphML file format")
     );
 
     let matches = app.get_matches();
@@ -97,26 +104,20 @@ fn main() {
     loop {
         db.parse(start.clone(), data.clone());
 
-        let mut types = vec![DiagnosticClass::Parse];
-
-        if !matches.is_present("discouraged") {
-            types.push(DiagnosticClass::Scope);
-        }
-
         if matches.is_present("verify") {
-            types.push(DiagnosticClass::Verify);
+            db.verify_pass();
         }
 
         if matches.is_present("grammar") {
-            types.push(DiagnosticClass::Grammar);
+            db.grammar_pass();
         }
 
         if matches.is_present("parse_stmt") {
-            types.push(DiagnosticClass::StmtParse);
+            db.stmt_parse_pass();
         }
 
         if matches.is_present("parse_typesetting") {
-            types.push(DiagnosticClass::Typesetting);
+            db.typesetting_pass();
         }
 
         if matches.is_present("verify_parse_stmt") {
@@ -124,11 +125,25 @@ fn main() {
             db.verify_parse_stmt();
         }
 
-        let mut diags = db.diag_notations(&types);
+        let mut diags = db.diag_notations();
 
         if matches.is_present("discouraged") {
             File::create(matches.value_of("discouraged").unwrap())
                 .and_then(|file| db.write_discouraged(&mut BufWriter::new(file)))
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        #[cfg(feature = "xml")]
+        if matches.is_present("export_graphml_deps") {
+            File::create(matches.value_of("export_graphml_deps").unwrap())
+                .map_err(|err| err.into())
+                .and_then(|file| db.export_graphml_deps(&mut BufWriter::new(file)))
+                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
+        }
+
+        if matches.is_present("axiom_use") {
+            File::create(matches.value_of("axiom_use").unwrap())
+                .and_then(|file| db.write_axiom_use(&mut BufWriter::new(file)))
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
@@ -200,6 +215,7 @@ fn main() {
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {
+            db.scope_pass();
             for file in exps {
                 db.export(&file);
             }

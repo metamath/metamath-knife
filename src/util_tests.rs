@@ -2,6 +2,7 @@ use crate::util;
 use std::sync::Arc;
 
 #[test]
+#[allow(clippy::redundant_clone)]
 fn test_ptr_eq() {
     let a1 = Arc::new("Hello, world".to_string());
     let a2 = a1.clone();
@@ -39,6 +40,7 @@ fn test_copy_portion() {
 
 #[test]
 #[should_panic(expected = "out of range")]
+#[allow(clippy::collection_is_never_read)]
 fn test_copy_portion_oob() {
     let mut s = Vec::from(b"Hello world" as &[u8]);
     s.extend_from_within(11..12);

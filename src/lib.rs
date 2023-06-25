@@ -35,6 +35,7 @@
     clippy::enum_glob_use,
     clippy::if_not_else,
     clippy::inline_always,
+    clippy::let_underscore_untyped,
     clippy::missing_errors_doc,
     clippy::module_name_repetitions,
     clippy::needless_range_loop,
@@ -57,6 +58,7 @@ mod tree;
 mod util;
 
 pub mod commands;
+pub mod axiom_use;
 pub mod comment_parser;
 pub mod database;
 pub mod diag;
@@ -74,6 +76,9 @@ pub mod statement;
 pub mod typesetting;
 pub mod verify;
 pub mod verify_markup;
+
+#[cfg(feature = "xml")]
+pub mod export_deps;
 
 #[cfg(test)]
 mod comment_parser_tests;
