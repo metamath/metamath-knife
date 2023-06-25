@@ -57,8 +57,8 @@ mod segment_set;
 mod tree;
 mod util;
 
-pub mod commands;
 pub mod axiom_use;
+pub mod commands;
 pub mod comment_parser;
 pub mod database;
 pub mod diag;
