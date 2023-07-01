@@ -198,6 +198,7 @@ pub enum Diagnostic {
     UnknownKeyword(Span),
     UnknownTypesettingCommand(Span),
     UnmatchedCloseGroup,
+    UsageViolation(Span, Token, Token),
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
     WindowsReservedLabel(Span),
@@ -1133,6 +1134,12 @@ impl Diagnostic {
                 "This $} does not match any open ${".into(),
                 stmt,
                 stmt.span(),
+            )]),
+            UsageViolation(span, label, axiom) => ("Usage violation".into(), vec![(
+                AnnotationType::Warning,
+                format!("Statement {label} uses axiom {axiom} despite $j declaring it avoids its usage.", label=as_str(label), axiom=as_str(axiom)).into(),
+                stmt,
+                *span,
             )]),
             VariableMissingFloat(index) => ("Variable missing float".into(), vec![(
                 AnnotationType::Error,
