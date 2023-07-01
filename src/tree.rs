@@ -100,21 +100,6 @@ impl<TreeItem> Tree<TreeItem> {
     pub(crate) fn has_children(&self, node_id: NodeId) -> bool {
         self.node(node_id).first_child != 0
     }
-
-    /// Debug only, dumps the internal structure of the tree.
-    pub(crate) fn dump<'a, D>(&'a self, display: D)
-    where
-        D: Fn(&'a TreeItem) -> &str,
-    {
-        for node in &self.nodes {
-            println!(
-                "  - {:?} fc={}, ns={}",
-                display(&node.item),
-                node.first_child,
-                node.next_sibling
-            );
-        }
-    }
 }
 
 impl<TreeItem> Index<NodeId> for Tree<TreeItem> {

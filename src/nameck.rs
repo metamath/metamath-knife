@@ -329,6 +329,39 @@ impl Nameset {
             .expect("please only use get_atom for local $v")
     }
 
+    /// Returns an atom uniquely identifiable by the given `u32`,
+    /// and guaranteed to be different of any "regular" atom
+    /// previously allocated during parsing.
+    #[inline]
+    #[must_use]
+    pub fn create_extra_atom(&self, id: u32) -> Option<Atom> {
+        let intern = u32::MAX.saturating_sub(id);
+        if intern > self.atom_table.table.len() as u32 {
+            Some(Atom(intern))
+        } else {
+            None
+        }
+    }
+
+    /// Retrieves the unique `u32` identifier given when creating an "extra" atom,
+    /// typically for work variables
+    #[inline]
+    #[must_use]
+    pub fn extra_atom_id(&self, atom: Atom) -> Option<u32> {
+        if self.is_extra_atom(atom) {
+            Some(u32::MAX.saturating_sub(atom.0))
+        } else {
+            None
+        }
+    }
+
+    /// Tests whether an atom has been allocated using `create_extra_atom`.
+    #[inline]
+    #[must_use]
+    pub fn is_extra_atom(&self, atom: Atom) -> bool {
+        atom.0 > self.atom_table.table.len() as u32
+    }
+
     /// Map atoms back to names.
     ///
     /// Since atoms never change over the lifetime of a database container, it

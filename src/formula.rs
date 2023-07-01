@@ -23,6 +23,7 @@ use crate::nameck::Atom;
 use crate::nameck::Nameset;
 use crate::scopeck::Hyp;
 use crate::segment_set::SegmentSet;
+use crate::statement::as_string;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
 use crate::tree::NodeId;
@@ -33,6 +34,7 @@ use crate::util::HashMap;
 use crate::verify::ProofBuilder;
 use crate::Database;
 use core::ops::Index;
+use std::borrow::Cow;
 use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -123,11 +125,83 @@ impl<'a> IntoIterator for &'a Substitutions {
     }
 }
 
-/// A provider for work variables
-/// Work variables are typically used when a new variable appears in an unification, which cannot be immediately assigned.
-pub trait WorkVariableProvider<E> {
+/// An interface for resolving symbol and label names into identifiers, and vice-versa,
+/// as well as a provider for work variables
+///
+/// Work variables are typically used when a new variable appears in an unification,
+/// which cannot be immediately assigned.
+pub trait Resolver: Debug {
+    /// Gets the symbol with the given name
+    fn get_symbol(&self, name: &[u8]) -> Option<Symbol>;
+
+    /// Gets the token for the given symbol
+    fn symbol_token(&self, symbol: Symbol) -> Cow<'_, [u8]>;
+
+    /// Gets the name of the given symbol
+    fn symbol_name(&self, symbol: Symbol) -> Cow<'_, str> {
+        match self.symbol_token(symbol) {
+            Cow::Borrowed(token) => as_str(token).into(),
+            Cow::Owned(token) => as_string(token).into(),
+        }
+    }
+
+    /// Gets the label with the given name
+    fn get_label(&self, name: &[u8]) -> Option<Label>;
+
+    /// Gets the name of the given label
+    fn label_name(&self, label: Label) -> Cow<'_, str>;
+
+    /// Gets the label representing a virtual "float" statement for the given variable symbol,
+    /// As well as the corresponding type code
+    fn label_for_symbol(&self, symbol: Symbol) -> (Label, TypeCode);
+
+    /// Gets the symbol for a float statement
+    /// This is only called for work variable labels
+    fn symbol_for_label(&self, label: Label) -> Symbol;
+
     /// Provide a new work variable for the given typecode
-    fn new_work_variable(&mut self, typecode: TypeCode) -> Result<Label, E>;
+    fn new_work_variable(&mut self, typecode: TypeCode) -> Option<Label>;
+
+    /// Assess whether the given symbol is a work variable.
+    fn is_work_variable(&self, symbol: Symbol) -> bool;
+}
+
+impl Resolver for Nameset {
+    fn get_symbol(&self, name: &[u8]) -> Option<Symbol> {
+        Some(self.lookup_symbol(name)?.atom)
+    }
+
+    fn symbol_token(&self, symbol: Symbol) -> Cow<'_, [u8]> {
+        self.atom_name(symbol).into()
+    }
+
+    fn get_label(&self, name: &[u8]) -> Option<Label> {
+        Some(self.lookup_label(name)?.atom)
+    }
+
+    fn label_name(&self, label: Label) -> Cow<'_, str> {
+        as_str(self.atom_name(label)).into()
+    }
+
+    fn label_for_symbol(&self, symbol: Symbol) -> (Label, TypeCode) {
+        let lookup = self.lookup_float_by_atom(symbol);
+        (lookup.statement_atom, lookup.typecode_atom)
+    }
+
+    fn symbol_for_label(&self, _: Label) -> Symbol {
+        panic!("Label in regular formulas shall only be regular labels");
+    }
+
+    fn new_work_variable(&mut self, _typecode: TypeCode) -> Option<Label> {
+        // Work variables are not implemented in Nameset,
+        // callers must implement their own resolvers to have this functionality.
+        None
+    }
+
+    fn is_work_variable(&self, _symbol: Symbol) -> bool {
+        // `Nameset` never provides work variables
+        false
+    }
 }
 
 /// A [`Substitutions`] reference in the context of a [`Database`].
@@ -199,14 +273,23 @@ impl Formula {
     /// Augment a formula with a database reference, to produce a [`FormulaRef`].
     /// The resulting object implements [`Display`], [`Debug`], and [`IntoIterator`].
     #[must_use]
-    pub const fn as_ref<'a>(&'a self, db: &'a Database) -> FormulaRef<'a> {
-        FormulaRef { db, formula: self }
+    pub fn as_ref<'a>(&'a self, db: &'a Database) -> FormulaRef<'a> {
+        FormulaRef {
+            db,
+            rslv: db.name_result() as &Nameset,
+            formula: self,
+        }
     }
 
-    /// Debug only, dumps the internal structure of the formula.
-    pub fn dump(&self, nset: &Nameset) {
-        println!("  Root: {}", self.root);
-        self.tree.dump(|atom| as_str(nset.atom_name(*atom)));
+    /// Augment a formula with a database reference, to produce a [`FormulaRef`].
+    /// The resulting object implements [`Display`], [`Debug`], and [`IntoIterator`].
+    #[must_use]
+    pub fn with_resolver<'a>(&'a self, db: &'a Database, rslv: &'a dyn Resolver) -> FormulaRef<'a> {
+        FormulaRef {
+            db,
+            rslv,
+            formula: self,
+        }
     }
 
     /// Returns the typecode of this formula
@@ -457,6 +540,7 @@ impl<'a> Iterator for LabelIter<'a> {
 pub struct FormulaRef<'a> {
     db: &'a Database,
     formula: &'a Formula,
+    rslv: &'a dyn Resolver,
 }
 
 impl<'a> std::ops::Deref for FormulaRef<'a> {
@@ -477,6 +561,7 @@ impl<'a> FormulaRef<'a> {
             stack: vec![],
             sset: self.db.parse_result(),
             nset: self.db.name_result(),
+            rslv: self.rslv,
         };
         f.step_into(self.root);
         f
@@ -529,21 +614,21 @@ impl<'a> FormulaRef<'a> {
 
     /// Handles the variables present in the formula but not in the substitution list
     /// The function `f` provided can modify on the fly the substitution list, adding any missing one.
-    pub fn complete_substitutions<E>(
+    pub fn complete_substitutions(
         &self,
         substitutions: &mut Substitutions,
-        wvp: &mut impl WorkVariableProvider<E>,
-    ) -> Result<(), E> {
+        wvp: &mut impl Resolver,
+    ) -> Option<()> {
         self.sub_complete_substitutions(self.formula.root, substitutions, wvp)
     }
 
     /// Handles the variables present in the sub-formula but not in the substitution list
-    fn sub_complete_substitutions<E>(
+    fn sub_complete_substitutions(
         &self,
         node_id: NodeId,
         substitutions: &mut Substitutions,
-        wvp: &mut impl WorkVariableProvider<E>,
-    ) -> Result<(), E> {
+        wvp: &mut impl Resolver,
+    ) -> Option<()> {
         if self.is_variable(node_id) {
             let label = &self.tree[node_id];
             if substitutions.0.get(label).is_none() {
@@ -556,7 +641,7 @@ impl<'a> FormulaRef<'a> {
                 self.sub_complete_substitutions(child_node_id, substitutions, wvp)?;
             }
         }
-        Ok(())
+        Some(())
     }
 
     /// Appends this formula to the provided stack buffer.
@@ -659,42 +744,57 @@ impl<'a> Debug for SubFormulaRef<'a> {
         for s_id in self.f_ref.formula.tree.children_iter(self.node_id) {
             dt.field(&SubFormulaRef {
                 node_id: s_id,
-                f_ref: FormulaRef {
-                    db: self.f_ref.db,
-                    formula: self.f_ref.formula,
-                },
+                f_ref: self.f_ref.formula.as_ref(self.f_ref.db),
             });
         }
         dt.finish()
     }
 }
 
+/// An item on the internal stack of the `Flatten` iterator
+#[allow(variant_size_differences)]
+#[derive(Debug)]
+enum FlattenStackItem<'a> {
+    WorkVariable(Symbol),
+    SubFormula(TokenIter<'a>, Option<SiblingIter<'a, Label>>),
+}
+
 /// An iterator going through each symbol in a formula
 #[derive(Debug)]
 pub struct Flatten<'a> {
     formula: &'a Formula,
-    stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Label>>)>,
+    stack: Vec<FlattenStackItem<'a>>,
     sset: &'a SegmentSet,
     nset: &'a Nameset,
+    rslv: &'a dyn Resolver,
 }
 
 impl<'a> Flatten<'a> {
     fn step_into(&mut self, node_id: NodeId) {
         let label = self.formula.tree[node_id];
-        let sref = self.sset.statement(
-            self.nset
-                .lookup_label(self.nset.atom_name(label))
-                .unwrap()
-                .address,
-        );
-        let mut math_iter = sref.math_iter();
-        math_iter.next(); // Always skip the typecode token.
-        if self.formula.tree.has_children(node_id) {
-            self.stack
-                .push((math_iter, Some(self.formula.tree.children_iter(node_id))));
+        if self.rslv.is_work_variable(label) {
+            self.stack.push(FlattenStackItem::WorkVariable(
+                self.rslv.symbol_for_label(label),
+            ));
         } else {
-            self.stack.push((math_iter, None));
-        };
+            let sref = self.sset.statement(
+                self.nset
+                    .lookup_label(self.nset.atom_name(label))
+                    .unwrap()
+                    .address,
+            );
+            let mut math_iter = sref.math_iter();
+            math_iter.next(); // Always skip the typecode token.
+            if self.formula.tree.has_children(node_id) {
+                self.stack.push(FlattenStackItem::SubFormula(
+                    math_iter,
+                    Some(self.formula.tree.children_iter(node_id)),
+                ));
+            } else {
+                self.stack
+                    .push(FlattenStackItem::SubFormula(math_iter, None));
+            }
+        }
     }
 }
 
@@ -706,26 +806,36 @@ impl<'a> Iterator for Flatten<'a> {
             return None;
         }
         let stack_end = self.stack.len() - 1;
-        let (ref mut math_iter, ref mut sibling_iter) = self.stack[stack_end];
-        if let Some(token) = math_iter.next() {
-            // Continue with next token of this syntax
-            let symbol = self.nset.lookup_symbol(token.slice).unwrap();
-            match (sibling_iter, symbol.stype) {
-                (_, SymbolType::Constant) | (None, SymbolType::Variable) => Some(symbol.atom),
-                (Some(ref mut iter), SymbolType::Variable) => {
-                    // Variable : push into the next child
-                    if let Some(next_child_id) = iter.next() {
-                        self.step_into(next_child_id);
-                        self.next()
-                    } else {
-                        panic!("Empty formula!");
+        #[allow(clippy::match_on_vec_items)]
+        match self.stack[stack_end] {
+            FlattenStackItem::SubFormula(ref mut math_iter, ref mut sibling_iter) => {
+                if let Some(token) = math_iter.next() {
+                    // Continue with next token of this syntax
+                    let symbol = self.nset.lookup_symbol(token.slice).unwrap();
+                    match (sibling_iter, symbol.stype) {
+                        (_, SymbolType::Constant) | (None, SymbolType::Variable) => {
+                            Some(symbol.atom)
+                        }
+                        (Some(ref mut iter), SymbolType::Variable) => {
+                            // Variable : push into the next child
+                            if let Some(next_child_id) = iter.next() {
+                                self.step_into(next_child_id);
+                                self.next()
+                            } else {
+                                panic!("Empty formula!");
+                            }
+                        }
                     }
+                } else {
+                    // End of this formula, pop to the parent one
+                    self.stack.pop();
+                    self.next()
                 }
             }
-        } else {
-            // End of this formula, pop to the parent one
-            self.stack.pop();
-            self.next()
+            FlattenStackItem::WorkVariable(symbol) => {
+                self.stack.pop();
+                Some(symbol)
+            }
         }
     }
 
@@ -737,7 +847,7 @@ impl<'a> Display for FormulaRef<'a> {
         let nset = &**self.db.name_result();
         write!(f, "{}", as_str(nset.atom_name(self.typecode)))?;
         for symbol in *self {
-            write!(f, " {}", as_str(nset.atom_name(symbol)))?;
+            write!(f, " {}", self.rslv.symbol_name(symbol))?;
         }
         Ok(())
     }
