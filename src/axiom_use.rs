@@ -44,14 +44,14 @@ impl<'a> UsagePass<'a> {
             [Keyword(cmd), label, Keyword(avoids), axioms @ ..]
                 if cmd.as_ref(buf) == b"usage" && avoids.as_ref(buf) == b"avoids" =>
             {
-                let stmt = label.value(buf);
+                let stmt = &*label.value(buf);
                 let usage = self
                     .axiom_use_map
                     .get(stmt)
                     .ok_or_else(|| vec![Diagnostic::UnknownLabel(label.full_span())])?;
                 let mut diags = vec![];
                 for cmd in axioms {
-                    let axiom = cmd.value(buf);
+                    let axiom = &*cmd.value(buf);
                     if let Some(index) = self.axioms.iter().position(|&x| x == axiom) {
                         if usage.has_bit(index) {
                             // TODO possibly research the usage "path" leading to this error.

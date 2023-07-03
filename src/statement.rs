@@ -31,7 +31,7 @@
 //! `SegmentId` and `SegmentRef` cover the same use cases for segments, although
 //! it makes no sense to have a segment-local segment reference.
 
-use std::ops::Deref;
+use std::{borrow::Cow, ops::Deref};
 
 use crate::{
     comment_parser::{CommentParser, Discouragements, ParentheticalIter},
@@ -301,6 +301,26 @@ pub struct HeadingDef {
     pub level: HeadingLevel,
 }
 
+#[inline]
+pub(crate) fn unescape(
+    mut buf: &[u8],
+    out: &mut Vec<u8>,
+    is_escape: impl FnOnce(u8) -> bool + Copy,
+) {
+    while let Some(n) = buf.iter().position(|&c| is_escape(c)) {
+        out.extend_from_slice(&buf[..=n]);
+        if buf.get(n + 1) == Some(&buf[n]) {
+            buf = &buf[n + 2..];
+        } else {
+            // this will not normally happen, but in some cases unescaped escapes
+            // are left uninterpreted because they appear in invalid position,
+            // and in that case they should be left as is
+            buf = &buf[n + 1..];
+        }
+    }
+    out.extend_from_slice(buf);
+}
+
 /// An individual symbol in a command, either a string or other keyword.
 #[derive(Clone, Copy, Debug)]
 pub enum CommandToken {
@@ -313,9 +333,10 @@ pub enum CommandToken {
 impl CommandToken {
     /// Get the string corresponding to this token.
     #[must_use]
-    pub fn value(self, buf: &[u8]) -> TokenPtr<'_> {
+    pub fn value(self, buf: &[u8]) -> Cow<'_, [u8]> {
         match self {
-            Self::Keyword(s) | Self::String(s) => s.as_ref(buf),
+            Self::Keyword(s) => Cow::Borrowed(s.as_ref(buf)),
+            Self::String(s) => Self::unescape_string(buf, s),
         }
     }
 
@@ -325,6 +346,26 @@ impl CommandToken {
         match self {
             Self::Keyword(s) => s,
             Self::String(s) => Span::new2(s.start - 1, s.end + 1),
+        }
+    }
+
+    /// Remove doubled quote escapes from a [`CommandToken::String`]`(span)`.
+    pub fn append_unescaped_string(buf: &[u8], span: Span, out: &mut Vec<u8>) {
+        let quote = buf[(span.start - 1) as usize];
+        unescape(span.as_ref(buf), out, |c| quote == c)
+    }
+
+    /// Remove doubled quote escapes from a [`CommandToken::String`]`(span)`.
+    #[must_use]
+    pub fn unescape_string(buf: &[u8], span: Span) -> Cow<'_, [u8]> {
+        let quote = buf[(span.start - 1) as usize];
+        let buf = span.as_ref(buf);
+        if buf.contains(&quote) {
+            let mut out = vec![];
+            unescape(span.as_ref(buf), &mut out, |c| quote == c);
+            out.into()
+        } else {
+            Cow::Borrowed(buf)
         }
     }
 }
