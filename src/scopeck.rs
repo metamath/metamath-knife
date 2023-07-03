@@ -30,6 +30,7 @@
 
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
+use crate::formula::TypeCode;
 use crate::nameck::{Atom, NameReader, NameUsage, Nameset};
 use crate::segment::{Comparer, Segment, SegmentOrder, SegmentRef};
 use crate::segment_set::SegmentSet;
@@ -115,7 +116,7 @@ pub struct ExprFragment {
 #[derive(Clone, Default, Debug)]
 pub struct VerifyExpr {
     /// Atom representation of the first constant symbol in the expression.
-    pub typecode: Atom,
+    pub typecode: TypeCode,
     /// Constant pool reference for the part of the expression after the last
     /// variable.
     pub rump: Range<usize>,
@@ -142,7 +143,7 @@ pub enum Hyp {
     Essential(StatementAddress, VerifyExpr),
     /// A `$f` hypothesis, which is checked against the typecode on the stack
     /// and then used to augment the subsitution.
-    Floating(StatementAddress, VarIndex, Atom),
+    Floating(StatementAddress, VarIndex, TypeCode),
 }
 
 impl Hyp {
@@ -156,7 +157,7 @@ impl Hyp {
 
     /// Returns the typecode expected on the stack for this hypothesis.
     #[must_use]
-    pub const fn typecode(&self) -> Atom {
+    pub const fn typecode(&self) -> TypeCode {
         match *self {
             Hyp::Essential(_, ref expr) => expr.typecode,
             Hyp::Floating(_, _, typecode) => typecode,

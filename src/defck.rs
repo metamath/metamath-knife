@@ -29,25 +29,34 @@ use crate::{Database, Label, Span, StatementRef, StatementType};
 #[derive(Debug, Default)]
 pub struct DefResult {
     equalities_by_tc: HashMap<TypeCode, (Label, GlobalSpan)>,
-    primitives: Vec<Label>,
+    bound_tc: HashSet<TypeCode>,
     justifications: HashMap<Label, (Label, GlobalSpan)>,
     definitions: HashSet<Label>,
     /// Maps syntax axioms to the corresponding definitions
-    def_map: HashMap<Label, Label>,
+    def_map: HashMap<Label, (Option<Label>, GlobalSpan)>,
     diagnostics: Vec<(StatementAddress, Diagnostic)>,
+    binding_structure: HashMap<Label, Vec<Bitset>>,
 }
 
 impl DefResult {
     /// Returns the definition axiom for the given syntax axiom.
+    /// Returns `Some(None)` if it is a primitive syntax.
     #[must_use]
-    pub fn definition_for(&self, syntax_axiom: Label) -> Option<Label> {
-        self.def_map.get(&syntax_axiom).copied()
+    pub fn definition_for(&self, syntax_axiom: Label) -> Option<Option<Label>> {
+        Some(self.def_map.get(&syntax_axiom)?.0)
     }
 
     /// Returns the list of errors that were generated during the definition check pass.
     #[must_use]
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
         self.diagnostics.clone()
+    }
+
+    /// Returns true if the given typecode has been marked as 'bound', meaning that
+    /// it can participate in binding syntaxes.
+    #[must_use]
+    pub fn is_bound_tc(&self, tc: TypeCode) -> bool {
+        self.bound_tc.contains(&tc)
     }
 }
 
@@ -152,10 +161,24 @@ fn match_justification<'a>(
     }
 }
 
-// fn get_free_vars(_body: SubFormulaRef<'_>) -> HashSet<Label> {
-//     // TODO
-//     HashSet::default()
-// }
+fn find_var(
+    nset: &Nameset,
+    var: Span,
+    buf: &[u8],
+    frame: &crate::scopeck::Frame,
+) -> Result<usize, Diagnostic> {
+    nset.lookup_symbol(var.as_ref(buf))
+        .and_then(|lookup| frame.var_list.iter().position(|&x| x == lookup.atom))
+        .ok_or_else(|| Diagnostic::UndefinedVariable(var))
+}
+
+fn get_free_vars(body: SubFormulaRef<'_>, bs: &mut Bitset, to_index: &HashMap<Label, usize>) {
+    if body.is_variable() {
+        bs.set_bit(to_index[body.label()])
+    } else {
+        // TODO
+    }
+}
 
 struct DefinitionPass<'a> {
     db: &'a Database,
@@ -175,6 +198,9 @@ struct DefinitionPass<'a> {
     /// if it is not a registered equality but we have already reported this error
     /// and are suppressing further errors about it.
     equalities: HashMap<Label, bool>,
+    /// This is like `result.binding_structure` but only includes cases that we
+    /// have proofs of.
+    proved_binding_structure: HashMap<Label, Vec<Bitset>>,
     result: &'a mut DefResult,
 }
 
@@ -199,19 +225,54 @@ impl DefinitionPass<'_> {
     }
 
     fn check_syntax_axiom(&mut self, stmt: &StatementRef<'_>) -> Result<(), Diagnostic> {
-        let Some(frame) = self.scope.get(stmt.label()) else {
-            return Ok(());
-        };
-        if frame
+        let Some(frame) = self.scope.get(stmt.label()) else { return Ok(()) };
+        if !(frame
             .hypotheses
             .iter()
             .all(|hyp| matches!(hyp, Hyp::Floating(..)))
             && frame.mandatory_dv.is_empty()
             && frame.target.tail.iter().map(|frag| frag.var).all_unique()
+            && !self.result.is_bound_tc(frame.target.typecode))
         {
-            Ok(())
-        } else {
-            Err(Diagnostic::DefCkMalformedSyntaxAxiom)
+            return Err(Diagnostic::DefCkMalformedSyntaxAxiom);
+        }
+        let atom = self.nset.lookup_label(stmt.label()).unwrap().atom;
+        let mut bss = vec![Bitset::default(); frame.hypotheses.len()];
+        self.proved_binding_structure.insert(atom, bss.clone());
+        let tcs = frame.hypotheses.iter().map(|hyp| {
+            let Hyp::Floating(_, i, tc) = *hyp else { unreachable!() };
+            (i, tc)
+        });
+        for (i, tc) in tcs.clone() {
+            if self.result.is_bound_tc(tc) {
+                for (j, tc2) in tcs.clone() {
+                    if !self.result.is_bound_tc(tc2) {
+                        bss[i].set_bit(j)
+                    }
+                }
+            }
+        }
+        self.result.binding_structure.insert(atom, bss);
+        Ok(())
+    }
+
+    fn add_definition(
+        &mut self,
+        syntax_axiom: Label,
+        def: Option<Label>,
+        span: GlobalSpan,
+    ) -> Result<(), Diagnostic> {
+        let name = self.nset.atom_name(syntax_axiom);
+        match self.result.def_map.entry(syntax_axiom) {
+            Entry::Occupied(e) => Err(Diagnostic::DefCkDuplicateDefinition(
+                name.into(),
+                e.get().1,
+                span.1,
+            )),
+            Entry::Vacant(e) => {
+                e.insert((def, span));
+                Ok(())
+            }
         }
     }
 
@@ -226,9 +287,17 @@ impl DefinitionPass<'_> {
     ) -> Result<(), Diagnostic> {
         use CommandToken::*;
         let buf = &**sref.buffer;
-        match args {
-            [Keyword(cmd), label, Keyword(from), refl, symm, trans]
-                if cmd.as_ref(buf) == b"equality" && from.as_ref(buf) == b"from" =>
+        let [Keyword(cmd), args @ ..] = args else { return Ok(()) };
+        match (cmd.as_ref(buf), args) {
+            (b"bound", _) => {
+                for sort in args {
+                    self.result
+                        .bound_tc
+                        .insert(self.nset.lookup_symbol(sort.value(buf)).unwrap().atom);
+                }
+            }
+            (b"equality", [label, Keyword(from), refl, symm, trans])
+                if from.as_ref(buf) == b"from" =>
             {
                 let tok = label.value(buf);
                 let equality = self
@@ -293,18 +362,19 @@ impl DefinitionPass<'_> {
                     check(self.db, addr, f)
                 })?;
             }
-            [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"primitive" => {
-                for label in rest {
-                    let primitive = self.nset.lookup_label(&label.value(buf)).unwrap().atom;
+            (b"primitive", _) => {
+                for label in args {
+                    let name = label.value(buf);
+                    let primitive = self.nset.lookup_label(name).unwrap().atom;
                     // Remove the definition from the pending list
                     if let Some(i) = self.pending_syntax.iter().position(|&x| x == primitive) {
                         self.pending_syntax.swap_remove(i);
-                        self.result.primitives.push(primitive)
+                        self.add_definition(primitive, None, (sref.id, label.span()))?;
                     } else if let Some(i) =
                         self.pending_primitive.iter().position(|x| x.0 == primitive)
                     {
                         self.pending_primitive.swap_remove(i);
-                        self.result.primitives.push(primitive)
+                        self.add_definition(primitive, None, (sref.id, label.span()))?;
                     } else {
                         self.result.diagnostics.push((
                             StatementAddress::new(sref.id, index),
@@ -313,8 +383,47 @@ impl DefinitionPass<'_> {
                     }
                 }
             }
-            [Keyword(cmd), justif_label, Keyword(for_), label]
-                if cmd.as_ref(buf) == b"justification" && for_.as_ref(buf) == b"for" =>
+            (b"free_var", [label, Keyword(with_), args @ ..]) if with_.as_ref(buf) == b"with" => {
+                let name = label.value(buf);
+                let Some(lookup) = self.nset.lookup_label(name) else {
+                    return Err(Diagnostic::UnknownLabel(label.span()))
+                };
+                let atom = lookup.atom;
+                let frame = self.scope.get(name).unwrap();
+                assert!(self.result.binding_structure.get_mut(&atom).is_some());
+                let Some(bss) = self.result.binding_structure.get_mut(&atom) else {
+                    return Err(Diagnostic::NotASyntaxAxiom(label.span()))
+                };
+                for var in args {
+                    match find_var(self.nset, var.span(), buf, frame) {
+                        Ok(i) => {
+                            bss[i] = Bitset::default();
+                        }
+                        Err(diag) => self
+                            .result
+                            .diagnostics
+                            .push((StatementAddress::new(sref.id, index), diag)),
+                    }
+                }
+            }
+            (b"free_var_in", [label, Keyword(with_), var, b_var])
+                if with_.as_ref(buf) == b"with" =>
+            {
+                let name = label.value(buf);
+                let Some(lookup) = self.nset.lookup_label(name) else {
+                    return Err(Diagnostic::UnknownLabel(label.span()))
+                };
+                let atom = lookup.atom;
+                let frame = self.scope.get(name).unwrap();
+                let Some(bss) = self.result.binding_structure.get_mut(&atom) else {
+                    return Err(Diagnostic::NotASyntaxAxiom(label.span()))
+                };
+                let var = find_var(self.nset, var.span(), buf, frame)?;
+                let b_var = find_var(self.nset, b_var.span(), buf, frame)?;
+                bss[b_var].unset_bit(var);
+            }
+            (b"justification", [justif_label, Keyword(for_), label])
+                if for_.as_ref(buf) == b"for" =>
             {
                 let theorem = self
                     .nset
@@ -344,12 +453,11 @@ impl DefinitionPass<'_> {
         // push the definition to the validated list early, so that later definitions
         // aren't as messed up if this check fails
         self.result.definitions.insert(definition);
-        if let Some(prev) = self.result.def_map.insert(syntax_axiom, definition) {
-            return Err(Diagnostic::DefCkDuplicateDefinition(
-                self.nset.atom_name(syntax_axiom).into(),
-                self.nset.lookup_label_by_atom(prev).address,
-            ));
-        }
+        self.add_definition(
+            syntax_axiom,
+            Some(definition),
+            (stmt.segment.id, stmt.span()),
+        )?;
 
         let Some(fmla) = self.stmts.get_formula(&stmt) else {
             // Ok because the error would have been reported already
@@ -426,12 +534,10 @@ impl DefinitionPass<'_> {
             }
 
             let rhs = subst.rhs.unwrap();
-            // let fvars = get_free_vars(rhs);
+            let fvars = get_free_vars(rhs);
 
             for (label, var) in rhs.labels_iter() {
-                if var && !subst.vars.contains_key(&label)
-                /* && fvars.contains(&label) */
-                {
+                if var && !subst.vars.contains_key(&label) && fvars.contains(&label) {
                     free_dummies.insert(label);
                 }
             }
@@ -520,12 +626,10 @@ impl DefinitionPass<'_> {
                 return Err(Diagnostic::DefCkMalformedDefinition(syntax_addr));
             }
 
-            // let fvars = get_free_vars(rhs);
+            let fvars = get_free_vars(rhs);
 
             for (label, var) in rhs.labels_iter() {
-                if var && !is_param.has_bit(to_index[&label])
-                /* && fvars.contains(&label) */
-                {
+                if var && !is_param.has_bit(to_index[&label]) && fvars.contains(&label) {
                     free_dummies.insert(label);
                 }
             }
@@ -569,13 +673,8 @@ impl DefinitionPass<'_> {
     /// or $j commands which come after the definitions they apply to.
     fn flush_pending_syntax(&mut self) {
         if !self.pending_syntax.is_empty() {
-            self.flush_pending_definitions();
             self.pending_primitive
                 .extend(self.pending_syntax.drain(..).map(|label| {
-                    println!(
-                        "pop {}",
-                        crate::as_str(self.db.statement_by_label(label).unwrap().label())
-                    );
                     (
                         label,
                         self.db.statement_by_label(label).unwrap().address(),
@@ -654,7 +753,6 @@ impl DefinitionPass<'_> {
                     }
                     StatementType::Provable => {
                         if !self.pending_syntax.is_empty() {
-                            self.flush_pending_definitions();
                             self.ensure_frame_does_not_use_pending_syntax(&stmt, false);
                         }
                     }
@@ -663,14 +761,50 @@ impl DefinitionPass<'_> {
             }
         }
 
+        self.flush_pending_definitions();
         self.flush_pending_syntax();
         for (_, addr, delayed_diag) in self.pending_primitive.drain(..) {
             self.result.diagnostics.push((addr, delayed_diag));
         }
+
+        for (label, bss) in &self.result.binding_structure {
+            let bss2 = &self.proved_binding_structure[label];
+            if bss != bss2 {
+                if let Some((bound, in_var)) =
+                    bss.iter().zip(bss2).enumerate().find_map(|(i, (bs, bs2))| {
+                        Some((i, bs.into_iter().find(|&j| !bs2.has_bit(j))?))
+                    })
+                {
+                    let name = self.nset.atom_name(*label);
+                    let frame = self.scope.get(name).unwrap();
+                    self.result.diagnostics.push((
+                        self.nset.lookup_label(name).unwrap().address,
+                        Diagnostic::DefCkUnprovedBinder(
+                            self.nset.atom_name(frame.var_list[bound]).into(),
+                            self.nset.atom_name(frame.var_list[in_var]).into(),
+                        ),
+                    ))
+                } else if let Some((bound, in_var)) =
+                    bss.iter().zip(bss2).enumerate().find_map(|(i, (bs, bs2))| {
+                        Some((i, bs2.into_iter().find(|&j| !bs.has_bit(j))?))
+                    })
+                {
+                    let name = self.nset.atom_name(*label);
+                    let frame = self.scope.get(name).unwrap();
+                    self.result.diagnostics.push((
+                        self.nset.lookup_label(name).unwrap().address,
+                        Diagnostic::DefCkVacuousBinder(
+                            self.nset.atom_name(frame.var_list[bound]).into(),
+                            self.nset.atom_name(frame.var_list[in_var]).into(),
+                        ),
+                    ))
+                }
+            }
+        }
     }
 
     /// Ensures the given frame does not use pending syntax.
-    /// If `except_for_one` is `True`, one occurrence of the syntax is allowed,
+    /// If `except_for_one` is `true`, one occurrence of the syntax is allowed,
     /// only in the main statement, and the label of that syntax axiom is returned.
     /// Unallowed occurrences are added to the `pending_primitive` table.
     fn ensure_frame_does_not_use_pending_syntax(
@@ -678,6 +812,7 @@ impl DefinitionPass<'_> {
         stmt: &StatementRef<'_>,
         except_for_one: bool,
     ) -> Option<Label> {
+        self.flush_pending_definitions();
         let res = self.ensure_statement_does_not_use_pending_syntax(stmt, except_for_one);
         if let Some(frame) = self.scope.get(stmt.label()) {
             for hyp in &*frame.hypotheses {
@@ -691,7 +826,7 @@ impl DefinitionPass<'_> {
     }
 
     /// Ensures the given statement does not use pending syntax.
-    /// If `except_for_one` is `True`, one occurrence of the syntax is allowed,
+    /// If `except_for_one` is `true`, one occurrence of the syntax is allowed,
     /// and the label of that syntax axiom is returned.
     /// Unallowed occurrences are added to the `pending_primitive` table.
     fn ensure_statement_does_not_use_pending_syntax(
@@ -736,6 +871,7 @@ impl Database {
             pending_syntax: vec![],
             pending_defn: vec![],
             equalities: HashMap::default(),
+            proved_binding_structure: HashMap::default(),
             result: definitions,
         }
         .verify_definitions(sset);

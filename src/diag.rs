@@ -105,7 +105,7 @@ pub enum Diagnostic {
     CommandIncomplete(Span),
     CommentMarkerNotStart(Span),
     ConstantNotTopLevel,
-    DefCkDuplicateDefinition(Token, StatementAddress),
+    DefCkDuplicateDefinition(Token, GlobalSpan, Span),
     DefCkDuplicateEquality(Token, GlobalSpan, Span),
     DefCkFreeDummyVars(Box<[Token]>),
     DefCkFreeDummyVarsJustification(StatementAddress, Box<[Token]>),
@@ -122,6 +122,8 @@ pub enum Diagnostic {
     DefCkMalformedSyntaxAxiom,
     DefCkMissingDefinition,
     DefCkSyntaxUsedBeforeDefinition(Token, StatementAddress),
+    DefCkUnprovedBinder(Token, Token),
+    DefCkVacuousBinder(Token, Token),
     DefCkNotAnEquality(Token, Vec<Token>),
     DisjointSingle,
     DjNotVariable(TokenIndex),
@@ -167,6 +169,7 @@ pub enum Diagnostic {
     NestedComment(Span, Span),
     NotActiveSymbol(TokenIndex),
     NotAProvableStatement,
+    NotASyntaxAxiom(Span),
     OldAltNotDiscouraged,
     ParenOrderError(Span, Span),
     ProofDvViolation,
@@ -210,6 +213,7 @@ pub enum Diagnostic {
     UnconventionalAxiomLabel(Span),
     UndefinedBibTag(Span),
     UndefinedToken(Span, Token),
+    UndefinedVariable(Span),
     UninterpretedEscape(u32),
     UninterpretedHtml(Span),
     UnknownLabel(Span),
@@ -446,16 +450,16 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
-            DefCkDuplicateDefinition(ref tok, prev_saddr) => (format!("Definition Check: Duplicate definition for '{label}'", label = t(tok)).into(), vec![(
+            &DefCkDuplicateDefinition(ref tok, fst, snd) => (format!("Definition Check: Duplicate definition for '{label}'", label = t(tok)).into(), vec![(
                 AnnotationType::Warning,
-                format!("This axiom seems to introduce a definition for '{label}', however a definition already exists.", label = t(tok)).into(),
+                format!("This statement seems to introduce a definition for '{label}', however a definition already exists.", label = t(tok)).into(),
                 stmt,
-                stmt.label_span(),
+                snd,
             ), (
                 AnnotationType::Note,
                 "Definition was previously provided here.".into(),
-                sset.statement(*prev_saddr),
-                sset.statement(*prev_saddr).label_span(),
+                sset.statement_or_dummy(StatementAddress::new(fst.0, NO_STATEMENT)),
+                fst.1,
             )]),
             &DefCkDuplicateEquality(ref tok, fst, snd) => (format!("Definition Check: Duplicate equality for typecode '{code}'", code = t(tok)).into(), vec![(
                 AnnotationType::Warning,
@@ -479,29 +483,23 @@ impl Diagnostic {
                 sset.statement(syntax),
                 sset.statement(syntax).label_span(),
             )]),
-            DefCkFreeDummyVars(vars) => {
-                notes = &["this is a known false positive, as the required check has not yet been implemented"];
-                ("Definition Check: Dummy variable(s) not bound".into(), vec![(
-                    AnnotationType::Error,
-                    format!("variable(s) '{vars}' are possibly free in this statement", vars = vars.iter().map(t).join("', '")).into(),
-                    stmt,
-                    stmt.label_span(),
-                )])
-            },
-            DefCkFreeDummyVarsJustification(def, vars) => {
-                notes = &["this is a known false positive, as the required check has not yet been implemented"];
-                ("Definition Check: Dummy variable(s) not bound".into(), vec![(
-                    AnnotationType::Error,
-                    format!("variable(s) '{vars}' are possibly free in this statement", vars = vars.iter().map(t).join("', '")).into(),
-                    stmt,
-                    stmt.label_span(),
-                ), (
-                    AnnotationType::Note,
-                    "while processing this definition".into(),
-                    sset.statement(*def),
-                    sset.statement(*def).label_span(),
-                )])
-            },
+            DefCkFreeDummyVars(vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' are possibly free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            DefCkFreeDummyVarsJustification(def, vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' are possibly free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "while processing this definition".into(),
+                sset.statement(*def),
+                sset.statement(*def).label_span(),
+            )]),
             DefCkJustificationDjViolation(just, vars) => ("Definition Check: Disjoint variable violation while applying justification".into(), vec![(
                 AnnotationType::Error,
                 format!("variables '{vars}' need to be disjoint", vars = vars.iter().map(t).join("', '")).into(),
@@ -616,6 +614,21 @@ impl Diagnostic {
                 "syntax declared here".into(),
                 sset.statement(*saddr),
                 sset.statement(*saddr).label_span(),
+            )]),
+            DefCkUnprovedBinder(bound, in_var) => {
+                notes = &["If this is deliberate, consider using 'free_var' or 'free_var_in' to indicate that the variable is not bound"];
+                ("Definition Check: Could not prove binding assertion".into(), vec![(
+                    AnnotationType::Error,
+                    format!("occurrences of '{bound}' in '{in_var}' may not be bound", bound = t(bound), in_var = t(in_var)).into(),
+                    stmt,
+                    stmt.span(),
+                )])
+            },
+            DefCkVacuousBinder(bound, in_var) => ("Definition Check: Proved binding assertion, but it should not be bound".into(), vec![(
+                AnnotationType::Warning,
+                format!("occurrences of '{bound}' in '{in_var}' are bound", bound = t(bound), in_var = t(in_var)).into(),
+                stmt,
+                stmt.span(),
             )]),
             DefCkNotAnEquality(ref tok, equalities) => {
                 notes = &["No provable axioms should appear between definitions and the corresponding syntax declaration."];
@@ -972,6 +985,12 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            &NotASyntaxAxiom(span) => ("Not a syntax axiom".into(), vec![(
+                AnnotationType::Error,
+                "this is not a syntax axiom".into(),
+                stmt,
+                span,
+            )]),
             OldAltNotDiscouraged if stmt.statement_type() == StatementType::Axiom => {
                 notes = &["Add (New usage is discouraged.) to the comment"];
                 ("OLD/ALT axiom not discouraged".into(), vec![(
@@ -1290,6 +1309,12 @@ impl Diagnostic {
                 stmt,
                 *span,
             )]),
+            UndefinedVariable(span) => ("Undefined variable".into(), vec![(
+                AnnotationType::Warning,
+                "This variable was not declared in the given statement".into(),
+                stmt,
+                *span,
+            )]),
             UnknownKeyword(kwspan) => ("Unknown keyword".into(), vec![(
                 AnnotationType::Error,
                 "Statement-starting keyword must be one of $a $c $d $e $f $p $v".into(),
@@ -1326,7 +1351,7 @@ impl Diagnostic {
                 *tok,
             )]),
             UnknownLabel(span) => ("Unknown label".into(), vec![(
-                AnnotationType::Warning,
+                AnnotationType::Error,
                 "This is not the label of any statement".into(),
                 stmt,
                 *span,
