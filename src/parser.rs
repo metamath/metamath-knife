@@ -681,7 +681,10 @@ fn collect_definitions(seg: &mut Segment) {
                     });
                 }
             }
-            continue;
+            // Skip further treatment if the statement is not at top-level, except for $j commands.
+            if stmt.stype != AdditionalInfoComment {
+                continue;
+            }
         }
 
         let math = &seg.span_pool[stmt.math_start..stmt.proof_start];

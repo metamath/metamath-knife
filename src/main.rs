@@ -33,6 +33,7 @@ fn main() {
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
+        (@arg verify_usage: -u --("verify-usage") "Checks axiom usage")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
         (@arg parse_typesetting: -t --("parse-typesetting") "Parses typesetting information")
@@ -123,6 +124,10 @@ fn main() {
         if matches.is_present("verify_parse_stmt") {
             db.stmt_parse_pass();
             db.verify_parse_stmt();
+        }
+
+        if matches.is_present("verify_usage") {
+            db.verify_usage_pass();
         }
 
         let mut diags = db.diag_notations();

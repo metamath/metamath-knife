@@ -88,6 +88,8 @@ mod grammar_tests;
 #[cfg(test)]
 mod parser_tests;
 #[cfg(test)]
+mod usage_tests;
+#[cfg(test)]
 mod util_tests;
 
 pub use database::Database;
