@@ -631,7 +631,6 @@ impl Database {
     /// than error diagnostics.  It does not save any parsed proof data.
     pub fn verify_usage_pass(&mut self) -> &Arc<UsageResult> {
         if self.usage.is_none() {
-            self.stmt_parse_pass();
             time(&self.options.clone(), "usage", || {
                 let parse = self.parse_result();
                 let mut usage = UsageResult::default();
