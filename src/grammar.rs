@@ -109,7 +109,7 @@ impl GrammarTree {
                     map: ref mut to_map,
                 },
             ) => {
-                for (&(stype, symbol), next_node) in map.iter() {
+                for (&(stype, symbol), next_node) in map {
                     match to_map.entry((stype, symbol)) {
                         Entry::Occupied(_) => {
                             // Skip error here, do nothing for now...

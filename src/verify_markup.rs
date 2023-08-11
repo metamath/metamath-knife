@@ -527,6 +527,7 @@ impl Bibliography {
     pub fn parse<'a>(source: &'a SourceInfo, diags: &mut Vec<(&'a SourceInfo, BibError)>) -> Self {
         lazy_static::lazy_static! {
             static ref A_NAME: Regex =
+                #[allow(clippy::invalid_regex)] // https://github.com/rust-lang/rust-clippy/issues/10825
                 Regex::new("(?i-u)<a[[:space:]]name=['\"]?([^&>]*?)['\"]?>").unwrap();
         }
         let mut bib = HashMap::default();

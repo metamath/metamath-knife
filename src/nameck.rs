@@ -84,7 +84,7 @@ fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: &A) {
 }
 
 fn autoviv<K: Hash + Eq, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V {
-    map.entry(key).or_insert_with(Default::default)
+    map.entry(key).or_default()
 }
 
 fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)

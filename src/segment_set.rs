@@ -337,10 +337,7 @@ impl SegmentSet {
         // read a file from disk (intercessions have already been checked, but
         // the first cache has not) and split/parse it;
         // returns by Result Error on I/O error
-        fn canonicalize_and_read(
-            state: &mut RecState,
-            path: String,
-        ) -> io::Result<Promise<FileSR>> {
+        fn canonicalize_and_read(state: &RecState, path: String) -> io::Result<Promise<FileSR>> {
             let metadata = fs::metadata(&path)?;
             let time = FileTime::from_last_modification_time(&metadata);
 

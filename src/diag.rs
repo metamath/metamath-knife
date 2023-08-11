@@ -726,8 +726,8 @@ impl Diagnostic {
             )]),
             &MissingMarkupDef([html, alt_html, latex], span) => {
                 let msg = html.then_some("htmldef").into_iter()
-                    .chain(alt_html.then_some("althtmldef").into_iter())
-                    .chain(latex.then_some("latexdef").into_iter());
+                    .chain(alt_html.then_some("althtmldef"))
+                    .chain(latex.then_some("latexdef"));
                 (format!("Missing {} for token", msg.format(", ")).into(), vec![(
                     AnnotationType::Warning,
                     "This token has not been declared in the $t comment".into(),
