@@ -8,7 +8,7 @@ use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::BibError;
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
-use metamath_knife::SourceInfo;
+use metamath_knife::{as_str, SourceInfo};
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::{self, BufWriter};
@@ -18,6 +18,15 @@ use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
+}
+
+fn label_list(val: String) -> Result<(), String> {
+    val.chars()
+        .all(|c| {
+            c == ',' || (c.is_ascii() && c.is_alphanumeric()) || c == '-' || c == '_' || c == '.'
+        })
+        .then_some(())
+        .ok_or("Expected list of Metamaths labels".to_string())
 }
 
 fn main() {
@@ -33,6 +42,7 @@ fn main() {
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
+        (@arg stmt_use: --("stmt-use") +takes_value validator(label_list) "Outputs statements directly or indirectly using the given list of statements")
         (@arg verify_usage: -u --("verify-usage") "Checks axiom usage")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
@@ -148,8 +158,19 @@ fn main() {
 
         if matches.is_present("axiom_use") {
             File::create(matches.value_of("axiom_use").unwrap())
-                .and_then(|file| db.write_axiom_use(&mut BufWriter::new(file)))
+                .and_then(|file| {
+                    db.write_stmt_use(|label| label.starts_with(b"ax-"), &mut BufWriter::new(file))
+                })
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        if matches.is_present("stmt_use") {
+            let stmt_list: Vec<&str> = matches.value_of("stmt_use").unwrap().split(',').collect();
+            db.write_stmt_use(
+                |label| stmt_list.contains(&as_str(label)),
+                &mut BufWriter::new(io::stdout()),
+            )
+            .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
         let mut count = db
