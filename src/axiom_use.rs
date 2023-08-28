@@ -134,13 +134,11 @@ pub(crate) fn verify_usage(sset: &Arc<SegmentSet>, usage: &mut UsageResult) {
 
 impl Database {
     /// Writes a `stmt_use` file to the given writer.
-    pub fn write_stmt_use<F>(
+    pub fn write_stmt_use(
         &self,
-        label_test: F,
+        label_test: impl Fn(&[u8]) -> bool,
         out: &mut impl std::io::Write,
     ) -> Result<(), std::io::Error>
-    where
-        F: Fn(&[u8]) -> bool,
     {
         time(&self.options.clone(), "stmt_use", || {
             let mut stmt_use_map = HashMap::default();
