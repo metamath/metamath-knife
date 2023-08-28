@@ -160,7 +160,7 @@ fn main() {
             let vals: Vec<_> = matches.values_of("stmt_use").unwrap().collect();
             let output_file_path = vals[0];
             let stmt_list: Vec<_> = vals[1].split(',').map(str::as_bytes).collect();
-            if !stmt_list.clone().into_iter().all(is_valid_label) {
+            if !stmt_list.iter().copied().all(is_valid_label) {
                 clap::Error::with_description(
                     "Expected list of labels as second argument to --stmt-use",
                     clap::ErrorKind::InvalidValue,
