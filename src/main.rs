@@ -9,7 +9,7 @@ use metamath_knife::diag::BibError;
 use metamath_knife::parser::is_valid_label;
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
-use metamath_knife::{as_str, SourceInfo};
+use metamath_knife::SourceInfo;
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::{self, BufWriter};
@@ -19,14 +19,6 @@ use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
-}
-
-fn label_list(val: String) -> Result<(), String> {
-    val.split(',')
-        .map(str::as_bytes)
-        .all(is_valid_label)
-        .then_some(())
-        .ok_or("Expected list of labels".to_string())
 }
 
 fn main() {
@@ -42,7 +34,7 @@ fn main() {
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
-        (@arg stmt_use: --("stmt-use") +takes_value validator(label_list) "Outputs statements directly or indirectly using the given list of statements")
+        (@arg stmt_use: --("stmt-use") value_names(&["FILE", "LABELS"]) "Outputs statements directly or indirectly using the given list of statements")
         (@arg verify_usage: -u --("verify-usage") "Checks axiom usage")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
@@ -165,12 +157,21 @@ fn main() {
         }
 
         if matches.is_present("stmt_use") {
-            let stmt_list: Vec<&str> = matches.value_of("stmt_use").unwrap().split(',').collect();
-            db.write_stmt_use(
-                |label| stmt_list.contains(&as_str(label)),
-                &mut BufWriter::new(io::stdout()),
-            )
-            .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+            let vals: Vec<_> = matches.values_of("stmt_use").unwrap().collect();
+            let output_file_path = vals[0];
+            let stmt_list: Vec<_> = vals[1].split(',').map(str::as_bytes).collect();
+            if !stmt_list.clone().into_iter().all(is_valid_label) {
+                eprintln!("Expected list of labels as second argument to --stmt-use");
+                std::process::exit(1);
+            }
+            File::create(output_file_path)
+                .and_then(|file| {
+                    db.write_stmt_use(
+                        |label| stmt_list.contains(&label),
+                        &mut BufWriter::new(file),
+                    )
+                })
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
         let mut count = db
