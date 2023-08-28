@@ -161,8 +161,11 @@ fn main() {
             let output_file_path = vals[0];
             let stmt_list: Vec<_> = vals[1].split(',').map(str::as_bytes).collect();
             if !stmt_list.clone().into_iter().all(is_valid_label) {
-                eprintln!("Expected list of labels as second argument to --stmt-use");
-                std::process::exit(1);
+                clap::Error::with_description(
+                    "Expected list of labels as second argument to --stmt-use",
+                    clap::ErrorKind::InvalidValue,
+                )
+                .exit();
             }
             File::create(output_file_path)
                 .and_then(|file| {
