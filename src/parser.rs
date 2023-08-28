@@ -759,7 +759,8 @@ fn collect_definitions(seg: &mut Segment) {
 }
 
 /// Metamath spec valid label characters are `[-._a-zA-Z0-9]`
-fn is_valid_label(label: &[u8]) -> bool {
+#[must_use]
+pub fn is_valid_label(label: &[u8]) -> bool {
     label
         .iter()
         .all(|&c| c == b'.' || c == b'-' || c == b'_' || c.is_ascii_alphanumeric())

@@ -97,6 +97,7 @@ pub use formula::Formula;
 pub use formula::FormulaRef;
 pub use formula::Label;
 pub use formula::Symbol;
+pub use parser::is_valid_label;
 pub use segment::Comparer;
 pub use segment_set::SourceInfo;
 pub use statement::as_str;

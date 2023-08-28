@@ -6,6 +6,7 @@ use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::BibError;
+use metamath_knife::parser::is_valid_label;
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::{as_str, SourceInfo};
@@ -21,12 +22,11 @@ fn positive_integer(val: String) -> Result<(), String> {
 }
 
 fn label_list(val: String) -> Result<(), String> {
-    val.chars()
-        .all(|c| {
-            c == ',' || (c.is_ascii() && c.is_alphanumeric()) || c == '-' || c == '_' || c == '.'
-        })
+    val.split(',')
+        .map(str::as_bytes)
+        .all(is_valid_label)
         .then_some(())
-        .ok_or("Expected list of Metamaths labels".to_string())
+        .ok_or("Expected list of labels".to_string())
 }
 
 fn main() {
