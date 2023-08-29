@@ -138,8 +138,7 @@ impl Database {
         &self,
         label_test: impl Fn(&[u8]) -> bool,
         out: &mut impl std::io::Write,
-    ) -> Result<(), std::io::Error>
-    {
+    ) -> Result<(), std::io::Error> {
         time(&self.options.clone(), "stmt_use", || {
             let mut stmt_use_map = HashMap::default();
             let mut stmt_list = vec![];
