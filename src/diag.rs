@@ -712,7 +712,7 @@ impl Diagnostic {
                 stmt,
                 *marker,
             )]),
-            MissingContributor => ("No contribution comment".into(), vec![(
+            MissingContributor => ("Missing or malformed contribution comment".into(), vec![(
                 AnnotationType::Warning,
                 "No (Contributed by...) provided for this statement".into(),
                 stmt,
