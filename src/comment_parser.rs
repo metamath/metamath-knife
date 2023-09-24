@@ -85,7 +85,7 @@ enum UnderscoreMode {
 #[inline]
 #[must_use]
 pub const fn is_text_escape(c: u8) -> bool {
-    matches!(c, b'`' | b'[' | b'~')
+    matches!(c, b'`' | b'[' | b'~' | b'_')
 }
 
 /// Returns true if this is a character that is escaped in [`CommentItem::MathToken`] fields,
