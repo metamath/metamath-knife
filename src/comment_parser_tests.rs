@@ -97,12 +97,7 @@ fn test_italic() {
 /// Two underscores in a row are treated as normal text.
 #[test]
 fn test_double_underscore() {
-    check(
-        b"MINIMIZE__WITH",
-        &[
-            Text(Span::new(0, 14)),
-        ],
-    )
+    check(b"MINIMIZE__WITH", &[Text(Span::new(0, 14))])
 }
 
 #[test]

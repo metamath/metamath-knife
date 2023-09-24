@@ -184,7 +184,7 @@ impl<'a> CommentParser<'a> {
         if self.pos == self.end_subscript {
             return UnderscoreMode::Italic;
         }
-        if let Some(c) = self.pos.checked_sub(1).map(|pos| self.buf.get(pos)).flatten() {
+        if let Some(c) = self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos)) {
             if c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c) {
                 return UnderscoreMode::Italic;
             }
