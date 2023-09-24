@@ -73,6 +73,12 @@ pub enum CommentItem {
     BibTag(Span),
 }
 
+enum UnderscoreMode {
+    Subscript,
+    Italic,
+    Underscore,
+}
+
 /// Returns true if this is a character that is escaped in [`CommentItem::Text`],
 /// [`CommentItem::Label`] and [`CommentItem::Url`] fields,
 /// meaning that doubled occurrences are turned into single occurrences.
@@ -168,16 +174,22 @@ impl<'a> CommentParser<'a> {
         None
     }
 
-    fn is_subscript(&self) -> Option<()> {
+    fn get_underscore_mode(&self) -> UnderscoreMode {
         const OPENING_PUNCTUATION: &[u8] = b"(['\"";
+        if let Some(&c) = self.buf.get(self.pos + 1) {
+            if c == b'_' {
+                return UnderscoreMode::Underscore;
+            }
+        }
         if self.pos == self.end_subscript {
-            return None;
+            return UnderscoreMode::Italic;
         }
-        let c = self.buf.get(self.pos.checked_sub(1)?)?;
-        if c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c) {
-            return None;
+        if let Some(c) = self.pos.checked_sub(1).map(|pos| self.buf.get(pos)).flatten() {
+            if c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c) {
+                return UnderscoreMode::Italic;
+            }
         }
-        Some(())
+        UnderscoreMode::Subscript
     }
 
     fn parse_subscript(&self) -> Option<usize> {
@@ -212,16 +224,23 @@ impl<'a> CommentParser<'a> {
 
     fn parse_underscore(&mut self) -> Option<(usize, CommentItem)> {
         let start = self.pos;
-        let item = if self.is_subscript().is_some() {
-            let sub_end = self.parse_subscript()?;
-            self.pos += 1;
-            self.end_subscript = sub_end;
-            CommentItem::StartSubscript(start)
-        } else {
-            let it_end = self.parse_italic()?;
-            self.pos += 1;
-            self.end_italic = it_end;
-            CommentItem::StartItalic(start)
+        let item = match self.get_underscore_mode() {
+            UnderscoreMode::Subscript => {
+                let sub_end = self.parse_subscript()?;
+                self.pos += 1;
+                self.end_subscript = sub_end;
+                CommentItem::StartSubscript(start)
+            }
+            UnderscoreMode::Italic => {
+                let it_end = self.parse_italic()?;
+                self.pos += 1;
+                self.end_italic = it_end;
+                CommentItem::StartItalic(start)
+            }
+            UnderscoreMode::Underscore => {
+                self.pos += 1;
+                return None;
+            }
         };
         Some((start, item))
     }
