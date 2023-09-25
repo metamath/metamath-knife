@@ -189,7 +189,18 @@ impl<'a> CommentParser<'a> {
         if !self.buf.get(self.pos + 1)?.is_ascii_alphanumeric() {
             return None;
         }
-        let end = (self.pos + 2) + self.buf[self.pos + 2..].iter().position(|&c| c == b'_')?;
+        let mut end = self.pos + 2;
+        loop {
+            if *self.buf.get(end)? == b'_' {
+                if self.buf.get(end + 1) == Some(&b'_') {
+                    end += 2
+                } else {
+                    break;
+                }
+            } else {
+                end += 1
+            }
+        }
         if !self.buf[end - 1].is_ascii_alphanumeric()
             || matches!(self.buf.get(end + 1), Some(c) if c.is_ascii_alphanumeric())
         {

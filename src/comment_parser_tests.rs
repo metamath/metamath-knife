@@ -196,6 +196,10 @@ fn edge_cases() {
         b"~</HTML>",
         &[Label(0, Span::new(1, 1)), Text(Span::new(1, 8))],
     );
+    check(
+        b"_a__b_",
+        &[StartItalic(0), Text(Span::new(1, 5)), EndItalic(5)],
+    );
 }
 
 #[test]
