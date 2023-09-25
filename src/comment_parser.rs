@@ -27,7 +27,7 @@ use crate::{statement::unescape, Span};
 pub enum CommentItem {
     /// A piece of regular text. The characters in the buffer at the given
     /// span should be interpreted literally, except for the escapes.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
     /// Note that `[` can also appear unescaped.
     Text(Span),
     /// A paragraph break, caused by two or more consecutive newlines in the input.
@@ -47,11 +47,11 @@ pub enum CommentItem {
     /// Use `unescape_math` to strip the escape character `` ` ``.
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
     /// Note that `[` and `~` can also appear unescaped.
     Label(usize, Span),
     /// A link to a web site URL. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
     /// Note that `[` and `~` can also appear unescaped.
     Url(usize, Span),
     /// The `<HTML>` keyword, which starts HTML mode
