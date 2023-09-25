@@ -73,12 +73,6 @@ pub enum CommentItem {
     BibTag(Span),
 }
 
-enum UnderscoreMode {
-    Subscript,
-    Italic,
-    Underscore,
-}
-
 /// Returns true if this is a character that is escaped in [`CommentItem::Text`],
 /// [`CommentItem::Label`] and [`CommentItem::Url`] fields,
 /// meaning that doubled occurrences are turned into single occurrences.
@@ -174,24 +168,6 @@ impl<'a> CommentParser<'a> {
         None
     }
 
-    fn get_underscore_mode(&self) -> UnderscoreMode {
-        const OPENING_PUNCTUATION: &[u8] = b"(['\"";
-        if let Some(&c) = self.buf.get(self.pos + 1) {
-            if c == b'_' {
-                return UnderscoreMode::Underscore;
-            }
-        }
-        if self.pos == self.end_subscript {
-            return UnderscoreMode::Italic;
-        }
-        if let Some(c) = self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos)) {
-            if c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c) {
-                return UnderscoreMode::Italic;
-            }
-        }
-        UnderscoreMode::Subscript
-    }
-
     fn parse_subscript(&self) -> Option<usize> {
         const CLOSING_PUNCTUATION: &[u8] = b".,;)?!:]'\"_-";
         let c = self.buf.get(self.pos + 1)?;
@@ -223,24 +199,28 @@ impl<'a> CommentParser<'a> {
     }
 
     fn parse_underscore(&mut self) -> Option<(usize, CommentItem)> {
+        const OPENING_PUNCTUATION: &[u8] = b"(['\"";
         let start = self.pos;
-        let item = match self.get_underscore_mode() {
-            UnderscoreMode::Subscript => {
-                let sub_end = self.parse_subscript()?;
-                self.pos += 1;
-                self.end_subscript = sub_end;
-                CommentItem::StartSubscript(start)
-            }
-            UnderscoreMode::Italic => {
-                let it_end = self.parse_italic()?;
-                self.pos += 1;
-                self.end_italic = it_end;
-                CommentItem::StartItalic(start)
-            }
-            UnderscoreMode::Underscore => {
+        if let Some(&c) = self.buf.get(self.pos + 1) {
+            if c == b'_' {
                 self.pos += 1;
                 return None;
             }
+        }
+        let is_italic = self.pos == self.end_subscript
+            || (self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos))).map_or(true, |c| {
+                c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c)
+            });
+        let item = if is_italic {
+            let it_end = self.parse_italic()?;
+            self.pos += 1;
+            self.end_italic = it_end;
+            CommentItem::StartItalic(start)
+        } else {
+            let sub_end = self.parse_subscript()?;
+            self.pos += 1;
+            self.end_subscript = sub_end;
+            CommentItem::StartSubscript(start)
         };
         Some((start, item))
     }
