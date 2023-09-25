@@ -28,7 +28,7 @@ pub enum CommentItem {
     /// A piece of regular text. The characters in the buffer at the given
     /// span should be interpreted literally, except for the escapes.
     /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
-    /// Note that `[` can also appear unescaped.
+    /// Note that `[` and `_` can also appear unescaped.
     Text(Span),
     /// A paragraph break, caused by two or more consecutive newlines in the input.
     /// This is a zero-length item (all characters will be present in `Text` nodes
@@ -48,11 +48,11 @@ pub enum CommentItem {
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
     /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
-    /// Note that `[` and `~` can also appear unescaped.
+    /// Note that `[`, `~`, `_` can also appear unescaped.
     Label(usize, Span),
     /// A link to a web site URL. The `usize` points to the `~` character.
     /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
-    /// Note that `[` and `~` can also appear unescaped.
+    /// Note that `[`, `~`, `_` can also appear unescaped.
     Url(usize, Span),
     /// The `<HTML>` keyword, which starts HTML mode
     /// (it doesn't actually put `<HTML>` in the output).
@@ -201,12 +201,6 @@ impl<'a> CommentParser<'a> {
     fn parse_underscore(&mut self) -> Option<(usize, CommentItem)> {
         const OPENING_PUNCTUATION: &[u8] = b"(['\"";
         let start = self.pos;
-        if let Some(&c) = self.buf.get(self.pos + 1) {
-            if c == b'_' {
-                self.pos += 1;
-                return None;
-            }
-        }
         let is_italic = self.pos == self.end_subscript
             || (self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos))).map_or(true, |c| {
                 c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c)
@@ -368,18 +362,20 @@ impl<'a> Iterator for CommentParser<'a> {
                 }
                 self.pos += 1;
             } else if c == b'_' {
-                if self.end_italic == self.pos {
+                if self.buf.get(self.pos + 1) == Some(&b'_') {
+                    self.pos += 2;
+                } else if self.end_italic == self.pos {
                     end = self.pos;
                     self.pos += 1;
                     self.item = Some(CommentItem::EndItalic(end));
                     break;
-                }
-                if let Some((pos, item)) = self.parse_underscore() {
+                } else if let Some((pos, item)) = self.parse_underscore() {
                     end = pos;
                     self.item = Some(item);
                     break;
+                } else {
+                    self.pos += 1;
                 }
-                self.pos += 1;
             } else {
                 self.pos += 1;
             }
