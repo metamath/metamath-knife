@@ -27,8 +27,8 @@ use crate::{statement::unescape, Span};
 pub enum CommentItem {
     /// A piece of regular text. The characters in the buffer at the given
     /// span should be interpreted literally, except for the escapes.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
-    /// Note that `[` can also appear unescaped.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
+    /// Note that `[` and `_` can also appear unescaped.
     Text(Span),
     /// A paragraph break, caused by two or more consecutive newlines in the input.
     /// This is a zero-length item (all characters will be present in `Text` nodes
@@ -47,12 +47,12 @@ pub enum CommentItem {
     /// Use `unescape_math` to strip the escape character `` ` ``.
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
-    /// Note that `[` and `~` can also appear unescaped.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
+    /// Note that `[`, `~`, `_` can also appear unescaped.
     Label(usize, Span),
     /// A link to a web site URL. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
-    /// Note that `[` and `~` can also appear unescaped.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
+    /// Note that `[`, `~`, `_` can also appear unescaped.
     Url(usize, Span),
     /// The `<HTML>` keyword, which starts HTML mode
     /// (it doesn't actually put `<HTML>` in the output).
@@ -79,7 +79,7 @@ pub enum CommentItem {
 #[inline]
 #[must_use]
 pub const fn is_text_escape(c: u8) -> bool {
-    matches!(c, b'`' | b'[' | b'~')
+    matches!(c, b'`' | b'[' | b'~' | b'_')
 }
 
 /// Returns true if this is a character that is escaped in [`CommentItem::MathToken`] fields,
@@ -168,18 +168,6 @@ impl<'a> CommentParser<'a> {
         None
     }
 
-    fn is_subscript(&self) -> Option<()> {
-        const OPENING_PUNCTUATION: &[u8] = b"(['\"";
-        if self.pos == self.end_subscript {
-            return None;
-        }
-        let c = self.buf.get(self.pos.checked_sub(1)?)?;
-        if c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c) {
-            return None;
-        }
-        Some(())
-    }
-
     fn parse_subscript(&self) -> Option<usize> {
         const CLOSING_PUNCTUATION: &[u8] = b".,;)?!:]'\"_-";
         let c = self.buf.get(self.pos + 1)?;
@@ -201,7 +189,18 @@ impl<'a> CommentParser<'a> {
         if !self.buf.get(self.pos + 1)?.is_ascii_alphanumeric() {
             return None;
         }
-        let end = (self.pos + 2) + self.buf[self.pos + 2..].iter().position(|&c| c == b'_')?;
+        let mut end = self.pos + 2;
+        loop {
+            if *self.buf.get(end)? == b'_' {
+                if self.buf.get(end + 1) == Some(&b'_') {
+                    end += 2
+                } else {
+                    break;
+                }
+            } else {
+                end += 1
+            }
+        }
         if !self.buf[end - 1].is_ascii_alphanumeric()
             || matches!(self.buf.get(end + 1), Some(c) if c.is_ascii_alphanumeric())
         {
@@ -211,17 +210,22 @@ impl<'a> CommentParser<'a> {
     }
 
     fn parse_underscore(&mut self) -> Option<(usize, CommentItem)> {
+        const OPENING_PUNCTUATION: &[u8] = b"(['\"";
         let start = self.pos;
-        let item = if self.is_subscript().is_some() {
-            let sub_end = self.parse_subscript()?;
-            self.pos += 1;
-            self.end_subscript = sub_end;
-            CommentItem::StartSubscript(start)
-        } else {
+        let is_italic = self.pos == self.end_subscript
+            || (self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos))).map_or(true, |c| {
+                c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c)
+            });
+        let item = if is_italic {
             let it_end = self.parse_italic()?;
             self.pos += 1;
             self.end_italic = it_end;
             CommentItem::StartItalic(start)
+        } else {
+            let sub_end = self.parse_subscript()?;
+            self.pos += 1;
+            self.end_subscript = sub_end;
+            CommentItem::StartSubscript(start)
         };
         Some((start, item))
     }
@@ -369,18 +373,20 @@ impl<'a> Iterator for CommentParser<'a> {
                 }
                 self.pos += 1;
             } else if c == b'_' {
-                if self.end_italic == self.pos {
+                if self.buf.get(self.pos + 1) == Some(&b'_') {
+                    self.pos += 2;
+                } else if self.end_italic == self.pos {
                     end = self.pos;
                     self.pos += 1;
                     self.item = Some(CommentItem::EndItalic(end));
                     break;
-                }
-                if let Some((pos, item)) = self.parse_underscore() {
+                } else if let Some((pos, item)) = self.parse_underscore() {
                     end = pos;
                     self.item = Some(item);
                     break;
+                } else {
+                    self.pos += 1;
                 }
-                self.pos += 1;
             } else {
                 self.pos += 1;
             }

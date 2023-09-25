@@ -94,6 +94,12 @@ fn test_italic() {
     );
 }
 
+/// Two underscores in a row are treated as normal text.
+#[test]
+fn test_double_underscore() {
+    check(b"MINIMIZE__WITH", &[Text(Span::new(0, 14))])
+}
+
 #[test]
 fn test_bib() {
     check(
@@ -189,6 +195,10 @@ fn edge_cases() {
     check(
         b"~</HTML>",
         &[Label(0, Span::new(1, 1)), Text(Span::new(1, 8))],
+    );
+    check(
+        b"_a__b_",
+        &[StartItalic(0), Text(Span::new(1, 5)), EndItalic(5)],
     );
 }
 
