@@ -432,7 +432,8 @@ fn verify_markup_comment(
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
-                check_uninterpreted_escapes(buf, sp, is_text_escape, |c, d| {
+                let escape = |c| is_text_escape(in_html.is_some(), c);
+                check_uninterpreted_escapes(buf, sp, escape, |c, d| {
                     // Don't report on unescaped [ in regular text
                     if c != b'[' {
                         diag(d)

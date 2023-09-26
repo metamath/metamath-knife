@@ -77,8 +77,8 @@ pub enum CommentItem {
 /// meaning that doubled occurrences are turned into single occurrences.
 #[inline]
 #[must_use]
-pub const fn is_text_escape(c: u8) -> bool {
-    matches!(c, b'`' | b'[' | b'~' | b'_')
+pub const fn is_text_escape(html_mode: bool, c: u8) -> bool {
+    matches!(c, b'`' | b'[' | b'~') || !html_mode && c == b'_'
 }
 
 /// Returns true if this is a character that is escaped in
@@ -101,8 +101,8 @@ pub const fn is_math_escape(c: u8) -> bool {
 impl CommentItem {
     /// Remove text escapes from a markup segment `buf`, generally coming from the
     /// [`CommentItem::Text`] field.
-    pub fn unescape_text(buf: &[u8], out: &mut Vec<u8>) {
-        unescape(buf, out, is_text_escape)
+    pub fn unescape_text(html_mode: bool, buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, |c| is_text_escape(html_mode, c))
     }
 
     /// Remove text escapes from a markup segment `buf`, generally coming from the
@@ -158,7 +158,7 @@ impl<'a> CommentParser<'a> {
     /// Remove text escapes from a markup segment `span`, generally coming from the
     /// [`CommentItem::Text`] field.
     pub fn unescape_text(&self, span: Span, out: &mut Vec<u8>) {
-        CommentItem::unescape_text(span.as_ref(self.buf), out)
+        CommentItem::unescape_text(self.html_mode, span.as_ref(self.buf), out)
     }
 
     /// Remove text escapes from a markup segment `span`, generally coming from the
