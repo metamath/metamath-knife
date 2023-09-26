@@ -214,7 +214,11 @@ fn test_label() {
     );
     check(
         b"According to ~ https://en.wikipedia.org/wiki/Torsion_(algebra) , an element",
-        &[Text(Span::new(0, 13)), Url(13, Span::new(15, 62)), Text(Span::new(62, 75))],
+        &[
+            Text(Span::new(0, 13)),
+            Url(13, Span::new(15, 62)),
+            Text(Span::new(62, 75)),
+        ],
     );
 }
 
