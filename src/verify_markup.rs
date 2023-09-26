@@ -451,11 +451,7 @@ fn verify_markup_comment(
             CommentItem::Label(i, sp) | CommentItem::Url(i, sp) => {
                 ensure_space_before(buf, i, &mut diag);
                 ensure_space_after(buf, i, &mut diag);
-                check_uninterpreted_escapes(buf, sp, |c, d| {
-                    if c != b'_' {
-                        diag(d)
-                    }
-                });
+                check_uninterpreted_escapes(buf, sp, |_, d| diag(d));
                 check_uninterpreted_html(buf, sp, &mut diag);
                 if matches!(item, CommentItem::Label(..)) {
                     temp_buffer.clear();
