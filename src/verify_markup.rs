@@ -427,7 +427,7 @@ fn verify_markup_comment(
             CommentItem::Text(sp) => {
                 check_uninterpreted_escapes(buf, sp, |c, d| {
                     // Don't report on unescaped [ in regular text
-                    if c != b'[' {
+                    if c != b'[' && (in_html.is_none() || c != b'_') {
                         diag(d)
                     }
                 });
