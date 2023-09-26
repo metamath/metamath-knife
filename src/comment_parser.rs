@@ -73,13 +73,21 @@ pub enum CommentItem {
     BibTag(Span),
 }
 
-/// Returns true if this is a character that is escaped in [`CommentItem::Text`],
+/// Returns true if this is a character that is escaped in [`CommentItem::Text`] fields,
+/// meaning that doubled occurrences are turned into single occurrences.
+#[inline]
+#[must_use]
+pub const fn is_text_escape(html_mode: bool, c: u8) -> bool {
+    matches!(c, b'`' | b'[' | b'~') || !html_mode && c == b'_'
+}
+
+/// Returns true if this is a character that is escaped in
 /// [`CommentItem::Label`] and [`CommentItem::Url`] fields,
 /// meaning that doubled occurrences are turned into single occurrences.
 #[inline]
 #[must_use]
-pub const fn is_text_escape(c: u8) -> bool {
-    matches!(c, b'`' | b'[' | b'~' | b'_')
+pub const fn is_label_escape(c: u8) -> bool {
+    matches!(c, b'`' | b'[' | b'~')
 }
 
 /// Returns true if this is a character that is escaped in [`CommentItem::MathToken`] fields,
@@ -92,9 +100,15 @@ pub const fn is_math_escape(c: u8) -> bool {
 
 impl CommentItem {
     /// Remove text escapes from a markup segment `buf`, generally coming from the
-    /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
-    pub fn unescape_text(buf: &[u8], out: &mut Vec<u8>) {
-        unescape(buf, out, is_text_escape)
+    /// [`CommentItem::Text`] field.
+    pub fn unescape_text(html_mode: bool, buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, |c| is_text_escape(html_mode, c))
+    }
+
+    /// Remove text escapes from a markup segment `buf`, generally coming from the
+    /// [`CommentItem::Label`] or [`CommentItem::Url`] fields.
+    pub fn unescape_label(buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, is_label_escape)
     }
 
     /// Remove math escapes from a markup segment `buf`, generally coming from the
@@ -142,9 +156,15 @@ impl<'a> CommentParser<'a> {
     }
 
     /// Remove text escapes from a markup segment `span`, generally coming from the
-    /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
+    /// [`CommentItem::Text`] field.
     pub fn unescape_text(&self, span: Span, out: &mut Vec<u8>) {
-        CommentItem::unescape_text(span.as_ref(self.buf), out)
+        CommentItem::unescape_text(self.html_mode, span.as_ref(self.buf), out)
+    }
+
+    /// Remove text escapes from a markup segment `span`, generally coming from the
+    /// [`CommentItem::Label`] or [`CommentItem::Url`] fields.
+    pub fn unescape_label(&self, span: Span, out: &mut Vec<u8>) {
+        CommentItem::unescape_label(span.as_ref(self.buf), out)
     }
 
     /// Remove math escapes from a markup segment `span`, generally coming from the
