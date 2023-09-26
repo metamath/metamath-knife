@@ -212,6 +212,10 @@ fn test_label() {
         b"Visit ~http://example.com",
         &[Text(Span::new(0, 6)), Url(6, Span::new(7, 25))],
     );
+    check(
+        b"test ~ https://a_b__c.com",
+        &[Text(Span::new(0, 5)), Url(5, Span::new(7, 25))],
+    );
 }
 
 #[test]

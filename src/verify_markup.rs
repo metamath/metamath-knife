@@ -9,7 +9,9 @@
 //! references, because this is what metamath.exe did. (Ideally, most or all of
 //! these hardcoded references can be replaced by `$j` commands in the future.)
 
-use crate::comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical};
+use crate::comment_parser::{
+    is_label_escape, is_text_escape, CommentItem, CommentParser, Date, Parenthetical,
+};
 use crate::diag::{BibError, Diagnostic};
 use crate::parser::{HeadingComment, HeadingLevel};
 use crate::scopeck::Hyp;
@@ -389,11 +391,16 @@ fn verify_markup_comment(
         }
     }
 
-    fn check_uninterpreted_escapes(buf: &[u8], sp: Span, mut diag: impl FnMut(u8, Diagnostic)) {
+    fn check_uninterpreted_escapes(
+        buf: &[u8],
+        sp: Span,
+        escape: impl Fn(u8) -> bool,
+        mut diag: impl FnMut(u8, Diagnostic),
+    ) {
         let mut i = sp.start as usize;
         while i < sp.end as usize {
             let c = buf[i];
-            if is_text_escape(c) {
+            if escape(c) {
                 if buf.get(i + 1) == Some(&c) {
                     i += 1;
                 } else {
@@ -425,7 +432,7 @@ fn verify_markup_comment(
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
-                check_uninterpreted_escapes(buf, sp, |c, d| {
+                check_uninterpreted_escapes(buf, sp, is_text_escape, |c, d| {
                     // Don't report on unescaped [ in regular text
                     if c != b'[' {
                         diag(d)
@@ -451,11 +458,11 @@ fn verify_markup_comment(
             CommentItem::Label(i, sp) | CommentItem::Url(i, sp) => {
                 ensure_space_before(buf, i, &mut diag);
                 ensure_space_after(buf, i, &mut diag);
-                check_uninterpreted_escapes(buf, sp, |_, d| diag(d));
+                check_uninterpreted_escapes(buf, sp, is_label_escape, |_, d| diag(d));
                 check_uninterpreted_html(buf, sp, &mut diag);
                 if matches!(item, CommentItem::Label(..)) {
                     temp_buffer.clear();
-                    CommentItem::unescape_text(sp.as_ref(buf), &mut temp_buffer);
+                    CommentItem::unescape_label(sp.as_ref(buf), &mut temp_buffer);
                     if temp_buffer.is_empty() {
                         diag(Diagnostic::EmptyLabel(i as u32))
                     } else if db.name_result().lookup_label(&temp_buffer).is_none() {
