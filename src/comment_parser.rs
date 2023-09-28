@@ -338,14 +338,10 @@ impl<'a> CommentParser<'a> {
 
     fn trim_space_after_close(&self) -> bool {
         self.buf.get(self.pos) == Some(&b' ')
-            && self.buf.get(self.pos + 1).map_or(false, |&c| {
-                CLOSING_PUNCTUATION.contains(&c)
-                    || c == b'\"'
-                        && self
-                            .buf
-                            .get(self.pos + 2)
-                            .map_or(true, u8::is_ascii_whitespace)
-            })
+            && self
+                .buf
+                .get(self.pos + 1)
+                .map_or(false, |c| CLOSING_PUNCTUATION.contains(c))
     }
 }
 
