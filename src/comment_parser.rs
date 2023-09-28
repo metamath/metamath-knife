@@ -138,6 +138,8 @@ pub struct CommentParser<'a> {
     end_subscript: usize,
 }
 
+const CLOSING_PUNCTUATION: &[u8] = b".,;)?!:]'\"_-";
+
 impl<'a> CommentParser<'a> {
     /// Construct a new `CommentParser` from a sub-span of a buffer.
     /// The returned comment items will have spans based on the input span,
@@ -189,7 +191,6 @@ impl<'a> CommentParser<'a> {
     }
 
     fn parse_subscript(&self) -> Option<usize> {
-        const CLOSING_PUNCTUATION: &[u8] = b".,;)?!:]'\"_-";
         let c = self.buf.get(self.pos + 1)?;
         if c.is_ascii_whitespace() || CLOSING_PUNCTUATION.contains(c) {
             return None;
@@ -323,11 +324,31 @@ impl<'a> CommentParser<'a> {
             CommentItem::Label(tilde, Span::new(label_start, self.pos))
         }
     }
+
+    fn trim_space_before_open(&self, lo: usize, pos: usize) -> bool {
+        lo + 2 <= pos
+            && self.buf[pos - 1] == b' '
+            && (b"([".contains(&self.buf[pos - 2])
+                || self.buf[pos - 2] == b'\"'
+                    && pos
+                        .checked_sub(3)
+                        .and_then(|i| self.buf.get(i))
+                        .map_or(true, u8::is_ascii_whitespace))
+    }
+
+    fn trim_space_after_close(&self) -> bool {
+        self.buf.get(self.pos) == Some(&b' ')
+            && self
+                .buf
+                .get(self.pos + 1)
+                .map_or(false, |c| CLOSING_PUNCTUATION.contains(c))
+    }
 }
 
 impl<'a> Iterator for CommentParser<'a> {
     type Item = CommentItem;
 
+    #[allow(clippy::cognitive_complexity)]
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(item) = self.item.take() {
             return Some(item);
@@ -347,6 +368,13 @@ impl<'a> Iterator for CommentParser<'a> {
                     end = self.pos;
                     self.pos += 1;
                     self.item = Some(self.parse_math_delim(end));
+                    if self.math_mode && self.trim_space_before_open(start, end) {
+                        // trim a single space if we are opening math mode after opening punct
+                        end -= 1;
+                    } else if !self.math_mode && self.trim_space_after_close() {
+                        // trim a single space if we are exiting math mode before closing punct
+                        self.pos += 1;
+                    }
                     break;
                 }
             } else if math_token {
@@ -369,7 +397,15 @@ impl<'a> Iterator for CommentParser<'a> {
                     self.pos += 2;
                 } else {
                     end = self.pos;
+                    if self.trim_space_before_open(start, end) {
+                        // trim a single space if we have a label after opening punct
+                        end -= 1;
+                    }
                     self.item = Some(self.parse_label());
+                    if self.trim_space_after_close() {
+                        // trim a single space if we have a label before closing punct
+                        self.pos += 1;
+                    }
                     break;
                 }
             } else if c == b'[' {

@@ -94,6 +94,34 @@ fn test_italic() {
     );
 }
 
+#[test]
+fn test_space_around_math() {
+    check(
+        b"a ` b ` c ~ d e",
+        &[
+            Text(Span::new(0, 2)),
+            StartMathMode(2),
+            MathToken(Span::new(4, 5)),
+            EndMathMode(6),
+            Text(Span::new(7, 10)),
+            Label(10, Span::new(12, 13)),
+            Text(Span::new(13, 15)),
+        ],
+    );
+    check(
+        b"\" ` x ` \" and ~x .",
+        &[
+            Text(Span::new(0, 1)),
+            StartMathMode(2),
+            MathToken(Span::new(4, 5)),
+            EndMathMode(6),
+            Text(Span::new(8, 14)),
+            Label(14, Span::new(15, 16)),
+            Text(Span::new(17, 18)),
+        ],
+    );
+}
+
 /// Two underscores in a row are treated as normal text.
 #[test]
 fn test_double_underscore() {
@@ -187,7 +215,7 @@ fn edge_cases() {
             StartMathMode(0),
             MathToken(Span::new(2, 3)),
             EndMathMode(4),
-            Text(Span::new(5, 8)),
+            Text(Span::new(6, 8)),
         ],
     );
 
