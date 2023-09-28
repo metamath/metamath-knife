@@ -725,6 +725,7 @@ impl<'a> StatementRef<'a> {
     }
 
     /// Returns a `HeadingComment` object for a heading comment (if it is actually a heading).
+    #[must_use]
     pub fn as_heading_comment(&self) -> Option<HeadingComment> {
         let StatementType::HeadingComment(lvl) = self.statement_type() else {
             return None;
