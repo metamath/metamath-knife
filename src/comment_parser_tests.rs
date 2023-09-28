@@ -187,7 +187,7 @@ fn edge_cases() {
             StartMathMode(0),
             MathToken(Span::new(2, 3)),
             EndMathMode(4),
-            Text(Span::new(5, 8)),
+            Text(Span::new(6, 8)),
         ],
     );
 
