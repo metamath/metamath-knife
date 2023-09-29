@@ -35,7 +35,7 @@ use std::{borrow::Cow, ops::Deref};
 
 use crate::{
     comment_parser::{CommentParser, Discouragements, ParentheticalIter},
-    parser::HeadingLevel,
+    parser::{HeadingComment, HeadingLevel},
     segment::SegmentRef,
 };
 
@@ -721,7 +721,16 @@ impl<'a> StatementRef<'a> {
     /// in this comment statement.
     #[must_use]
     pub fn parentheticals(&self) -> ParentheticalIter<'a> {
-        ParentheticalIter::new(&self.segment().segment.buffer, self.comment_contents())
+        ParentheticalIter::new(&self.segment.segment.buffer, self.comment_contents())
+    }
+
+    /// Returns a `HeadingComment` object for a heading comment (if it is actually a heading).
+    #[must_use]
+    pub fn as_heading_comment(&self) -> Option<HeadingComment> {
+        let StatementType::HeadingComment(lvl) = self.statement_type() else {
+            return None;
+        };
+        HeadingComment::parse(&self.segment.buffer, lvl, self.comment_contents())
     }
 }
 

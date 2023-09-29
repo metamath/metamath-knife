@@ -1093,13 +1093,21 @@ impl SegmentSet {
     }
 }
 
-pub(crate) struct HeadingComment {
-    pub(crate) header: Span,
-    pub(crate) content: Span,
+/// A parsed heading comment.
+#[derive(Debug, Clone, Copy)]
+pub struct HeadingComment {
+    /// The header part of the heading comment (the text of the header)
+    pub header: Span,
+    /// The content part of the heading comment (descriptive text regarding the header)
+    pub content: Span,
 }
 
 impl HeadingComment {
-    pub(crate) fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
+    /// Parses a heading comment at the given span in a segment buffer,
+    /// with the specified heading level and span. Returns `None` if this is not a heading comment
+    /// or it is malformed.
+    #[must_use]
+    pub fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
         lazy_static::lazy_static! {
             static ref MAJOR_PART: Regex =
                 Regex::new(r"^[ \n]+#{4,}\n *([^\n]*)\n#{4,}\n").unwrap();
@@ -1125,7 +1133,9 @@ impl HeadingComment {
         })
     }
 
-    pub(crate) fn parse_mathbox_header(&self, buf: &[u8]) -> Option<Span> {
+    /// Parses a mathbox heading comment, returning the span of the author name.
+    #[must_use]
+    pub fn parse_mathbox_header(&self, buf: &[u8]) -> Option<Span> {
         lazy_static::lazy_static! {
             static ref MATHBOX_FOR: Regex = Regex::new(r"^Mathbox for (.*)$").unwrap();
         }
