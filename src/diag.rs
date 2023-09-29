@@ -1108,7 +1108,7 @@ impl Diagnostic {
                 notes = &[
                     "This character has special meaning in this position, \
                     but it was not interpretable here.",
-                    "Use ~~ or [[ or `` or __ if you mean to include the character literally"
+                    "Use ~~ or [[ or `` or \\__ if you mean to include the character literally"
                 ];
                 ("Invalid escape character".into(), vec![(
                     AnnotationType::Warning,
