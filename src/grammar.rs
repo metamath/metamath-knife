@@ -789,7 +789,7 @@ impl Grammar {
                     typecode,
                 } = *self.nodes.get(next_node.next_node_id)
                 {
-                    let mut reduce_vec = next_node.leaf_label.clone();
+                    let mut reduce_vec = next_node.leaf_label;
                     for reduce in stored_reduces {
                         reduce_vec.push(reduce);
                     }
