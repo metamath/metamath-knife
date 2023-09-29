@@ -416,18 +416,20 @@ impl Grammar {
             let buf = &**sref.buffer;
             for (_, (_, command)) in &sref.j_commands {
                 use CommandToken::*;
-                match &**command {
-                    [Keyword(cmd), sort, Keyword(as_), logic]
-                        if cmd.as_ref(buf) == b"syntax" && as_.as_ref(buf) == b"as" =>
-                    {
+                let [Keyword(cmd), rest @ ..] = &**command else { continue };
+                let b"syntax" = cmd.as_ref(buf) else { continue };
+                match rest {
+                    [sort, Keyword(as_), logic] if as_.as_ref(buf) == b"as" => {
                         self.provable_type = nset.lookup_symbol(&sort.value(buf)).unwrap().atom;
                         self.logic_type = nset.lookup_symbol(&logic.value(buf)).unwrap().atom;
-                        self.typecodes.push(self.logic_type);
+                        self.typecodes.push(self.provable_type);
                     }
-                    [Keyword(cmd), sort] if cmd.as_ref(buf) == b"syntax" => self
-                        .typecodes
-                        .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom),
-                    _ => {}
+                    _ => {
+                        for sort in rest {
+                            self.typecodes
+                                .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom)
+                        }
+                    }
                 }
             }
         }
@@ -1090,7 +1092,6 @@ impl Grammar {
         db: &Database,
         names: &mut NameReader<'_>,
     ) -> Result<(), (StatementAddress, Diagnostic)> {
-        let nset = db.name_result();
         for sref in db.parse_result().segments(..) {
             let buf = &**sref.buffer;
             for &(ix, (span, ref command)) in &sref.j_commands {
@@ -1102,29 +1103,6 @@ impl Grammar {
                 {
                     // Empty parser command
                     match k.as_ref(buf) {
-                        b"syntax" => match rest {
-                            [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
-                                // syntax '|-' as 'wff';
-                                self.provable_type = nset
-                                    .lookup_symbol(&ty.value(buf))
-                                    .ok_or((address, undefined_cmd(ty, buf)))?
-                                    .atom;
-                                self.typecodes.push(
-                                    nset.lookup_symbol(&code.value(buf))
-                                        .ok_or((address, undefined_cmd(code, buf)))?
-                                        .atom,
-                                );
-                            }
-                            [ty] => {
-                                // syntax 'setvar';
-                                self.typecodes.push(
-                                    nset.lookup_symbol(&ty.value(buf))
-                                        .ok_or((address, undefined_cmd(ty, buf)))?
-                                        .atom,
-                                );
-                            }
-                            _ => {}
-                        },
                         // Handle Ambiguous prefix commands
                         b"garden_path" => {
                             let split_index = rest
@@ -1218,77 +1196,92 @@ impl Grammar {
                     // We found a leaf: REDUCE
                     Self::do_reduce(&mut formula_builder, reduce, nset);
 
-                    if e.expected_typecodes.contains(&typecode) {
-                        // We found an expected typecode, pop from the stack and continue
-                        if let Some(popped) = stack.pop() {
-                            e = popped;
-                            debug!(
-                                " ++ Finished parsing formula, found typecode {:?}, back to {}",
-                                as_str(nset.atom_name(typecode)),
-                                e.node_id
-                            );
-                            let map = self.get_branch(e.node_id);
-                            match map.get(&(SymbolType::Variable, typecode)) {
-                                Some(NextNode {
-                                    next_node_id,
-                                    leaf_label,
-                                }) => {
-                                    // Found a sub-formula: First optionally REDUCE and continue
-                                    for &reduce in leaf_label {
-                                        Self::do_reduce(&mut formula_builder, reduce, nset);
-                                    }
+                    loop {
+                        if e.expected_typecodes.contains(&typecode) {
+                            // We found an expected typecode, pop from the stack and continue
+                            if let Some(popped) = stack.pop() {
+                                e = popped;
+                                debug!(
+                                    " ++ Finished parsing formula, found typecode {:?}, back to {}",
+                                    as_str(nset.atom_name(typecode)),
+                                    e.node_id
+                                );
+                                let map = self.get_branch(e.node_id);
+                                match map.get(&(SymbolType::Variable, typecode)) {
+                                    Some(NextNode {
+                                        next_node_id,
+                                        leaf_label,
+                                    }) => {
+                                        // Found a sub-formula: First optionally REDUCE and continue
+                                        for &reduce in leaf_label {
+                                            Self::do_reduce(&mut formula_builder, reduce, nset);
+                                        }
 
-                                    e.node_id = *next_node_id;
-                                    debug!("   Next Node: {:?}", e.node_id);
+                                        e.node_id = *next_node_id;
+                                        debug!("   Next Node: {:?}", e.node_id);
+                                    }
+                                    None => {
+                                        debug!("TODO");
+                                    }
                                 }
-                                None => {
-                                    debug!("TODO");
+                            } else if symbol_enum.peek().is_none() {
+                                // We popped the last element from the stack and we are at the end of the math string, success
+                                if typecode == self.logic_type && convert_to_provable {
+                                    typecode = self.provable_type;
                                 }
+                                return Ok(formula_builder.build(typecode));
+                            } else {
+                                // There are still symbols to parse, continue from root
+                                let (next_node_id, leaf_label) = self
+                                    .next_var_node(self.root, typecode)
+                                    .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
+                                for &reduce in leaf_label {
+                                    Self::do_reduce(&mut formula_builder, reduce, nset);
+                                }
+                                e.node_id = next_node_id;
                             }
-                        } else if symbol_enum.peek().is_none() {
-                            // We popped the last element from the stack and we are at the end of the math string, success
-                            if typecode == self.logic_type && convert_to_provable {
-                                typecode = self.provable_type;
-                            }
-                            return Ok(formula_builder.build(typecode));
-                        } else {
-                            // There are still symbols to parse, continue from root
-                            let (next_node_id, leaf_label) = self
-                                .next_var_node(self.root, typecode)
-                                .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
+                            break;
+                        }
+                        // // We have parsed everything but did not obtain an expected typecode, try a type conversion.
+                        // if symbol_enum.peek().is_none() {
+                        //     for (from_typecode, to_typecode, label) in &self.type_conversions {
+                        //         if *from_typecode == typecode
+                        //             && e.expected_typecodes.contains(to_typecode)
+                        //         {
+                        //             let reduce = Reduce::new(*label, 1);
+                        //             Self::do_reduce(&mut formula_builder, reduce, nset);
+                        //             let typecode =
+                        //                 if *to_typecode == self.logic_type && convert_to_provable {
+                        //                     self.provable_type
+                        //                 } else {
+                        //                     *to_typecode
+                        //                 };
+                        //             return Ok(formula_builder.build(typecode));
+                        //         }
+                        //     }
+                        // }
+                        // We have not found the expected typecode, continue from root
+                        debug!(" ++ Wrong type obtained, continue.");
+                        if let Some((next_node_id, leaf_label)) =
+                            self.next_var_node(self.root, typecode)
+                        {
                             for &reduce in leaf_label {
                                 Self::do_reduce(&mut formula_builder, reduce, nset);
                             }
                             e.node_id = next_node_id;
+                            break;
                         }
-                    } else {
-                        // We have parsed everything but did not obtain an expected typecode, try a type conversion.
-                        if symbol_enum.peek().is_none() {
-                            for (from_typecode, to_typecode, label) in &self.type_conversions {
-                                if *from_typecode == typecode
-                                    && e.expected_typecodes.contains(to_typecode)
-                                {
-                                    let reduce = Reduce::new(*label, 1);
-                                    Self::do_reduce(&mut formula_builder, reduce, nset);
-                                    let typecode =
-                                        if *to_typecode == self.logic_type && convert_to_provable {
-                                            self.provable_type
-                                        } else {
-                                            *to_typecode
-                                        };
-                                    return Ok(formula_builder.build(typecode));
-                                }
-                            }
-                        }
-                        // We have not found the expected typecode, continue from root
-                        debug!(" ++ Wrong type obtained, continue.");
-                        let (next_node_id, leaf_label) = self
-                            .next_var_node(self.root, typecode)
+
+                        // We did not obtain an expected typecode, try a type conversion.
+                        debug!(" ++ Can't shift, try a type conversion.");
+                        let (_, to, label) = self
+                            .type_conversions
+                            .iter()
+                            .find(|(from, _, _)| *from == typecode)
                             .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
-                        for &reduce in leaf_label {
-                            Self::do_reduce(&mut formula_builder, reduce, nset);
-                        }
-                        e.node_id = next_node_id;
+                        let reduce = Reduce::new(*label, 1);
+                        Self::do_reduce(&mut formula_builder, reduce, nset);
+                        typecode = *to;
                     }
                 }
                 GrammarNode::Branch { ref map } => {

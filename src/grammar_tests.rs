@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use simple_logger::SimpleLogger;
+
 use crate::as_str;
 use crate::database::Database;
 use crate::database::DbOptions;
@@ -327,6 +329,40 @@ macro_rules! grammar_test {
             assert_eq!(grammar.diagnostics(), &[(sa!($id, $index), $diag)]);
         }
     };
+}
+
+const ISSUE_135: &[u8] = b"
+    $c = class wff setvar -> ( ) |- + [ ] $.
+    $( $j syntax 'setvar' 'class' 'wff'; syntax '|-' as 'wff'; $)
+    $v x A B ph ps $.
+    vx $f setvar x $.
+    wph $f wff ph $.
+    wps $f wff ps $.
+    cA $f class A $.
+    cB $f class B $.
+    cv $a class x $.
+    wn $a wff [ A ] $.
+    wceq $a wff A = B $.
+    wi $a wff ( ph -> ps ) $.
+    cdif $a class ( A + B ) $.
+    ax1 $a |- [ x ] $.
+    ax2 $a |- ( x = x -> ph ) $.
+";
+
+#[test]
+fn test_issue_135() {
+    SimpleLogger::new().without_timestamps().init().unwrap();
+    let mut db = mkdb(ISSUE_135);
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let sref = db.statement(b"ax1").unwrap();
+    let formula = stmt_parse.get_formula(&sref).unwrap();
+    assert_eq!(formula.as_ref(&db).as_sexpr(), "(wn (cv vx))");
+    let sref = db.statement(b"ax2").unwrap();
+    let formula = stmt_parse.get_formula(&sref).unwrap();
+    assert_eq!(
+        formula.as_ref(&db).as_sexpr(),
+        "(wi (wceq (cv vx) (cv vx)) wph)"
+    );
 }
 
 grammar_test!(

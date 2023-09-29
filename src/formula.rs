@@ -753,14 +753,14 @@ impl<'a> Debug for FormulaRef<'a> {
     }
 }
 
-#[derive(Default)]
+/// A utility to build a formula.
+#[derive(Default, Debug)]
 pub(crate) struct FormulaBuilder {
     stack: Vec<NodeId>,
     variables: Bitset,
     tree: Tree<Label>,
 }
 
-/// A utility to build a formula.
 impl FormulaBuilder {
     pub(crate) fn from_formula(fmla: Formula) -> Self {
         let stack = vec![fmla.root];
