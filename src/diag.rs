@@ -1108,7 +1108,8 @@ impl Diagnostic {
                 notes = &[
                     "This character has special meaning in this position, \
                     but it was not interpretable here.",
-                    "Use ~~ or [[ or `` or \\_\\_ if you mean to include the character literally"
+                    // Zero width space, see #136
+                    "Use ~~ or [[ or `` or _\u{200B}_ if you mean to include the character literally"
                 ];
                 ("Invalid escape character".into(), vec![(
                     AnnotationType::Warning,
