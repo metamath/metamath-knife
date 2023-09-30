@@ -424,9 +424,12 @@ impl Grammar {
                         self.logic_type = nset.lookup_symbol(&logic.value(buf)).unwrap().atom;
                         self.typecodes.push(self.logic_type);
                     }
-                    [Keyword(cmd), sort] if cmd.as_ref(buf) == b"syntax" => self
-                        .typecodes
-                        .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom),
+                    [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"syntax" => {
+                        for sort in rest {
+                            self.typecodes
+                                .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom)
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -517,31 +520,24 @@ impl Grammar {
         stype: SymbolType,
         add_reduce: ReduceVec,
     ) -> Result<NodeId, NodeId> {
-        match self.nodes.get_mut(to_node) {
-            GrammarNode::Leaf { .. } => {
-                Err(to_node) // Error: cannot add to a leaf node, `to_node` is the conflicting node
-            }
-            GrammarNode::Branch { map } => {
-                match map.get(&(stype, symbol)) {
-                    Some(prev_node) if prev_node.leaf_label == add_reduce => {
-                        Ok(prev_node.next_node_id)
-                    }
-                    Some(prev_node) => Err(prev_node.next_node_id),
-                    None => {
-                        let new_node_id = self.nodes.create_branch();
-                        // here we have to re-borrow from self after the creation,
-                        // because the previous var_map and cst_map may not be valid pointers anymore
-                        if let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) {
-                            map.insert(
-                                (stype, symbol),
-                                NextNode::new_with_reduce_vec(new_node_id, add_reduce),
-                            );
-                            Ok(new_node_id)
-                        } else {
-                            panic!("Shall not happen!");
-                        }
-                    }
-                }
+        let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) else {
+            return Err(to_node); // Error: cannot add to a leaf node, `to_node` is the conflicting node
+        };
+        match map.get(&(stype, symbol)) {
+            Some(prev_node) if prev_node.leaf_label == add_reduce => Ok(prev_node.next_node_id),
+            Some(prev_node) => Err(prev_node.next_node_id),
+            None => {
+                let new_node_id = self.nodes.create_branch();
+                // here we have to re-borrow from self after the creation,
+                // because the previous var_map and cst_map may not be valid pointers anymore
+                let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) else {
+                    unreachable!();
+                };
+                map.insert(
+                    (stype, symbol),
+                    NextNode::new_with_reduce_vec(new_node_id, add_reduce),
+                );
+                Ok(new_node_id)
             }
         }
     }
@@ -574,14 +570,11 @@ impl Grammar {
                 .lookup_symbol(token_ptr)
                 .ok_or_else(|| Diagnostic::UndefinedToken(sref.math_span(1), token_ptr.into()))?;
             if symbol.stype == SymbolType::Variable {
-                let from_typecode = match names.lookup_float(token_ptr) {
-                    Some(lookup_float) => lookup_float.typecode_atom,
-                    _ => {
-                        return Err(Diagnostic::VariableMissingFloat(1));
-                    }
+                let Some(lookup_float) = names.lookup_float(token_ptr) else {
+                    return Err(Diagnostic::VariableMissingFloat(1));
                 };
                 self.type_conversions
-                    .push((from_typecode, this_typecode, this_label));
+                    .push((lookup_float.typecode_atom, this_typecode, this_label));
                 return Ok(()); // we don't need to add the type conversion axiom itself to the grammar (or do we?)
             }
         }
@@ -605,14 +598,13 @@ impl Grammar {
                         .typecode_atom
                 }
             };
-            match match &tokens.peek() {
-                Some(_) => self.add_branch_with_reduce(node, atom, symbol.stype, ReduceVec::new()),
-                None => {
-                    let leaf_node_id = self
-                        .nodes
-                        .create_leaf(Reduce::new(this_label, var_count), this_typecode);
-                    self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
-                }
+            match if tokens.peek().is_some() {
+                self.add_branch_with_reduce(node, atom, symbol.stype, ReduceVec::new())
+            } else {
+                let leaf_node_id = self
+                    .nodes
+                    .create_leaf(Reduce::new(this_label, var_count), this_typecode);
+                self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
             } {
                 Ok(next_node) => {
                     node = next_node;
@@ -662,21 +654,19 @@ impl Grammar {
             as_str(nset.statement_name(sref))
         );
 
-        match self.nodes.get_mut(self.root) {
-            // We ignore the ambiguity in floats, since they are actually frame dependent.
-            GrammarNode::Branch { map } => {
-                map.insert(
-                    (SymbolType::Constant, symbol.atom),
-                    NextNode::new(leaf_node),
-                );
-                Ok(())
-                // match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
-                //     None => Ok(()),
-                //     Some(_) => Err(self.ambiguous(conflict_node.next_node_id, nset)),
-                // }
-            }
-            GrammarNode::Leaf { .. } => panic!("Root node shall be a branch node!"),
-        }
+        let GrammarNode::Branch { map } = self.nodes.get_mut(self.root) else {
+            unreachable!("Root node must be a branch node!")
+        };
+        // We ignore the ambiguity in floats, since they are actually frame dependent.
+        map.insert(
+            (SymbolType::Constant, symbol.atom),
+            NextNode::new(leaf_node),
+        );
+        Ok(())
+        // match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
+        //     None => Ok(()),
+        //     Some(_) => Err(self.ambiguous(conflict_node.next_node_id, nset)),
+        // }
     }
 
     /// Handle type conversion:
@@ -737,16 +727,14 @@ impl Grammar {
     }
 
     fn next_var_node(&self, node_id: NodeId, typecode: TypeCode) -> Option<(NodeId, &ReduceVec)> {
-        match self.nodes.get(node_id) {
-            GrammarNode::Branch { map } => match map.get(&(SymbolType::Variable, typecode)) {
-                Some(NextNode {
-                    next_node_id,
-                    leaf_label,
-                }) => Some((*next_node_id, leaf_label)),
-                _ => None,
-            },
-            GrammarNode::Leaf { .. } => None,
-        }
+        let GrammarNode::Branch { map } = self.nodes.get(node_id) else {
+            return None;
+        };
+        let NextNode {
+            next_node_id,
+            leaf_label,
+        } = map.get(&(SymbolType::Variable, typecode))?;
+        Some((*next_node_id, leaf_label))
     }
 
     /// Recursively clone the whole grammar tree starting from `add_from_node_id`
@@ -1096,26 +1084,26 @@ impl Grammar {
             for &(ix, (span, ref command)) in &sref.j_commands {
                 use CommandToken::*;
                 let address = StatementAddress::new(sref.id, ix);
-                if let (Keyword(k), rest) = command
-                    .split_first()
-                    .ok_or((address, Diagnostic::BadCommand(span)))?
-                {
-                    // Empty parser command
-                    match k.as_ref(buf) {
-                        b"syntax" => match rest {
-                            [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
-                                // syntax '|-' as 'wff';
-                                self.provable_type = nset
-                                    .lookup_symbol(&ty.value(buf))
-                                    .ok_or((address, undefined_cmd(ty, buf)))?
-                                    .atom;
-                                self.typecodes.push(
-                                    nset.lookup_symbol(&code.value(buf))
-                                        .ok_or((address, undefined_cmd(code, buf)))?
-                                        .atom,
-                                );
-                            }
-                            [ty] => {
+                let [Keyword(k), ref rest @ ..] = **command else {
+                    return Err((address, Diagnostic::BadCommand(span)));
+                };
+                // Empty parser command
+                match k.as_ref(buf) {
+                    b"syntax" => match rest {
+                        [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
+                            // syntax '|-' as 'wff';
+                            self.provable_type = nset
+                                .lookup_symbol(&ty.value(buf))
+                                .ok_or((address, undefined_cmd(ty, buf)))?
+                                .atom;
+                            self.typecodes.push(
+                                nset.lookup_symbol(&code.value(buf))
+                                    .ok_or((address, undefined_cmd(code, buf)))?
+                                    .atom,
+                            );
+                        }
+                        _ => {
+                            for ty in rest {
                                 // syntax 'setvar';
                                 self.typecodes.push(
                                     nset.lookup_symbol(&ty.value(buf))
@@ -1123,38 +1111,29 @@ impl Grammar {
                                         .atom,
                                 );
                             }
-                            _ => {}
-                        },
-                        // Handle Ambiguous prefix commands
-                        b"garden_path" => {
-                            let split_index = rest
-                                .iter()
-                                .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
-                                .ok_or((address, Diagnostic::BadCommand(*k)))?; // '=>' not present in 'garden_path' command
-                            let (prefix, shadows) = rest.split_at(split_index);
-                            if let Err(diag) =
-                                self.handle_common_prefixes(prefix, &shadows[1..], buf, db, names)
-                            {
-                                return Err((address, diag));
-                            }
                         }
-                        // Handle replacement schemes
-                        b"type_conversions" => {
-                            for &(from_typecode, to_typecode, label) in
-                                &self.type_conversions.clone()
-                            {
-                                if let Err(diag) = self.perform_type_conversion(
-                                    from_typecode,
-                                    to_typecode,
-                                    label,
-                                    db,
-                                ) {
-                                    return Err((address, diag));
-                                }
-                            }
+                    },
+                    // Handle Ambiguous prefix commands
+                    b"garden_path" => {
+                        let split_index = rest
+                            .iter()
+                            .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
+                            .ok_or((address, Diagnostic::BadCommand(k)))?; // '=>' not present in 'garden_path' command
+                        let (prefix, shadows) = rest.split_at(split_index);
+                        if let Err(diag) =
+                            self.handle_common_prefixes(prefix, &shadows[1..], buf, db, names)
+                        {
+                            return Err((address, diag));
                         }
-                        _ => {}
                     }
+                    // Handle replacement schemes
+                    b"type_conversions" => {
+                        for &(from_typecode, to_typecode, label) in &self.type_conversions.clone() {
+                            self.perform_type_conversion(from_typecode, to_typecode, label, db)
+                                .map_err(|diag| (address, diag))?;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
