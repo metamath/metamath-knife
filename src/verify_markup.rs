@@ -286,6 +286,15 @@ impl Database {
                         eol_check(&mut diags, &seg, line_start, i);
                         line_start = i + 1;
                     }
+                    b'\r' => {
+                        eol_check(&mut diags, &seg, line_start, i);
+                        line_start = if seg.buffer.get(i + 1) == Some(&b'\n') {
+                            iter.next();
+                            i + 2
+                        } else {
+                            i + 1
+                        }
+                    }
                     b'\t' => {
                         let count = seg.buffer[i..].iter().take_while(|&&c| c == b'\t').count();
                         for _ in 1..count {
