@@ -226,6 +226,7 @@ fn main() {
 
         #[cfg(feature = "dot")]
         if matches.is_present("export_grammar_dot") {
+            db.grammar_pass();
             db.export_grammar_dot();
         }
 
