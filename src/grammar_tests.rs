@@ -9,7 +9,6 @@ use crate::nameck::Nameset;
 use crate::statement::SegmentId;
 use crate::statement::StatementAddress;
 use crate::Span;
-use simple_logger::SimpleLogger;
 
 macro_rules! sa {
     ($id: expr, $index:expr) => {
@@ -351,7 +350,6 @@ const ISSUE_135: &[u8] = b"
 
 #[test]
 fn test_issue_135() {
-    SimpleLogger::new().without_timestamps().init().unwrap();
     let mut db = mkdb(ISSUE_135);
     let stmt_parse = db.stmt_parse_pass().clone();
     let sref = db.statement(b"ax1").unwrap();
