@@ -124,6 +124,16 @@ pub struct VerifyExpr {
     pub tail: Box<[ExprFragment]>,
 }
 
+impl VerifyExpr {
+    /// Returns an iterator over runs of constants in the expression,
+    /// as references into the constant pool.
+    pub fn const_ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+        (self.tail.iter().map(|e| &e.prefix))
+            .chain(std::iter::once(&self.rump))
+            .cloned()
+    }
+}
+
 /// Representation of a hypothesis in a frame program.
 #[derive(Clone, Debug)]
 pub enum Hyp {
