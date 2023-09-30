@@ -1102,13 +1102,13 @@ impl HeadingComment {
     pub(crate) fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
         lazy_static::lazy_static! {
             static ref MAJOR_PART: Regex =
-                Regex::new(r"^[ \n]+#{4,}\n *([^\n]*)\n#{4,}\n").unwrap();
+                Regex::new(r"^[ \r\n]+#{4,}\r?\n *([^\n]*)\r?\n#{4,}\r?\n").unwrap();
             static ref SECTION: Regex =
-                Regex::new(r"^[ \n]+(?:#\*){2,}#?\n *([^\n]*)\n(?:#\*){2,}#?\n").unwrap();
+                Regex::new(r"^[ \r\n]+(?:#\*){2,}#?\r?\n *([^\n]*)\r?\n(?:#\*){2,}#?\r?\n").unwrap();
             static ref SUBSECTION: Regex =
-                Regex::new(r"^[ \n]+(?:=-){2,}=?\n *([^\n]*)\n(?:=-){2,}=?\n").unwrap();
+                Regex::new(r"^[ \r\n]+(?:=-){2,}=?\r?\n *([^\n]*)\r?\n(?:=-){2,}=?\r?\n").unwrap();
             static ref SUBSUBSECTION: Regex =
-                Regex::new(r"^[ \n]+(?:-\.){2,}-?\n *([^\n]*)\n(?:-\.){2,}-?\n").unwrap();
+                Regex::new(r"^[ \r\n]+(?:-\.){2,}-?\r?\n *([^\n]*)\r?\n(?:-\.){2,}-?\r?\n").unwrap();
         }
         let regex = match lvl {
             HeadingLevel::MajorPart => &*MAJOR_PART,
