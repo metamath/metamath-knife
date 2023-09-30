@@ -304,7 +304,7 @@ impl<'a> CommentParser<'a> {
         while let Some(&c) = self.buf.get(self.pos) {
             match c {
                 b'[' | b'`' if self.buf.get(self.pos + 1) == Some(&c) => self.pos += 2,
-                b' ' | b'\n' | b'`' => break,
+                b' ' | b'\r' | b'\n' | b'`' => break,
                 b'[' if self.parse_bib().is_some() => break,
                 b'<' if self.buf[self.pos..].starts_with(b"<HTML>")
                     || self.buf[self.pos..].starts_with(b"</HTML>") =>
@@ -534,9 +534,9 @@ impl<'a> ParentheticalIter<'a> {
     pub fn new(buf: &'a [u8], span: Span) -> Self {
         lazy_static! {
             static ref PARENTHETICALS: Regex = Regex::new(concat!(
-                r"\((Contributed|Revised|Proof[ \n]+shortened)",
-                r"[ \n]+by[ \n]+([^,)]+),[ \n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
-                r"\((Proof[ \n]+modification|New[ \n]+usage)[ \n]+is[ \n]+discouraged\.\)",
+                r"\((Contributed|Revised|Proof[ \r\n]+shortened)",
+                r"[ \r\n]+by[ \r\n]+([^,)]+),[ \r\n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
+                r"\((Proof[ \r\n]+modification|New[ \r\n]+usage)[ \r\n]+is[ \r\n]+discouraged\.\)",
             ))
             .unwrap();
         }
