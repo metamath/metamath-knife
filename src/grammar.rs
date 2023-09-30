@@ -1161,12 +1161,18 @@ impl Grammar {
         Ok(())
     }
 
-    fn do_shift(&self, symbol_iter: &mut dyn Iterator<Item = FormulaToken>, nset: &Nameset) {
+    fn do_shift(
+        &self,
+        symbol_iter: &mut dyn Iterator<Item = Result<FormulaToken, StmtParseError>>,
+        nset: &Nameset,
+    ) -> Result<(), StmtParseError> {
         if let Some(token) = symbol_iter.next() {
+            let token = token?;
             if self.debug {
                 debug!("   SHIFT {:?}", as_str(nset.atom_name(token.symbol)));
             }
         }
+        Ok(())
     }
 
     fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Nameset) {
@@ -1189,7 +1195,7 @@ impl Grammar {
     /// Parses the given list of symbols into a formula syntax tree.
     pub fn parse_formula(
         &self,
-        symbol_iter: &mut impl Iterator<Item = FormulaToken>,
+        symbol_iter: &mut impl Iterator<Item = Result<FormulaToken, StmtParseError>>,
         expected_typecodes: &[TypeCode],
         convert_to_provable: bool,
         nset: &Nameset,
@@ -1201,9 +1207,12 @@ impl Grammar {
 
         let mut formula_builder = FormulaBuilder::default();
         let mut symbol_enum = symbol_iter.peekable();
-        let mut last_token = *symbol_enum
+        let Ok(mut last_token) = symbol_enum
             .peek()
-            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
+            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?
+        else {
+            return Err(symbol_enum.next().unwrap().unwrap_err());
+        };
         let mut e = StackElement {
             node_id: self.root,
             expected_typecodes: expected_typecodes.to_vec().into_boxed_slice(),
@@ -1292,7 +1301,7 @@ impl Grammar {
                     }
                 }
                 GrammarNode::Branch { ref map } => {
-                    if let Some(&token) = symbol_enum.peek() {
+                    if let Some(&Ok(token)) = symbol_enum.peek() {
                         last_token = token;
                         debug!("   {:?}", as_str(nset.atom_name(token.symbol)));
 
@@ -1307,7 +1316,7 @@ impl Grammar {
                             }
 
                             // Found an atom matching one of our next nodes: SHIFT, to the next node
-                            self.do_shift(&mut symbol_enum, nset);
+                            self.do_shift(&mut symbol_enum, nset)?;
                             e.node_id = *next_node_id;
                             debug!("   Next Node: {:?}", e.node_id);
                         } else {
@@ -1333,6 +1342,9 @@ impl Grammar {
                             };
                         }
                     } else {
+                        if let Some(token) = symbol_enum.next() {
+                            token?;
+                        }
                         return Err(Grammar::too_short(last_token, map, nset));
                     }
                 }
@@ -1401,6 +1413,47 @@ impl Iterator for FormulaTokenIter<'_> {
     }
 }
 
+/// An iterator through the tokens of a math expression
+#[derive(Debug)]
+pub struct StmtTokenIter<'a, 'b> {
+    span: &'a [Span],
+    buffer: &'a [u8],
+    index: usize,
+    names: &'a mut NameReader<'b>,
+}
+
+impl StatementRef<'_> {
+    /// Returns a new iterator over tokens of a math expression.
+    /// `names` caches the result of any name lookups performed.
+    pub fn token_iter<'a, 'b>(&'a self, names: &'a mut NameReader<'b>) -> StmtTokenIter<'a, 'b> {
+        let range = self.statement.math_start..self.statement.proof_start;
+        StmtTokenIter {
+            span: &self.segment.segment.span_pool[range],
+            buffer: &self.segment.segment.buffer,
+            index: 1,
+            names,
+        }
+    }
+}
+
+impl Iterator for StmtTokenIter<'_, '_> {
+    type Item = Result<FormulaToken, StmtParseError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let span = *self.span.get(self.index)?;
+        self.index += 1;
+        Some(
+            if let Some(lookup) = self.names.lookup_symbol(span.as_ref(self.buffer)) {
+                Ok(FormulaToken {
+                    symbol: lookup.atom,
+                    span,
+                })
+            } else {
+                Err(StmtParseError::UnknownToken(span))
+            },
+        )
+    }
+}
+
 impl Grammar {
     /// Parses a character string into a formula
     /// As a first math token, the string is expected to contain the typecode for the formula.
@@ -1410,12 +1463,10 @@ impl Grammar {
         formula_string: &str,
         nset: &Arc<Nameset>,
     ) -> Result<Formula, StmtParseError> {
-        let mut symbols = FormulaTokenIter::from_str(formula_string, nset)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter();
+        let mut symbols = FormulaTokenIter::from_str(formula_string, nset);
         let typecode = symbols
             .next()
-            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
+            .ok_or(StmtParseError::ParsedStatementNoTypeCode)??;
         let expected_typecode = if typecode.symbol == self.provable_type {
             self.logic_type
         } else {
@@ -1461,24 +1512,10 @@ impl Grammar {
             as_str(nset.statement_name(sref))
         );
 
-        let math_string: Result<Vec<_>, _> = sref
-            .math_iter()
-            .skip(1)
-            .map(|token| {
-                let span = sref.math_span(token.index());
-                if let Some(lookup) = names.lookup_symbol(token.slice) {
-                    Ok(FormulaToken {
-                        symbol: lookup.atom,
-                        span,
-                    })
-                } else {
-                    Err(StmtParseError::UnknownToken(span))
-                }
-            })
-            .collect();
+        let mut math_string = sref.token_iter(names);
         let convert_to_provable = typecode == self.provable_type;
         let formula = self.parse_formula(
-            &mut math_string?.into_iter(),
+            &mut math_string,
             &[expected_typecode],
             convert_to_provable,
             nset,

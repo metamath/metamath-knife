@@ -113,7 +113,7 @@ fn test_parse_formula() {
     let fmla_vec = vec![a, eq, open_parens, b, plus, a, close_parens];
     let formula = grammar
         .parse_formula(
-            &mut fmla_vec.clone().into_iter(),
+            &mut fmla_vec.iter().map(|t| Ok(*t)),
             &[wff, class],
             false,
             &names,
@@ -213,7 +213,7 @@ fn test_setvar_as_class() {
     {
         let formula = grammar
             .parse_formula(
-                &mut vec![x_symbol].into_iter(),
+                &mut std::iter::once(Ok(x_symbol)),
                 &[class_symbol],
                 false,
                 &names,
