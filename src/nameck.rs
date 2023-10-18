@@ -343,7 +343,7 @@ impl Nameset {
     #[must_use]
     pub fn lookup_label(&self, label: TokenPtr<'_>) -> Option<LookupLabel> {
         self.labels.get(label).and_then(|lslot| {
-            lslot.labels.first().map(|&(addr, _)| LookupLabel {
+            lslot.labels.first().map(|&(addr, ())| LookupLabel {
                 atom: lslot.atom,
                 address: addr,
             })
@@ -358,7 +358,7 @@ impl Nameset {
                 stype,
                 atom: syminfo.atom,
                 address: addr,
-                const_address: syminfo.constant.first().map(|&(addr, _)| addr),
+                const_address: syminfo.constant.first().map(|&(addr, ())| addr),
             })
         })
     }
