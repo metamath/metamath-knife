@@ -476,7 +476,7 @@ fn verify_markup_comment(
                     if temp_buffer.is_empty() {
                         diag(Diagnostic::EmptyLabel(i as u32))
                     } else if db.name_result().lookup_label(&temp_buffer).is_none() {
-                        diag(Diagnostic::UndefinedToken(sp, (&*temp_buffer).into()))
+                        diag(Diagnostic::UnknownLabel(sp))
                     }
                 }
             }
