@@ -1,0 +1,22 @@
+[package]
+name = "metamath-knife"
+readme = "metamath-knife/README.md"
+description = "A command-line tool for Metamath, including parallel and incremental verifier for Metamath databases"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+edition = "2021"
+
+[dependencies]
+clap = "2.33"
+simple_logger = "1.13"
+annotate-snippets = "0.9"
+metamath-rs = { path = "../metamath-rs" }
+
+[[bin]]
+name = "metamath-knife"
+path = "src/main.rs"
+doc = false

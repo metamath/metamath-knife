@@ -168,8 +168,17 @@ name = "metamath-knife"
 version = "0.3.6"
 dependencies = [
  "annotate-snippets",
- "assert_matches",
  "clap",
+ "metamath-rs",
+ "simple_logger",
+]
+
+[[package]]
+name = "metamath-rs"
+version = "0.3.6"
+dependencies = [
+ "annotate-snippets",
+ "assert_matches",
  "dot-writer",
  "filetime",
  "fnv",
@@ -177,7 +186,6 @@ dependencies = [
  "lazy_static",
  "log",
  "regex",
- "simple_logger",
  "tinyvec",
  "typed-arena",
  "xml-rs",
