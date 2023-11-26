@@ -2,7 +2,7 @@
 name = "metamath-knife"
 readme = "metamath-knife/README.md"
 description = "A command-line tool for Metamath, including parallel and incremental verifier for Metamath databases"
-version.workspace = true
+version = "0.3.6"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
