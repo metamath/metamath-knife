@@ -182,6 +182,7 @@ fn main() {
         }
 
         if matches.is_present("list_statements") {
+            db.scope_pass();
             _ = list_statements(&db, |_label| true, &mut stdout());
         }
 
