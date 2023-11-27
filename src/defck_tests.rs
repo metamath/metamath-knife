@@ -42,11 +42,15 @@ fn test_defck() {
 
     // Malformed Equality 'apple + banana + orange'
     assert_matches!(diags[0], (_, DefCkMalformedEquality(..)));
-    let DefCkMalformedEquality(malformed, _) = diags[0].1.clone() else { panic!() };
+    let DefCkMalformedEquality(malformed, _) = diags[0].1.clone() else {
+        panic!()
+    };
     assert_eq!(malformed, names.lookup_label(b"malformed").unwrap().address);
 
     // Duplicated Equality for 'fruit'
     assert_matches!(diags[1], (_, DefCkDuplicateEquality(..)));
-    let DefCkDuplicateEquality(dup_typecode, ..) = diags[1].1.clone() else { panic!() };
+    let DefCkDuplicateEquality(dup_typecode, ..) = diags[1].1.clone() else {
+        panic!()
+    };
     assert_eq!(&*dup_typecode, b"fruit");
 }

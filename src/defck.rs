@@ -67,7 +67,9 @@ fn nil(mut c: SubFormulaChildren<'_>) -> bool {
     c.next().is_none()
 }
 fn get_var(db: &Database, iter: &mut std::slice::Iter<'_, Hyp>) -> Option<Label> {
-    let Hyp::Floating(addr, _, _) = *iter.next()? else { return None };
+    let Hyp::Floating(addr, _, _) = *iter.next()? else {
+        return None;
+    };
     let label = db.statement_by_address(addr).label();
     Some(db.name_result().lookup_label(label)?.atom)
 }
@@ -85,7 +87,9 @@ fn check_hyp(
     iter: &mut std::slice::Iter<'_, Hyp>,
     f: impl FnOnce(SubFormulaRef<'_>) -> bool,
 ) -> Option<()> {
-    let Hyp::Essential(addr, _) = *iter.next()? else { return None };
+    let Hyp::Essential(addr, _) = *iter.next()? else {
+        return None;
+    };
     check(db, addr, f)
 }
 
@@ -195,7 +199,9 @@ impl DefinitionPass<'_> {
     }
 
     fn check_syntax_axiom(&mut self, stmt: &StatementRef<'_>) -> Result<(), Diagnostic> {
-        let Some(frame) = self.scope.get(stmt.label()) else { return Ok(()) };
+        let Some(frame) = self.scope.get(stmt.label()) else {
+            return Ok(());
+        };
         if frame
             .hypotheses
             .iter()
@@ -227,11 +233,11 @@ impl DefinitionPass<'_> {
                 let tok = label.value(buf);
                 let equality = self
                     .nset
-                    .lookup_label(tok)
+                    .lookup_label(&tok)
                     .ok_or_else(|| Diagnostic::UnknownLabel(label.span()))?;
                 match *self
                     .scope
-                    .get(tok)
+                    .get(&tok)
                     .ok_or_else(|| Diagnostic::UnknownLabel(label.span()))?
                     .hypotheses
                 {
@@ -289,7 +295,7 @@ impl DefinitionPass<'_> {
             }
             [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"primitive" => {
                 for label in rest {
-                    let primitive = self.nset.lookup_label(label.value(buf)).unwrap().atom;
+                    let primitive = self.nset.lookup_label(&label.value(buf)).unwrap().atom;
                     // Remove the definition from the pending list
                     if let Some(i) = self.pending_syntax.iter().position(|&x| x == primitive) {
                         self.pending_syntax.swap_remove(i);
@@ -312,10 +318,10 @@ impl DefinitionPass<'_> {
             {
                 let theorem = self
                     .nset
-                    .lookup_label(justif_label.value(buf))
+                    .lookup_label(&justif_label.value(buf))
                     .unwrap()
                     .atom;
-                let definition = self.nset.lookup_label(label.value(buf)).unwrap().atom;
+                let definition = self.nset.lookup_label(&label.value(buf)).unwrap().atom;
                 self.result
                     .justifications
                     .insert(definition, (theorem, (sref.id, justif_label.span())));
@@ -347,7 +353,7 @@ impl DefinitionPass<'_> {
 
         let Some(fmla) = self.stmts.get_formula(&stmt) else {
             // Ok because the error would have been reported already
-            return Ok(())
+            return Ok(());
         };
         let root = fmla.root(self.db);
         let mut is_param = Bitset::new();
