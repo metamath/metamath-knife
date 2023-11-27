@@ -139,7 +139,7 @@ impl GrammarTree {
 ///
 /// Example:
 /// ```
-/// use metamath_knife::database::{Database, DbOptions};
+/// use metamath_rs::database::{Database, DbOptions};
 ///
 /// // Setup the required options
 /// let mut options = DbOptions::default();
@@ -1675,7 +1675,7 @@ impl Grammar {
 ///
 /// Example:
 /// ```
-/// use metamath_knife::database::{Database, DbOptions};
+/// use metamath_rs::database::{Database, DbOptions};
 ///
 /// // Setup the required options
 /// let mut options = DbOptions::default();
