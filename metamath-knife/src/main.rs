@@ -4,12 +4,12 @@
 
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
-use metamath_knife::database::{Database, DbOptions};
-use metamath_knife::diag::BibError;
-use metamath_knife::parser::is_valid_label;
-use metamath_knife::statement::StatementAddress;
-use metamath_knife::verify_markup::{Bibliography, Bibliography2};
-use metamath_knife::SourceInfo;
+use metamath_rs::database::{Database, DbOptions};
+use metamath_rs::diag::BibError;
+use metamath_rs::parser::is_valid_label;
+use metamath_rs::statement::StatementAddress;
+use metamath_rs::verify_markup::{Bibliography, Bibliography2};
+use metamath_rs::SourceInfo;
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::{self, BufWriter};
