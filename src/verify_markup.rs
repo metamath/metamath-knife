@@ -9,7 +9,9 @@
 //! references, because this is what metamath.exe did. (Ideally, most or all of
 //! these hardcoded references can be replaced by `$j` commands in the future.)
 
-use crate::comment_parser::{is_text_escape, CommentItem, CommentParser, Date, Parenthetical};
+use crate::comment_parser::{
+    is_label_escape, is_text_escape, CommentItem, CommentParser, Date, Parenthetical,
+};
 use crate::diag::{BibError, Diagnostic};
 use crate::parser::{HeadingComment, HeadingLevel};
 use crate::scopeck::Hyp;
@@ -284,6 +286,15 @@ impl Database {
                         eol_check(&mut diags, &seg, line_start, i);
                         line_start = i + 1;
                     }
+                    b'\r' => {
+                        eol_check(&mut diags, &seg, line_start, i);
+                        line_start = if seg.buffer.get(i + 1) == Some(&b'\n') {
+                            iter.next();
+                            i + 2
+                        } else {
+                            i + 1
+                        }
+                    }
                     b'\t' => {
                         let count = seg.buffer[i..].iter().take_while(|&&c| c == b'\t').count();
                         for _ in 1..count {
@@ -389,11 +400,16 @@ fn verify_markup_comment(
         }
     }
 
-    fn check_uninterpreted_escapes(buf: &[u8], sp: Span, mut diag: impl FnMut(u8, Diagnostic)) {
+    fn check_uninterpreted_escapes(
+        buf: &[u8],
+        sp: Span,
+        escape: impl Fn(u8) -> bool,
+        mut diag: impl FnMut(u8, Diagnostic),
+    ) {
         let mut i = sp.start as usize;
         while i < sp.end as usize {
             let c = buf[i];
-            if is_text_escape(c) {
+            if escape(c) {
                 if buf.get(i + 1) == Some(&c) {
                     i += 1;
                 } else {
@@ -425,7 +441,8 @@ fn verify_markup_comment(
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
-                check_uninterpreted_escapes(buf, sp, |c, d| {
+                let escape = |c| is_text_escape(in_html.is_some(), c);
+                check_uninterpreted_escapes(buf, sp, escape, |c, d| {
                     // Don't report on unescaped [ in regular text
                     if c != b'[' {
                         diag(d)
@@ -451,15 +468,15 @@ fn verify_markup_comment(
             CommentItem::Label(i, sp) | CommentItem::Url(i, sp) => {
                 ensure_space_before(buf, i, &mut diag);
                 ensure_space_after(buf, i, &mut diag);
-                check_uninterpreted_escapes(buf, sp, |_, d| diag(d));
+                check_uninterpreted_escapes(buf, sp, is_label_escape, |_, d| diag(d));
                 check_uninterpreted_html(buf, sp, &mut diag);
                 if matches!(item, CommentItem::Label(..)) {
                     temp_buffer.clear();
-                    CommentItem::unescape_text(sp.as_ref(buf), &mut temp_buffer);
+                    CommentItem::unescape_label(sp.as_ref(buf), &mut temp_buffer);
                     if temp_buffer.is_empty() {
                         diag(Diagnostic::EmptyLabel(i as u32))
                     } else if db.name_result().lookup_label(&temp_buffer).is_none() {
-                        diag(Diagnostic::UndefinedToken(sp, (&*temp_buffer).into()))
+                        diag(Diagnostic::UnknownLabel(sp))
                     }
                 }
             }
@@ -527,6 +544,7 @@ impl Bibliography {
     pub fn parse<'a>(source: &'a SourceInfo, diags: &mut Vec<(&'a SourceInfo, BibError)>) -> Self {
         lazy_static::lazy_static! {
             static ref A_NAME: Regex =
+                #[allow(clippy::invalid_regex)] // https://github.com/rust-lang/rust-clippy/issues/10825
                 Regex::new("(?i-u)<a[[:space:]]name=['\"]?([^&>]*?)['\"]?>").unwrap();
         }
         let mut bib = HashMap::default();

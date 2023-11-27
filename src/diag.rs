@@ -907,7 +907,7 @@ impl Diagnostic {
                 stmt,
                 *marker,
             )]),
-            MissingContributor => ("No contribution comment".into(), vec![(
+            MissingContributor => ("Missing or malformed contribution comment".into(), vec![(
                 AnnotationType::Warning,
                 "No (Contributed by...) provided for this statement".into(),
                 stmt,
@@ -921,8 +921,8 @@ impl Diagnostic {
             )]),
             &MissingMarkupDef([html, alt_html, latex], span) => {
                 let msg = html.then_some("htmldef").into_iter()
-                    .chain(alt_html.then_some("althtmldef").into_iter())
-                    .chain(latex.then_some("latexdef").into_iter());
+                    .chain(alt_html.then_some("althtmldef"))
+                    .chain(latex.then_some("latexdef"));
                 (format!("Missing {} for token", msg.format(", ")).into(), vec![(
                     AnnotationType::Warning,
                     "This token has not been declared in the $t comment".into(),
@@ -1303,7 +1303,8 @@ impl Diagnostic {
                 notes = &[
                     "This character has special meaning in this position, \
                     but it was not interpretable here.",
-                    "Use ~~ or [[ or `` if you mean to include the character literally"
+                    // Zero width space, see #136
+                    "Use ~~ or [[ or `` or _\u{200B}_ if you mean to include the character literally"
                 ];
                 ("Invalid escape character".into(), vec![(
                     AnnotationType::Warning,

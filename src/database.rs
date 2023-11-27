@@ -636,7 +636,6 @@ impl Database {
     /// than error diagnostics.  It does not save any parsed proof data.
     pub fn verify_usage_pass(&mut self) -> &Arc<UsageResult> {
         if self.usage.is_none() {
-            self.stmt_parse_pass();
             time(&self.options.clone(), "usage", || {
                 let parse = self.parse_result();
                 let mut usage = UsageResult::default();
@@ -831,9 +830,7 @@ impl Database {
     /// Get a statement by label atom. Requires: [`Database::name_pass`]
     #[must_use]
     pub fn statement_by_label(&self, label: Label) -> Option<StatementRef<'_>> {
-        let token = self.name_result().atom_name(label);
-        let lookup = self.name_result().lookup_label(token)?;
-        Some(self.statement_by_address(lookup.address))
+        self.statement(self.name_result().atom_name(label))
     }
 
     /// Get a statement by address. **Panics** if the statement does not exist.
@@ -892,18 +889,34 @@ impl Database {
             .flat_map(move |seg| seg.range_address(&self.segments.order, (start2, end2)))
     }
 
-    /// Compare the database position of two labels. Proofs can only reference earlier theorems.
+    /// Compare the database position of two label atoms. Proofs can only reference earlier theorems.
     #[must_use]
-    pub fn cmp(&self, left: &Label, right: &Label) -> Option<std::cmp::Ordering> {
+    pub fn cmp_label(&self, left: &Label, right: &Label) -> Option<std::cmp::Ordering> {
         let token_left = self.name_result().atom_name(*left);
         let token_right = self.name_result().atom_name(*right);
-        let lookup_left = self.name_result().lookup_label(token_left)?;
-        let lookup_right = self.name_result().lookup_label(token_right)?;
+        self.cmp(token_left, token_right)
+    }
+
+    /// Compare the database position of two labels. Proofs can only reference earlier theorems.
+    #[must_use]
+    pub fn cmp(&self, left: &[u8], right: &[u8]) -> Option<std::cmp::Ordering> {
+        let lookup_left = self.name_result().lookup_label(left)?;
+        let lookup_right = self.name_result().lookup_label(right)?;
         Some(
             self.parse_result()
                 .order
                 .cmp(&lookup_left.address, &lookup_right.address),
         )
+    }
+
+    /// Compare the database position of two addresses. Proofs can only reference earlier theorems.
+    #[must_use]
+    pub fn cmp_address(
+        &self,
+        left: &StatementAddress,
+        right: &StatementAddress,
+    ) -> std::cmp::Ordering {
+        self.parse_result().order.cmp(left, right)
     }
 
     /// Returns the typecode for a given label.

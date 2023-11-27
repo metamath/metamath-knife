@@ -124,6 +124,16 @@ pub struct VerifyExpr {
     pub tail: Box<[ExprFragment]>,
 }
 
+impl VerifyExpr {
+    /// Returns an iterator over runs of constants in the expression,
+    /// as references into the constant pool.
+    pub fn const_ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+        (self.tail.iter().map(|e| &e.prefix))
+            .chain(std::iter::once(&self.rump))
+            .cloned()
+    }
+}
+
 /// Representation of a hypothesis in a frame program.
 #[derive(Clone, Debug)]
 pub enum Hyp {
@@ -270,11 +280,7 @@ struct ScopeState<'a> {
 }
 
 fn push_diagnostic(state: &mut ScopeState<'_>, ix: StatementIndex, diag: Diagnostic) {
-    state
-        .diagnostics
-        .entry(ix)
-        .or_insert_with(Vec::new)
-        .push(diag);
+    state.diagnostics.entry(ix).or_default().push(diag);
 }
 
 /// Verifies that this is the true (first) use of a label.  The returned atom
@@ -731,7 +737,9 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let const_tok = sref.math_at(0);
     let var_tok = sref.math_at(1);
 
-    let Some(l_atom) = check_label_dup(state, sref) else { return };
+    let Some(l_atom) = check_label_dup(state, sref) else {
+        return;
+    };
 
     // $f must be one constant and one variable - parser can't check this
     let mut const_at = Atom::default();
@@ -773,7 +781,7 @@ fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         state
             .local_floats
             .entry((*var_tok).into())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(LocalFloatInfo {
                 typecode: const_at,
                 valid: sref.scope_range(),
@@ -797,10 +805,7 @@ fn maybe_add_local_var(
     s_ref: StatementRef<'_>,
     t_ref: TokenRef<'_>,
 ) -> Option<TokenAddress> {
-    let lv_slot = state
-        .local_vars
-        .entry((*t_ref).into())
-        .or_insert_with(Vec::new);
+    let lv_slot = state.local_vars.entry((*t_ref).into()).or_default();
 
     if let Some(lv_most_recent) = lv_slot.last() {
         if check_endpoint(s_ref.index(), lv_most_recent.end) {

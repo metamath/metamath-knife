@@ -95,6 +95,40 @@ fn test_italic() {
 }
 
 #[test]
+fn test_space_around_math() {
+    check(
+        b"a ` b ` c ~ d e",
+        &[
+            Text(Span::new(0, 2)),
+            StartMathMode(2),
+            MathToken(Span::new(4, 5)),
+            EndMathMode(6),
+            Text(Span::new(7, 10)),
+            Label(10, Span::new(12, 13)),
+            Text(Span::new(13, 15)),
+        ],
+    );
+    check(
+        b"\" ` x ` \" and ~x .",
+        &[
+            Text(Span::new(0, 1)),
+            StartMathMode(2),
+            MathToken(Span::new(4, 5)),
+            EndMathMode(6),
+            Text(Span::new(8, 14)),
+            Label(14, Span::new(15, 16)),
+            Text(Span::new(17, 18)),
+        ],
+    );
+}
+
+/// Two underscores in a row are treated as normal text.
+#[test]
+fn test_double_underscore() {
+    check(b"MINIMIZE__WITH", &[Text(Span::new(0, 14))])
+}
+
+#[test]
 fn test_bib() {
     check(
         b"Hello [world] test",
@@ -181,7 +215,7 @@ fn edge_cases() {
             StartMathMode(0),
             MathToken(Span::new(2, 3)),
             EndMathMode(4),
-            Text(Span::new(5, 8)),
+            Text(Span::new(6, 8)),
         ],
     );
 
@@ -189,6 +223,10 @@ fn edge_cases() {
     check(
         b"~</HTML>",
         &[Label(0, Span::new(1, 1)), Text(Span::new(1, 8))],
+    );
+    check(
+        b"_a__b_",
+        &[StartItalic(0), Text(Span::new(1, 5)), EndItalic(5)],
     );
 }
 
@@ -201,6 +239,10 @@ fn test_label() {
     check(
         b"Visit ~http://example.com",
         &[Text(Span::new(0, 6)), Url(6, Span::new(7, 25))],
+    );
+    check(
+        b"test ~ https://a_b__c.com",
+        &[Text(Span::new(0, 5)), Url(5, Span::new(7, 25))],
     );
 }
 

@@ -109,7 +109,7 @@ impl GrammarTree {
                     map: ref mut to_map,
                 },
             ) => {
-                for (&(stype, symbol), next_node) in map.iter() {
+                for (&(stype, symbol), next_node) in map {
                     match to_map.entry((stype, symbol)) {
                         Entry::Occupied(_) => {
                             // Skip error here, do nothing for now...
@@ -170,7 +170,7 @@ pub struct Grammar {
 /// - `label` is the syntax axiom being applied.
 /// - `var_count` is the number of variables this syntax axiom requires. This tells how many of the parse trees will be joined.
 /// - `offset` says how far in the stack of yet un-joined parse trees the reduce will join. The cases when this is non-zero are rare.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Reduce {
     label: Label,
     var_count: u8,
@@ -420,13 +420,16 @@ impl Grammar {
                     [Keyword(cmd), sort, Keyword(as_), logic]
                         if cmd.as_ref(buf) == b"syntax" && as_.as_ref(buf) == b"as" =>
                     {
-                        self.provable_type = nset.lookup_symbol(sort.value(buf)).unwrap().atom;
-                        self.logic_type = nset.lookup_symbol(logic.value(buf)).unwrap().atom;
+                        self.provable_type = nset.lookup_symbol(&sort.value(buf)).unwrap().atom;
+                        self.logic_type = nset.lookup_symbol(&logic.value(buf)).unwrap().atom;
                         self.typecodes.push(self.logic_type);
                     }
-                    [Keyword(cmd), sort] if cmd.as_ref(buf) == b"syntax" => self
-                        .typecodes
-                        .push(nset.lookup_symbol(sort.value(buf)).unwrap().atom),
+                    [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"syntax" => {
+                        for sort in rest {
+                            self.typecodes
+                                .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom)
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -517,31 +520,24 @@ impl Grammar {
         stype: SymbolType,
         add_reduce: ReduceVec,
     ) -> Result<NodeId, NodeId> {
-        match self.nodes.get_mut(to_node) {
-            GrammarNode::Leaf { .. } => {
-                Err(to_node) // Error: cannot add to a leaf node, `to_node` is the conflicting node
-            }
-            GrammarNode::Branch { map } => {
-                match map.get(&(stype, symbol)) {
-                    Some(prev_node) if prev_node.leaf_label == add_reduce => {
-                        Ok(prev_node.next_node_id)
-                    }
-                    Some(prev_node) => Err(prev_node.next_node_id),
-                    None => {
-                        let new_node_id = self.nodes.create_branch();
-                        // here we have to re-borrow from self after the creation,
-                        // because the previous var_map and cst_map may not be valid pointers anymore
-                        if let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) {
-                            map.insert(
-                                (stype, symbol),
-                                NextNode::new_with_reduce_vec(new_node_id, add_reduce),
-                            );
-                            Ok(new_node_id)
-                        } else {
-                            panic!("Shall not happen!");
-                        }
-                    }
-                }
+        let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) else {
+            return Err(to_node); // Error: cannot add to a leaf node, `to_node` is the conflicting node
+        };
+        match map.get(&(stype, symbol)) {
+            Some(prev_node) if prev_node.leaf_label == add_reduce => Ok(prev_node.next_node_id),
+            Some(prev_node) => Err(prev_node.next_node_id),
+            None => {
+                let new_node_id = self.nodes.create_branch();
+                // here we have to re-borrow from self after the creation,
+                // because the previous var_map and cst_map may not be valid pointers anymore
+                let GrammarNode::Branch { map } = self.nodes.get_mut(to_node) else {
+                    unreachable!();
+                };
+                map.insert(
+                    (stype, symbol),
+                    NextNode::new_with_reduce_vec(new_node_id, add_reduce),
+                );
+                Ok(new_node_id)
             }
         }
     }
@@ -574,14 +570,11 @@ impl Grammar {
                 .lookup_symbol(token_ptr)
                 .ok_or_else(|| Diagnostic::UndefinedToken(sref.math_span(1), token_ptr.into()))?;
             if symbol.stype == SymbolType::Variable {
-                let from_typecode = match names.lookup_float(token_ptr) {
-                    Some(lookup_float) => lookup_float.typecode_atom,
-                    _ => {
-                        return Err(Diagnostic::VariableMissingFloat(1));
-                    }
+                let Some(lookup_float) = names.lookup_float(token_ptr) else {
+                    return Err(Diagnostic::VariableMissingFloat(1));
                 };
                 self.type_conversions
-                    .push((from_typecode, this_typecode, this_label));
+                    .push((lookup_float.typecode_atom, this_typecode, this_label));
                 return Ok(()); // we don't need to add the type conversion axiom itself to the grammar (or do we?)
             }
         }
@@ -605,14 +598,13 @@ impl Grammar {
                         .typecode_atom
                 }
             };
-            match match &tokens.peek() {
-                Some(_) => self.add_branch_with_reduce(node, atom, symbol.stype, ReduceVec::new()),
-                None => {
-                    let leaf_node_id = self
-                        .nodes
-                        .create_leaf(Reduce::new(this_label, var_count), this_typecode);
-                    self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
-                }
+            match if tokens.peek().is_some() {
+                self.add_branch_with_reduce(node, atom, symbol.stype, ReduceVec::new())
+            } else {
+                let leaf_node_id = self
+                    .nodes
+                    .create_leaf(Reduce::new(this_label, var_count), this_typecode);
+                self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
             } {
                 Ok(next_node) => {
                     node = next_node;
@@ -662,21 +654,19 @@ impl Grammar {
             as_str(nset.statement_name(sref))
         );
 
-        match self.nodes.get_mut(self.root) {
-            // We ignore the ambiguity in floats, since they are actually frame dependent.
-            GrammarNode::Branch { map } => {
-                map.insert(
-                    (SymbolType::Constant, symbol.atom),
-                    NextNode::new(leaf_node),
-                );
-                Ok(())
-                // match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
-                //     None => Ok(()),
-                //     Some(_) => Err(self.ambiguous(conflict_node.next_node_id, nset)),
-                // }
-            }
-            GrammarNode::Leaf { .. } => panic!("Root node shall be a branch node!"),
-        }
+        let GrammarNode::Branch { map } = self.nodes.get_mut(self.root) else {
+            unreachable!("Root node must be a branch node!")
+        };
+        // We ignore the ambiguity in floats, since they are actually frame dependent.
+        map.insert(
+            (SymbolType::Constant, symbol.atom),
+            NextNode::new(leaf_node),
+        );
+        Ok(())
+        // match cst_map.insert(symbol.atom, NextNode::new(leaf_node)) {
+        //     None => Ok(()),
+        //     Some(_) => Err(self.ambiguous(conflict_node.next_node_id, nset)),
+        // }
     }
 
     /// Handle type conversion:
@@ -737,16 +727,14 @@ impl Grammar {
     }
 
     fn next_var_node(&self, node_id: NodeId, typecode: TypeCode) -> Option<(NodeId, &ReduceVec)> {
-        match self.nodes.get(node_id) {
-            GrammarNode::Branch { map } => match map.get(&(SymbolType::Variable, typecode)) {
-                Some(NextNode {
-                    next_node_id,
-                    leaf_label,
-                }) => Some((*next_node_id, leaf_label)),
-                _ => None,
-            },
-            GrammarNode::Leaf { .. } => None,
-        }
+        let GrammarNode::Branch { map } = self.nodes.get(node_id) else {
+            return None;
+        };
+        let NextNode {
+            next_node_id,
+            leaf_label,
+        } = map.get(&(SymbolType::Variable, typecode))?;
+        Some((*next_node_id, leaf_label))
     }
 
     /// Recursively clone the whole grammar tree starting from `add_from_node_id`
@@ -789,7 +777,7 @@ impl Grammar {
                     typecode,
                 } = *self.nodes.get(next_node.next_node_id)
                 {
-                    let mut reduce_vec = ReduceVec::new();
+                    let mut reduce_vec = next_node.leaf_label;
                     for reduce in stored_reduces {
                         reduce_vec.push(reduce);
                     }
@@ -959,7 +947,7 @@ impl Grammar {
             if let GrammarNode::Branch { map } = self.nodes.get(node_id) {
                 let prefix_symbol = db
                     .name_result()
-                    .lookup_symbol(prefix[index].value(buf))
+                    .lookup_symbol(&prefix[index].value(buf))
                     .ok_or_else(|| undefined_cmd(&prefix[index], buf))?
                     .atom;
                 let next_node = map
@@ -976,7 +964,7 @@ impl Grammar {
 
         // We note the typecode and next branch of the "shadowed" prefix
         let shadowed_typecode = names
-            .lookup_float(shadows[index].value(buf))
+            .lookup_float(&shadows[index].value(buf))
             .ok_or_else(|| undefined_cmd(&shadows[index], buf))?
             .typecode_atom;
         let (shadowed_next_node, _) =
@@ -992,11 +980,11 @@ impl Grammar {
         let mut missing_reduce = ReduceVec::new();
         for token in &prefix[index..] {
             let lookup_symbol = names
-                .lookup_symbol(token.value(buf))
+                .lookup_symbol(&token.value(buf))
                 .ok_or_else(|| undefined_cmd(token, buf))?;
             debug!(
                 "Following prefix {}, at {} / {}",
-                as_str(token.value(buf)),
+                as_str(&token.value(buf)),
                 node_id,
                 add_from_node_id
             );
@@ -1006,7 +994,7 @@ impl Grammar {
                 SymbolType::Variable => {
                     increment_offsets(&mut missing_reduce);
                     names
-                        .lookup_float(token.value(buf))
+                        .lookup_float(&token.value(buf))
                         .ok_or_else(|| undefined_cmd(token, buf))?
                         .typecode_atom
                 }
@@ -1034,7 +1022,7 @@ impl Grammar {
             }
         }
 
-        debug!("Shadowed token: {}", as_str(shadows[index].value(buf)));
+        debug!("Shadowed token: {}", as_str(&shadows[index].value(buf)));
         debug!("Missing reduces: {}", missing_reduce.len());
         debug!(
             "Handle shadowed next node {}, typecode {:?}",
@@ -1096,77 +1084,74 @@ impl Grammar {
             for &(ix, (span, ref command)) in &sref.j_commands {
                 use CommandToken::*;
                 let address = StatementAddress::new(sref.id, ix);
-                if let (Keyword(k), rest) = command
-                    .split_first()
-                    .ok_or((address, Diagnostic::BadCommand(span)))?
-                {
-                    // Empty parser command
-                    match k.as_ref(buf) {
-                        b"syntax" => match rest {
-                            [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
-                                // syntax '|-' as 'wff';
-                                self.provable_type = nset
-                                    .lookup_symbol(ty.value(buf))
-                                    .ok_or((address, undefined_cmd(ty, buf)))?
-                                    .atom;
-                                self.typecodes.push(
-                                    nset.lookup_symbol(code.value(buf))
-                                        .ok_or((address, undefined_cmd(code, buf)))?
-                                        .atom,
-                                );
-                            }
-                            [ty] => {
+                let [Keyword(k), ref rest @ ..] = **command else {
+                    return Err((address, Diagnostic::BadCommand(span)));
+                };
+                // Empty parser command
+                match k.as_ref(buf) {
+                    b"syntax" => match rest {
+                        [ty, Keyword(as_), code] if as_.as_ref(buf) == b"as" => {
+                            // syntax '|-' as 'wff';
+                            self.provable_type = nset
+                                .lookup_symbol(&ty.value(buf))
+                                .ok_or((address, undefined_cmd(ty, buf)))?
+                                .atom;
+                            self.typecodes.push(
+                                nset.lookup_symbol(&code.value(buf))
+                                    .ok_or((address, undefined_cmd(code, buf)))?
+                                    .atom,
+                            );
+                        }
+                        _ => {
+                            for ty in rest {
                                 // syntax 'setvar';
                                 self.typecodes.push(
-                                    nset.lookup_symbol(ty.value(buf))
+                                    nset.lookup_symbol(&ty.value(buf))
                                         .ok_or((address, undefined_cmd(ty, buf)))?
                                         .atom,
                                 );
                             }
-                            _ => {}
-                        },
-                        // Handle Ambiguous prefix commands
-                        b"garden_path" => {
-                            let split_index = rest
-                                .iter()
-                                .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
-                                .ok_or((address, Diagnostic::BadCommand(*k)))?; // '=>' not present in 'garden_path' command
-                            let (prefix, shadows) = rest.split_at(split_index);
-                            if let Err(diag) =
-                                self.handle_common_prefixes(prefix, &shadows[1..], buf, db, names)
-                            {
-                                return Err((address, diag));
-                            }
                         }
-                        // Handle replacement schemes
-                        b"type_conversions" => {
-                            for &(from_typecode, to_typecode, label) in
-                                &self.type_conversions.clone()
-                            {
-                                if let Err(diag) = self.perform_type_conversion(
-                                    from_typecode,
-                                    to_typecode,
-                                    label,
-                                    db,
-                                ) {
-                                    return Err((address, diag));
-                                }
-                            }
+                    },
+                    // Handle Ambiguous prefix commands
+                    b"garden_path" => {
+                        let split_index = rest
+                            .iter()
+                            .position(|t| matches!(t, Keyword(k) if k.as_ref(buf) == b"=>"))
+                            .ok_or((address, Diagnostic::BadCommand(k)))?; // '=>' not present in 'garden_path' command
+                        let (prefix, shadows) = rest.split_at(split_index);
+                        if let Err(diag) =
+                            self.handle_common_prefixes(prefix, &shadows[1..], buf, db, names)
+                        {
+                            return Err((address, diag));
                         }
-                        _ => {}
                     }
+                    // Handle replacement schemes
+                    b"type_conversions" => {
+                        for &(from_typecode, to_typecode, label) in &self.type_conversions.clone() {
+                            self.perform_type_conversion(from_typecode, to_typecode, label, db)
+                                .map_err(|diag| (address, diag))?;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
         Ok(())
     }
 
-    fn do_shift(&self, symbol_iter: &mut dyn Iterator<Item = FormulaToken>, nset: &Nameset) {
+    fn do_shift(
+        &self,
+        symbol_iter: &mut dyn Iterator<Item = Result<FormulaToken, StmtParseError>>,
+        nset: &Nameset,
+    ) -> Result<(), StmtParseError> {
         if let Some(token) = symbol_iter.next() {
+            let token = token?;
             if self.debug {
                 debug!("   SHIFT {:?}", as_str(nset.atom_name(token.symbol)));
             }
         }
+        Ok(())
     }
 
     fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Nameset) {
@@ -1189,7 +1174,7 @@ impl Grammar {
     /// Parses the given list of symbols into a formula syntax tree.
     pub fn parse_formula(
         &self,
-        symbol_iter: &mut impl Iterator<Item = FormulaToken>,
+        symbol_iter: &mut impl Iterator<Item = Result<FormulaToken, StmtParseError>>,
         expected_typecodes: &[TypeCode],
         convert_to_provable: bool,
         nset: &Nameset,
@@ -1201,9 +1186,12 @@ impl Grammar {
 
         let mut formula_builder = FormulaBuilder::default();
         let mut symbol_enum = symbol_iter.peekable();
-        let mut last_token = *symbol_enum
+        let Ok(mut last_token) = symbol_enum
             .peek()
-            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
+            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?
+        else {
+            return Err(symbol_enum.next().unwrap().unwrap_err());
+        };
         let mut e = StackElement {
             node_id: self.root,
             expected_typecodes: expected_typecodes.to_vec().into_boxed_slice(),
@@ -1292,7 +1280,7 @@ impl Grammar {
                     }
                 }
                 GrammarNode::Branch { ref map } => {
-                    if let Some(&token) = symbol_enum.peek() {
+                    if let Some(&Ok(token)) = symbol_enum.peek() {
                         last_token = token;
                         debug!("   {:?}", as_str(nset.atom_name(token.symbol)));
 
@@ -1307,7 +1295,7 @@ impl Grammar {
                             }
 
                             // Found an atom matching one of our next nodes: SHIFT, to the next node
-                            self.do_shift(&mut symbol_enum, nset);
+                            self.do_shift(&mut symbol_enum, nset)?;
                             e.node_id = *next_node_id;
                             debug!("   Next Node: {:?}", e.node_id);
                         } else {
@@ -1333,6 +1321,9 @@ impl Grammar {
                             };
                         }
                     } else {
+                        if let Some(token) = symbol_enum.next() {
+                            token?;
+                        }
                         return Err(Grammar::too_short(last_token, map, nset));
                     }
                 }
@@ -1401,6 +1392,47 @@ impl Iterator for FormulaTokenIter<'_> {
     }
 }
 
+/// An iterator through the tokens of a math expression
+#[derive(Debug)]
+pub struct StmtTokenIter<'a, 'b> {
+    span: &'a [Span],
+    buffer: &'a [u8],
+    index: usize,
+    names: &'a mut NameReader<'b>,
+}
+
+impl StatementRef<'_> {
+    /// Returns a new iterator over tokens of a math expression.
+    /// `names` caches the result of any name lookups performed.
+    pub fn token_iter<'a, 'b>(&'a self, names: &'a mut NameReader<'b>) -> StmtTokenIter<'a, 'b> {
+        let range = self.statement.math_start..self.statement.proof_start;
+        StmtTokenIter {
+            span: &self.segment.segment.span_pool[range],
+            buffer: &self.segment.segment.buffer,
+            index: 1,
+            names,
+        }
+    }
+}
+
+impl Iterator for StmtTokenIter<'_, '_> {
+    type Item = Result<FormulaToken, StmtParseError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let span = *self.span.get(self.index)?;
+        self.index += 1;
+        Some(
+            if let Some(lookup) = self.names.lookup_symbol(span.as_ref(self.buffer)) {
+                Ok(FormulaToken {
+                    symbol: lookup.atom,
+                    span,
+                })
+            } else {
+                Err(StmtParseError::UnknownToken(span))
+            },
+        )
+    }
+}
+
 impl Grammar {
     /// Parses a character string into a formula
     /// As a first math token, the string is expected to contain the typecode for the formula.
@@ -1410,12 +1442,10 @@ impl Grammar {
         formula_string: &str,
         nset: &Arc<Nameset>,
     ) -> Result<Formula, StmtParseError> {
-        let mut symbols = FormulaTokenIter::from_str(formula_string, nset)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter();
+        let mut symbols = FormulaTokenIter::from_str(formula_string, nset);
         let typecode = symbols
             .next()
-            .ok_or(StmtParseError::ParsedStatementNoTypeCode)?;
+            .ok_or(StmtParseError::ParsedStatementNoTypeCode)??;
         let expected_typecode = if typecode.symbol == self.provable_type {
             self.logic_type
         } else {
@@ -1461,24 +1491,10 @@ impl Grammar {
             as_str(nset.statement_name(sref))
         );
 
-        let math_string: Result<Vec<_>, _> = sref
-            .math_iter()
-            .skip(1)
-            .map(|token| {
-                let span = sref.math_span(token.index());
-                if let Some(lookup) = names.lookup_symbol(token.slice) {
-                    Ok(FormulaToken {
-                        symbol: lookup.atom,
-                        span,
-                    })
-                } else {
-                    Err(StmtParseError::UnknownToken(span))
-                }
-            })
-            .collect();
+        let mut math_string = sref.token_iter(names);
         let convert_to_provable = typecode == self.provable_type;
         let formula = self.parse_formula(
-            &mut math_string?.into_iter(),
+            &mut math_string,
             &[expected_typecode],
             convert_to_provable,
             nset,

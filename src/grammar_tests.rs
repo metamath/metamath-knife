@@ -113,7 +113,7 @@ fn test_parse_formula() {
     let fmla_vec = vec![a, eq, open_parens, b, plus, a, close_parens];
     let formula = grammar
         .parse_formula(
-            &mut fmla_vec.clone().into_iter(),
+            &mut fmla_vec.iter().map(|t| Ok(*t)),
             &[wff, class],
             false,
             &names,
@@ -213,7 +213,7 @@ fn test_setvar_as_class() {
     {
         let formula = grammar
             .parse_formula(
-                &mut vec![x_symbol].into_iter(),
+                &mut std::iter::once(Ok(x_symbol)),
                 &[class_symbol],
                 false,
                 &names,
@@ -329,6 +329,39 @@ macro_rules! grammar_test {
     };
 }
 
+const ISSUE_135: &[u8] = b"
+    $c = class wff setvar -> ( ) |- + [ ] $.
+    $( $j syntax 'setvar' 'class' 'wff'; syntax '|-' as 'wff'; $)
+    $( $j type_conversions; garden_path ( x => ( ph ; $)
+    $v x A B ph ps $.
+    vx $f setvar x $.
+    wph $f wff ph $.
+    wps $f wff ps $.
+    cA $f class A $.
+    cB $f class B $.
+    cv $a class x $.
+    wn $a wff [ A ] $.
+    wceq $a wff A = B $.
+    wi $a wff ( ph -> ps ) $.
+    cdif $a class ( A + B ) $.
+    ax1 $a |- [ x ] $.
+    ax2 $a |- ( x = x -> ph ) $.
+";
+
+#[test]
+fn test_issue_135() {
+    let mut db = mkdb(ISSUE_135);
+    let stmt_parse = db.stmt_parse_pass().clone();
+    let sref = db.statement(b"ax1").unwrap();
+    let formula = stmt_parse.get_formula(&sref).unwrap();
+    assert_eq!(formula.as_ref(&db).as_sexpr(), "(wn (cv vx))");
+    let sref = db.statement(b"ax2").unwrap();
+    let formula = stmt_parse.get_formula(&sref).unwrap();
+    assert_eq!(
+        formula.as_ref(&db).as_sexpr(),
+        "(wi (wceq (cv vx) (cv vx)) wph)"
+    );
+}
 grammar_test!(
     test_missing_float,
     b"$c setvar $. $v x $. vx $a setvar x $.",
@@ -343,6 +376,7 @@ grammar_test!(
     2,
     Diagnostic::GrammarAmbiguous(sa!(2, 1))
 );
+
 grammar_test!(
     test_float_not_var,
     b"$c setvar $. vx $f setvar x $.",

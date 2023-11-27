@@ -6,6 +6,7 @@ use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_knife::database::{Database, DbOptions};
 use metamath_knife::diag::BibError;
+use metamath_knife::parser::is_valid_label;
 use metamath_knife::statement::StatementAddress;
 use metamath_knife::verify_markup::{Bibliography, Bibliography2};
 use metamath_knife::SourceInfo;
@@ -34,6 +35,7 @@ fn main() {
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
+        (@arg stmt_use: --("stmt-use") value_names(&["FILE", "LABELS"]) "Outputs statements directly or indirectly using the given list of statements")
         (@arg verify_usage: -u --("verify-usage") "Checks axiom usage")
         (@arg outline: -O --outline "Shows database outline")
         (@arg dump_typesetting: -T --("dump-typesetting") "Dumps typesetting information")
@@ -165,7 +167,30 @@ fn main() {
 
         if matches.is_present("axiom_use") {
             File::create(matches.value_of("axiom_use").unwrap())
-                .and_then(|file| db.write_axiom_use(&mut BufWriter::new(file)))
+                .and_then(|file| {
+                    db.write_stmt_use(|label| label.starts_with(b"ax-"), &mut BufWriter::new(file))
+                })
+                .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        if matches.is_present("stmt_use") {
+            let vals: Vec<_> = matches.values_of("stmt_use").unwrap().collect();
+            let output_file_path = vals[0];
+            let stmt_list: Vec<_> = vals[1].split(',').map(str::as_bytes).collect();
+            if !stmt_list.iter().copied().all(is_valid_label) {
+                clap::Error::with_description(
+                    "Expected list of labels as second argument to --stmt-use",
+                    clap::ErrorKind::InvalidValue,
+                )
+                .exit();
+            }
+            File::create(output_file_path)
+                .and_then(|file| {
+                    db.write_stmt_use(
+                        |label| stmt_list.contains(&label),
+                        &mut BufWriter::new(file),
+                    )
+                })
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
@@ -218,6 +243,7 @@ fn main() {
 
         #[cfg(feature = "dot")]
         if matches.is_present("export_grammar_dot") {
+            db.grammar_pass();
             db.export_grammar_dot();
         }
 

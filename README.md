@@ -14,7 +14,7 @@ Metamath-knife is a friendly fork of
   adds support for *all* Metamath proof formats
   (<a href="https://groups.google.com/g/metamath/c/xCUNA2ttHew/m/RXSNzdovBAAJ">uncompressed, compressed, package, or explicit</a>.
 * We take extra steps to prevent errors, e.g., we have a CI pipeline
-  (implemented using GitHub actons).
+  (implemented using GitHub actions).
 * We remove deprecated constructs, e.g., the deprecated try!(...)
   has been replaced with the easier-to-read "?" construct.
 * We actively work to eliminate compiler warnings. This tends to

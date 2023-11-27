@@ -101,9 +101,9 @@ impl ProofBuilder for () {
     type Item = ();
     type Accum = ();
 
-    fn push(&mut self, _: &mut (), _: ()) {}
+    fn push(&mut self, _: &mut (), (): ()) {}
 
-    fn build(&mut self, _: StatementAddress, _: (), _: &[u8], _: Range<usize>) {}
+    fn build(&mut self, _: StatementAddress, (): (), _: &[u8], _: Range<usize>) {}
 }
 
 /// Working memory used by the verifier on a segment.  This expands for the
