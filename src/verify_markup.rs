@@ -521,9 +521,9 @@ pub struct Bibliography(HashSet<Box<[u8]>>);
 /// A pair of bibliography files. This is used to support `set.mm`, which
 /// contains two separate-ish databases inside one metamath file. Bibliography
 /// references in the first part of the file refer to the
-/// [`TypesettingData::html_bibliography`],
-/// while references after the [`TypesettingData::ext_html_label`] go to the
-/// [`TypesettingData::ext_html_bibliography`].
+/// [`html_bibliography`][crate::typesetting::TypesettingData::html_bibliography],
+/// while references after the [`ext_html_label`][crate::typesetting::TypesettingData::ext_html_label] go to the
+/// [`ext_html_bibliography`][crate::typesetting::TypesettingData::ext_html_bibliography].
 #[derive(Debug)]
 pub struct Bibliography2 {
     /// The main bibliography file.

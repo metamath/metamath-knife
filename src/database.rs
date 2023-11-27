@@ -642,7 +642,7 @@ impl Database {
     }
 
     /// Returns axiom usage verification information for the database.
-    /// Returns `None` if [`Database::usage_pass`] was not previously called.
+    /// Returns `None` if [`Database::verify_usage_pass`] was not previously called.
     ///
     /// This is an optimized verifier which returns no useful information other
     /// than error diagnostics.  It does not save any parsed proof data.

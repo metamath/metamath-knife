@@ -35,12 +35,12 @@ pub enum CommentItem {
     /// before and after the element), but corresponds roughly to a `<p>` tag in HTML.
     LineBreak(usize),
     /// Start math mode, indicated by a backtick character. The usize points to the character.
-    /// Between [`StartMathMode`] and [`EndMathMode`],
-    /// there will be no comment items other than [`MathToken`].
+    /// Between [`CommentItem::StartMathMode`] and [`CommentItem::EndMathMode`],
+    /// there will be no comment items other than [`CommentItem::MathToken`].
     StartMathMode(usize),
     /// End math mode, indicated by a backtick character. The usize points to the character.
-    /// Between [`StartMathMode`] and [`EndMathMode`],
-    /// there will be no comment items other than [`MathToken`].
+    /// Between [`CommentItem::StartMathMode`] and [`CommentItem::EndMathMode`],
+    /// there will be no comment items other than [`CommentItem::MathToken`].
     EndMathMode(usize),
     /// A single math token. After unescaping this should correspond to a `$c` or `$v` statement
     /// in the database.
