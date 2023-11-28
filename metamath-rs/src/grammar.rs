@@ -1474,12 +1474,6 @@ impl Grammar {
         let typecode = nset.get_atom(sref.math_at(0).slice);
         let mut expected_typecode = typecode;
 
-        // Skip syntactic axioms
-        if sref.statement_type() == StatementType::Axiom && expected_typecode != self.provable_type
-        {
-            return Ok(None);
-        }
-
         // If this is a provable statement, prove that this is a wff. Otherwise just use the provided typecode
         if expected_typecode == self.provable_type {
             expected_typecode = self.logic_type;
