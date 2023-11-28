@@ -46,6 +46,8 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Format
         run: cargo fmt -- --check
+      - name: Docs
+        run: cargo doc --lib --no-deps
       - name: Verify official set.mm
         run: |
           curl -s -G https://raw.githubusercontent.com/metamath/set.mm/develop/set.mm > set.mm
