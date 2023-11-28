@@ -11,8 +11,7 @@ categories.workspace = true
 edition = "2021"
 
 [dependencies]
-lazy_static = "1.4"
-itertools = "0.10"
+itertools = "0.12"
 filetime = "0.2"
 fnv = "1.0"
 regex = { version = "1.5", default-features = false, features = ["std", "perf"] }
