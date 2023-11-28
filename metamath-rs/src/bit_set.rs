@@ -128,6 +128,11 @@ impl Bitset {
                 Some(bx) => bx.iter().all(|&word| word == 0),
             }
     }
+
+    /// Returns an iterator over the indices of set bits in the bitset.
+    pub fn iter(&self) -> BitsetIter<'_> {
+        self.into_iter()
+    }
 }
 
 impl<'a> BitOrAssign<&'a Bitset> for Bitset {
