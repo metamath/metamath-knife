@@ -30,7 +30,7 @@ use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::mem;
 use std::str;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// State used by the scanning process
 #[derive(Default)]
@@ -1108,21 +1108,23 @@ impl HeadingComment {
     /// or it is malformed.
     #[must_use]
     pub fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
-        lazy_static::lazy_static! {
-            static ref MAJOR_PART: Regex =
-                Regex::new(r"^[ \r\n]+#{4,}\r?\n *([^\n]*)\r?\n#{4,}\r?\n").unwrap();
-            static ref SECTION: Regex =
-                Regex::new(r"^[ \r\n]+(?:#\*){2,}#?\r?\n *([^\n]*)\r?\n(?:#\*){2,}#?\r?\n").unwrap();
-            static ref SUBSECTION: Regex =
-                Regex::new(r"^[ \r\n]+(?:=-){2,}=?\r?\n *([^\n]*)\r?\n(?:=-){2,}=?\r?\n").unwrap();
-            static ref SUBSUBSECTION: Regex =
-                Regex::new(r"^[ \r\n]+(?:-\.){2,}-?\r?\n *([^\n]*)\r?\n(?:-\.){2,}-?\r?\n").unwrap();
-        }
+        static MAJOR_PART: OnceLock<Regex> = OnceLock::new();
+        static SECTION: OnceLock<Regex> = OnceLock::new();
+        static SUBSECTION: OnceLock<Regex> = OnceLock::new();
+        static SUBSUBSECTION: OnceLock<Regex> = OnceLock::new();
         let regex = match lvl {
-            HeadingLevel::MajorPart => &*MAJOR_PART,
-            HeadingLevel::Section => &*SECTION,
-            HeadingLevel::SubSection => &*SUBSECTION,
-            HeadingLevel::SubSubSection => &*SUBSUBSECTION,
+            HeadingLevel::MajorPart => MAJOR_PART.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+#{4,}\r?\n *([^\n]*)\r?\n#{4,}\r?\n").unwrap()
+            }),
+            HeadingLevel::Section => SECTION.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+(?:#\*){2,}#?\r?\n *([^\n]*)\r?\n(?:#\*){2,}#?\r?\n").unwrap()
+            }),
+            HeadingLevel::SubSection => SUBSECTION.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+(?:=-){2,}=?\r?\n *([^\n]*)\r?\n(?:=-){2,}=?\r?\n").unwrap()
+            }),
+            HeadingLevel::SubSubSection => SUBSUBSECTION.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+(?:-\.){2,}-?\r?\n *([^\n]*)\r?\n(?:-\.){2,}-?\r?\n").unwrap()
+            }),
             _ => unreachable!(),
         };
         let groups = regex.captures(sp.as_ref(buf))?;
@@ -1136,10 +1138,9 @@ impl HeadingComment {
     /// Parses a mathbox heading comment, returning the span of the author name.
     #[must_use]
     pub fn parse_mathbox_header(&self, buf: &[u8]) -> Option<Span> {
-        lazy_static::lazy_static! {
-            static ref MATHBOX_FOR: Regex = Regex::new(r"^Mathbox for (.*)$").unwrap();
-        }
-        let m = MATHBOX_FOR.captures(self.header.as_ref(buf))?.get(1)?;
+        static MATHBOX_FOR: OnceLock<Regex> = OnceLock::new();
+        let mathbox_for = MATHBOX_FOR.get_or_init(|| Regex::new(r"^Mathbox for (.*)$").unwrap());
+        let m = mathbox_for.captures(self.header.as_ref(buf))?.get(1)?;
         Some(Span::new2(
             self.header.start + m.start() as u32,
             self.header.start + m.end() as u32,

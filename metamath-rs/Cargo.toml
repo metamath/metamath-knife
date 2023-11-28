@@ -1,0 +1,33 @@
+[package]
+name = "metamath-rs"
+readme = "metamath-rs/README.md"
+description = "A library manipulating Metamath databases, including a parallel and incremental verifier for Metamath databases"
+version = "0.3.6"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+edition = "2021"
+
+[dependencies]
+itertools = "0.12"
+filetime = "0.2"
+fnv = "1.0"
+regex = { version = "1.5", default-features = false, features = ["std", "perf"] }
+tinyvec = "1.5"
+log = "0.4"
+annotate-snippets = "0.9"
+typed-arena = "2.0"
+
+# Optional dependencies
+dot-writer = { version = "0.1.2", optional = true }
+xml-rs = { version = "0.8.14", optional = true }
+
+[dev-dependencies]
+assert_matches = "1.5"
+
+[features]
+default = ["annotate-snippets/color"]
+dot = ["dot-writer"]
+xml = ["xml-rs"]
