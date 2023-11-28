@@ -14,9 +14,8 @@
 //! corresponding byte string in the file has to be unescaped before
 //! interpretation, using the [`CommentParser::unescape_text`] and
 //! [`CommentParser::unescape_math`] functions.
-use std::fmt::Display;
+use std::{fmt::Display, sync::OnceLock};
 
-use lazy_static::lazy_static;
 use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
 
 use crate::{statement::unescape, Span};
@@ -473,14 +472,15 @@ impl Discouragements {
     /// is discouraged.
     #[must_use]
     pub fn new(buf: &[u8]) -> Self {
-        lazy_static! {
-            static ref MODIFICATION: RegexSet = RegexSet::new([
+        static MODIFICATION: OnceLock<RegexSet> = OnceLock::new();
+        let modification = MODIFICATION.get_or_init(|| {
+            RegexSet::new([
                 r"\(Proof[ \n]+modification[ \n]+is[ \n]+discouraged\.\)",
-                r"\(New[ \n]+usage[ \n]+is[ \n]+discouraged\.\)"
+                r"\(New[ \n]+usage[ \n]+is[ \n]+discouraged\.\)",
             ])
-            .unwrap();
-        }
-        let m = MODIFICATION.matches(buf);
+            .unwrap()
+        });
+        let m = modification.matches(buf);
         Self {
             modification_discouraged: m.matched(0),
             usage_discouraged: m.matched(1),
@@ -532,17 +532,17 @@ impl<'a> ParentheticalIter<'a> {
     /// Construct a new parenthetical iterator given a segment buffer and a span in it.
     #[must_use]
     pub fn new(buf: &'a [u8], span: Span) -> Self {
-        lazy_static! {
-            static ref PARENTHETICALS: Regex = Regex::new(concat!(
+        static PARENTHETICALS: OnceLock<Regex> = OnceLock::new();
+        let parentheticals = PARENTHETICALS.get_or_init(|| {
+            Regex::new(concat!(
                 r"\((Contributed|Revised|Proof[ \r\n]+shortened)",
                 r"[ \r\n]+by[ \r\n]+([^,)]+),[ \r\n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
                 r"\((Proof[ \r\n]+modification|New[ \r\n]+usage)[ \r\n]+is[ \r\n]+discouraged\.\)",
             ))
-            .unwrap();
-        }
-
+            .unwrap()
+        });
         Self {
-            matches: PARENTHETICALS.captures_iter(span.as_ref(buf)),
+            matches: parentheticals.captures_iter(span.as_ref(buf)),
             off: span.start,
         }
     }

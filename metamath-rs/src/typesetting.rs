@@ -1,7 +1,7 @@
 //! The typesetting data.
 //!
 //! This is the result of parsing a `$t` metamath comment, which contains information
-//! used by the metamath website generator. Although `metamath-knife` tries to be
+//! used by the metamath website generator. Although `metamath-rs` tries to be
 //! generic and so it does not itself contain a website generator, this pass can be
 //! used to collect information for generating HTML in the style of
 //! [`metamath.exe`](https://github.com/metamath/metamath-exe).
