@@ -9,7 +9,6 @@ resolver = "2"
 authors = ["David A. Wheeler <dwheeler@dwheeler.com>", "Stefan O'Rear <sorear2@gmail.com>"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-version = "0.3.6"
 description = "A parallel and incremental verifier for Metamath databases"
 repository = "https://github.com/metamath/metamath-knife"
 keywords = ["theorem", "proving", "verifier", "proof", "assistant"]
