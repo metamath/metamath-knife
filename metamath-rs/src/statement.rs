@@ -652,7 +652,7 @@ impl<'a> StatementRef<'a> {
     pub fn use_iter(&self) -> UseIter<'a> {
         let spans = self.proof_spans();
         let mut iter = spans.iter();
-        if spans.get(0).map(|sp| sp.as_ref(&self.segment.buffer)) == Some(b"(") {
+        if spans.first().map(|sp| sp.as_ref(&self.segment.buffer)) == Some(b"(") {
             iter.next();
         }
         UseIter {
