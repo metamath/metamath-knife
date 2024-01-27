@@ -475,8 +475,8 @@ impl Discouragements {
         static MODIFICATION: OnceLock<RegexSet> = OnceLock::new();
         let modification = MODIFICATION.get_or_init(|| {
             RegexSet::new([
-                r"\(Proof[ \n]+modification[ \n]+is[ \n]+discouraged\.\)",
-                r"\(New[ \n]+usage[ \n]+is[ \n]+discouraged\.\)",
+                r"\(Proof[ \r\n]+modification[ \r\n]+is[ \r\n]+discouraged\.\)",
+                r"\(New[ \r\n]+usage[ \r\n]+is[ \r\n]+discouraged\.\)",
             ])
             .unwrap()
         });
