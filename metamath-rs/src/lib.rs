@@ -65,6 +65,7 @@ pub mod discouraged;
 pub mod export;
 pub mod formula;
 pub mod grammar;
+pub mod gen_proof;
 pub mod line_cache;
 pub mod nameck;
 pub mod outline;

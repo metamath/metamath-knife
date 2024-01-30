@@ -169,6 +169,7 @@ version = "0.3.6"
 dependencies = [
  "annotate-snippets",
  "clap",
+ "itertools",
  "metamath-rs",
  "simple_logger",
 ]

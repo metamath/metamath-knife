@@ -12,6 +12,7 @@ edition = "2021"
 
 [dependencies]
 clap = "2.33"
+itertools = "0.12.0"
 simple_logger = "1.13"
 annotate-snippets = "0.9"
 metamath-rs = { path = "../metamath-rs" }

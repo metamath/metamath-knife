@@ -17,6 +17,9 @@ use std::mem;
 use std::str::FromStr;
 use std::sync::Arc;
 
+mod minimizer;
+use minimizer::minimize;
+
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
 }
@@ -53,6 +56,7 @@ fn main() {
         (@arg repeat: --repeat "Demonstrates incremental verifier")
         (@arg jobs: -j --jobs +takes_value validator(positive_integer)
             "Number of threads to use for verification")
+        (@arg minimize: -M --minimize [LABEL] ... "Attempts to minimize the given theorem")
         (@arg export: -e --export [LABEL] ... "Outputs a proof file")
         (@arg biblio: --biblio [FILE] ... "Supplies a bibliography file for verify-markup\n\
             Can be used one or two times; the second is for exthtml processing")
@@ -82,7 +86,8 @@ fn main() {
             || matches.is_present("verify_parse_stmt")
             || matches.is_present("export_grammar_dot")
             || matches.is_present("dump_grammar")
-            || matches.is_present("dump_formula"),
+            || matches.is_present("dump_formula")
+            || matches.is_present("minimize"),
         jobs: usize::from_str(matches.value_of("jobs").unwrap_or("1"))
             .expect("validator should check this"),
     };
@@ -243,6 +248,14 @@ fn main() {
         if matches.is_present("print_typesetting") {
             db.typesetting_pass();
             db.print_typesetting();
+        }
+
+        if let Some(exps) = matches.values_of_lossy("minimize") {
+            db.name_pass();
+            db.stmt_parse_pass();
+            for label in exps {
+                minimize(&db, &label);
+            }
         }
 
         if let Some(exps) = matches.values_of_lossy("export") {

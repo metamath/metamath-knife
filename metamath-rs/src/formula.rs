@@ -37,6 +37,7 @@ use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::FromIterator;
+use std::mem::replace;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -93,8 +94,15 @@ impl Substitutions {
     }
 
     /// Add all the provided substitutions to this one
-    pub fn extend(&mut self, substitutions: &Substitutions) {
+    /// Fails in case 
+    pub fn extend(&mut self, substitutions: &Substitutions) -> Result<(), ()> {
+        for (label, fmla) in &substitutions.0 {
+            if let Some(my_fmla) = self.0.get(&label) {
+                if !my_fmla.eq(&fmla) { Err(())?; }
+            }
+        }
         self.0.extend(substitutions.0.clone());
+        Ok(())
     }
 
     /// Gets the formula the given label is to be substituted with.
@@ -153,6 +161,19 @@ impl<'a> Debug for SubstitutionsRef<'a> {
             dm.entry(
                 &as_str(self.db.name_result().atom_name(*label)),
                 &formula.as_ref(self.db),
+            );
+        }
+        dm.finish()
+    }
+}
+
+impl<'a> Display for SubstitutionsRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dm = f.debug_map();
+        for (label, formula) in &self.substitutions.0 {
+            dm.entry(
+                &as_str(self.db.name_result().atom_name(*label)),
+                &format!("{}", &formula.as_ref(self.db)),
             );
         }
         dm.finish()
@@ -270,7 +291,10 @@ impl Formula {
         other: &Formula,
         substitutions: &mut Substitutions,
     ) -> Result<(), UnificationError> {
-        self.sub_unify(self.root, other, other.root, substitutions)
+        let mut new_substitutions = substitutions.clone();
+        self.sub_unify(self.root, other, other.root, &mut new_substitutions)?;
+        let _ = replace(substitutions, new_substitutions);
+        Ok(())
     }
 
     /// Unify a sub-formula
