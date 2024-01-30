@@ -1,7 +1,10 @@
 //! A set of utilities to computionally generate proofs.
-//! 
+//!
 
-use crate::{as_str, formula::Substitutions, proof::ProofTreeArray, verify::ProofBuilder, Database, Formula, Label};
+use crate::{
+    as_str, formula::Substitutions, proof::ProofTreeArray, verify::ProofBuilder, Database, Formula,
+    Label,
+};
 
 impl Database {
     /// Add a hypothesis step to a proof array
@@ -36,12 +39,15 @@ impl Database {
         let mut hyps = vec![];
         for label in frame.floating() {
             let formula = &substitutions.get(label).unwrap_or_else(|| {
-                panic!("While building proof using {}: No substitution for {}", as_str(token), as_str(self.name_result().atom_name(label)));
+                panic!(
+                    "While building proof using {}: No substitution for {}",
+                    as_str(token),
+                    as_str(self.name_result().atom_name(label))
+                );
             });
-            let proof_tree_index = formula.as_ref(self).build_syntax_proof::<usize, Vec<usize>>(
-                stack_buffer,
-                arr,
-            );
+            let proof_tree_index = formula
+                .as_ref(self)
+                .build_syntax_proof::<usize, Vec<usize>>(stack_buffer, arr);
             hyps.push(proof_tree_index);
         }
         hyps.extend(mand_hyps.iter());

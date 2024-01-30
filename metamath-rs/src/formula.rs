@@ -94,11 +94,13 @@ impl Substitutions {
     }
 
     /// Add all the provided substitutions to this one
-    /// Fails in case 
-    pub fn extend(&mut self, substitutions: &Substitutions) -> Result<(), ()> {
+    /// Fails in case
+    pub fn extend(&mut self, substitutions: &Substitutions) -> Result<(), UnificationError> {
         for (label, fmla) in &substitutions.0 {
-            if let Some(my_fmla) = self.0.get(&label) {
-                if !my_fmla.eq(&fmla) { Err(())?; }
+            if let Some(my_fmla) = self.0.get(label) {
+                if !my_fmla.eq(fmla) {
+                    Err(UnificationError::UnificationFailed)?;
+                }
             }
         }
         self.0.extend(substitutions.0.clone());
@@ -242,16 +244,29 @@ impl Formula {
         !self.tree.has_children(self.root)
     }
 
+    /// Returns the node obtained when following the given path.
+    #[inline]
+    fn node_by_path(&self, path: &[usize]) -> Option<usize> {
+        let mut node_id = self.root;
+        for index in path {
+            node_id = self.tree.nth_child(node_id, *index)?;
+        }
+        Some(node_id)
+    }
+
     /// Returns the label obtained when following the given path.
     /// Each element of the path gives the index of the child to retrieve.
     /// For example, the empty
     #[must_use]
     pub fn get_by_path(&self, path: &[usize]) -> Option<Label> {
-        let mut node_id = self.root;
-        for index in path {
-            node_id = self.tree.nth_child(node_id, *index)?;
-        }
-        Some(self.tree[node_id])
+        self.node_by_path(path).map(|node_id| self.tree[node_id])
+    }
+
+    /// Returns whether the node obtained when following the given path is variable
+    #[must_use]
+    pub fn is_variable_by_path(&self, path: &[usize]) -> Option<bool> {
+        self.node_by_path(path)
+            .map(|node_id| self.variables.has_bit(node_id))
     }
 
     #[inline]
