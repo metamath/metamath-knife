@@ -92,7 +92,7 @@ pub fn minimize(db: &Database, label_str: &str) {
     let provable_typecode = db.grammar_result().provable_typecode();
     for theorem in db
         .statements_range(..label)
-        .filter(|s| s.is_assertion() && !sref.discouragements().usage_discouraged)
+        .filter(|s| s.is_assertion() && !s.discouragements().usage_discouraged)
     {
         let formula = db.stmt_parse_result().get_formula(&theorem).unwrap();
         if formula.get_typecode() == provable_typecode {

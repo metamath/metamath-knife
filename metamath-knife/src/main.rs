@@ -251,7 +251,6 @@ fn main() {
         }
 
         if let Some(exps) = matches.values_of_lossy("minimize") {
-            db.name_pass();
             db.stmt_parse_pass();
             for label in exps {
                 minimize(&db, &label);
