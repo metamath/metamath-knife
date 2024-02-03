@@ -31,6 +31,7 @@ fn main() {
         (@arg split: --split "Processes files > 1 MiB in multiple segments")
         (@arg timing: --time "Prints milliseconds after each stage")
         (@arg verify: -v --verify "Checks proof validity")
+        (@arg verify_defs: --("verify-defs") "Checks definitions")
         (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
@@ -67,7 +68,9 @@ fn main() {
     #[cfg(feature = "xml")]
     let app = clap_app!(@app (app)
         (@arg export_graphml_deps: --("export-graphml-deps") [FILE]
-        "Exports all theorem dependencies in the GraphML file format")
+            "Exports all theorem dependencies in the GraphML file format")
+        (@arg export_graphml_defs: --("export-graphml-defs") [FILE]
+            "Exports all definition dependencies in the GraphML file format")
     );
 
     let matches = app.get_matches();
@@ -80,9 +83,11 @@ fn main() {
             || matches.is_present("grammar")
             || matches.is_present("parse_stmt")
             || matches.is_present("verify_parse_stmt")
+            || matches.is_present("verify_defs")
             || matches.is_present("export_grammar_dot")
             || matches.is_present("dump_grammar")
-            || matches.is_present("dump_formula"),
+            || matches.is_present("dump_formula")
+            || matches.is_present("export_graphml_defs"),
         jobs: usize::from_str(matches.value_of("jobs").unwrap_or("1"))
             .expect("validator should check this"),
     };
@@ -128,6 +133,10 @@ fn main() {
             db.verify_parse_stmt();
         }
 
+        if matches.is_present("verify_defs") {
+            db.definitions_pass();
+        }
+
         if matches.is_present("verify_usage") {
             db.verify_usage_pass();
         }
@@ -145,6 +154,14 @@ fn main() {
             File::create(matches.value_of("export_graphml_deps").unwrap())
                 .map_err(|err| err.into())
                 .and_then(|file| db.export_graphml_deps(&mut BufWriter::new(file)))
+                .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
+        }
+
+        #[cfg(feature = "xml")]
+        if matches.is_present("export_graphml_defs") {
+            File::create(matches.value_of("export_graphml_defs").unwrap())
+                .map_err(|err| err.into())
+                .and_then(|file| db.export_graphml_defs(&mut BufWriter::new(file)))
                 .unwrap_or_else(|diag| diags.push((StatementAddress::default(), diag)));
         }
 

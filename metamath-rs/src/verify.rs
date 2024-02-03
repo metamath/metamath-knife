@@ -756,12 +756,13 @@ fn verify_proof<'a, P: ProofBuilder>(
                 count += 1;
             }
             if step.hyptok.is_some() {
-                if explicit_stack.is_none() {
-                    // lazy initialization so that we don't need to maintain
-                    // this parallel stack if we are not in explicit mode
-                    explicit_stack = Some(vec![None; state.stack.len() - 1]);
-                }
-                explicit_stack.as_mut().unwrap().push(step.hyptok);
+                explicit_stack
+                    .get_or_insert_with(|| {
+                        // lazy initialization so that we don't need to maintain
+                        // this parallel stack if we are not in explicit mode
+                        vec![None; state.stack.len() - 1]
+                    })
+                    .push(step.hyptok);
             }
         }
     }
