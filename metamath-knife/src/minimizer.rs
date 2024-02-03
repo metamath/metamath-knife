@@ -6,7 +6,8 @@ use std::{
 
 use itertools::Itertools;
 use metamath_rs::{
-    as_str, formula::Substitutions, proof::ProofTreeArray, Database, Formula, Label, StatementRef,
+    as_str, axiom_use::AxiomUse, formula::Substitutions, proof::ProofTreeArray, Database, Formula,
+    Label, StatementRef,
 };
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
@@ -71,7 +72,7 @@ impl MinimizedStep {
 }
 
 /// Attempt to minimize a given statement.
-/// Requires: [`Database::stmt_parse_pass`]
+/// Requires: [`Database::stmt_parse_pass`] and [`Database::verify_usage_pass`]
 pub fn minimize(db: &Database, label_str: &str) {
     let now = Instant::now();
     let mut out = std::io::stdout();
@@ -89,11 +90,21 @@ pub fn minimize(db: &Database, label_str: &str) {
     // Those are stored in `theorem_rest` and will be checked every time.
     let mut theorem_hash = HashMap::new();
     let mut theorem_rest = vec![];
+    let axiom_usage = db.try_usage_result().unwrap();
+    let current_axiom_usage = axiom_usage.get_axiom_use(&sref).unwrap_or_else(|| {
+        panic!("Theorem {label_str} does not have an axiom usage");
+    });
     let provable_typecode = db.grammar_result().provable_typecode();
-    for theorem in db
-        .statements_range(..label)
-        .filter(|s| s.is_assertion() && !s.discouragements().usage_discouraged)
-    {
+    let provable_typecode_token = db.name_result().atom_name(provable_typecode);
+    for theorem in db.statements_range(..label).filter(|s| {
+        s.is_assertion()
+            && s.math_at(0).slice == provable_typecode_token
+            && !s.discouragements().usage_discouraged
+            && axiom_usage
+                .get_axiom_use(s)
+                .unwrap_or(&AxiomUse::default())
+                .compatible_with(current_axiom_usage)
+    }) {
         let formula = db.stmt_parse_result().get_formula(&theorem).unwrap();
         if formula.get_typecode() == provable_typecode {
             if formula.is_variable_by_path(&[]).unwrap() {

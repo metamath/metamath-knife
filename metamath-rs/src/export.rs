@@ -221,8 +221,10 @@ impl Database {
             .exprs()
             .expect("exporting MMP requires expressions enabled in the ProofTreeArray");
         for &mut (cur, ref mut line) in &mut lines {
-            for _ in 0..(spaces + indent[cur] - line.len() as u16) {
-                line.push(' ')
+            if indent[cur] < u16::MAX {
+                for _ in 0..(spaces + indent[cur] - line.len() as u16) {
+                    line.push(' ')
+                }
             }
             line.push_str(str::from_utf8(tc).unwrap());
             line.push_str(&String::from_utf8_lossy(&exprs[cur]));
