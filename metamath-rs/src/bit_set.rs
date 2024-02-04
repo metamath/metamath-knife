@@ -180,7 +180,7 @@ impl<'a> IntoIterator for &'a Bitset {
 }
 
 /// Iterator for set bits in a bitset.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BitsetIter<'a> {
     bits: usize,
     offset: usize,

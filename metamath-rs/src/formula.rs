@@ -269,10 +269,25 @@ impl Formula {
             .map(|node_id| self.variables.has_bit(node_id))
     }
 
-    #[inline]
     /// Returns whether the node given by `node_id` is a variable.
+    #[inline]
     fn is_variable(&self, node_id: NodeId) -> bool {
         self.variables.has_bit(node_id)
+    }
+
+    /// Returns whether this formula contains the given label.
+    #[must_use]
+    pub fn contains(&self, label: Label) -> bool {
+        self.labels_iter().any(|(l, _)| l == label)
+    }
+
+    /// Iterates through all variables in the formula
+    // Note: One cannot use e.g. `self.variables.iter().map(|node_id| self.tree[node_id])`
+    // Because formulas extracted from substitutions are lazily cloned.
+    pub fn variable_iter(&self) -> impl Iterator<Item = Label> + Clone + '_ {
+        self.labels_iter()
+            .filter(|&(_, is_variable)| is_variable)
+            .map(|(l, _)| l)
     }
 
     /// Returns a subformula, with its root at the given `node_id`
@@ -453,7 +468,7 @@ impl PartialEq for Formula {
 /// An iterator through the labels of a formula.
 /// This iterator sequence is depth-first, postfix (post-order).
 /// It provides the label, and a boolean indicating whether the current label is a variable or not.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LabelIter<'a> {
     formula: &'a Formula,
     stack: Vec<SiblingIter<'a, Label>>,

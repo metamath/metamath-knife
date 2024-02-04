@@ -1,13 +1,14 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    sync::Arc,
     time::Instant,
 };
 
 use itertools::Itertools;
 use metamath_rs::{
-    as_str, axiom_use::AxiomUse, formula::Substitutions, proof::ProofTreeArray, Database, Formula,
-    Label, StatementRef,
+    as_str, axiom_use::AxiomUse, formula::Substitutions, nameck::Nameset, proof::ProofTreeArray,
+    scopeck::Frame, Database, Formula, Label, StatementRef,
 };
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
@@ -76,11 +77,12 @@ impl MinimizedStep {
 pub fn minimize(db: &Database, label_str: &str) {
     let now = Instant::now();
     let mut out = std::io::stdout();
+    let names = db.name_result();
     let sref: metamath_rs::StatementRef<'_> =
         db.statement(label_str.as_bytes()).unwrap_or_else(|| {
             panic!("Label {label_str} does not correspond to an existing statement");
         });
-    let label = db.name_result().get_atom(sref.label());
+    let label = names.get_atom(sref.label());
     let original_proof_tree = db.get_proof_tree(sref).unwrap_or_else(|| {
         panic!("Could not get original proof tree for label {label_str}");
     });
@@ -95,7 +97,7 @@ pub fn minimize(db: &Database, label_str: &str) {
         panic!("Theorem {label_str} does not have an axiom usage");
     });
     let provable_typecode = db.grammar_result().provable_typecode();
-    let provable_typecode_token = db.name_result().atom_name(provable_typecode);
+    let provable_typecode_token = names.atom_name(provable_typecode);
     for theorem in db.statements_range(..label).filter(|s| {
         s.is_assertion()
             && s.math_at(0).slice == provable_typecode_token
@@ -127,7 +129,8 @@ pub fn minimize(db: &Database, label_str: &str) {
     let mut proof_tree = ProofTreeArray::default();
     let mut stack_buffer = vec![];
     let mut logical_steps_idx = vec![]; // For each logical step, stores the corresponding index in the full proof tree array
-    for (label, formula) in db.get_frame(label).unwrap().essentials() {
+    let frame = db.get_frame(label).unwrap();
+    for (label, formula) in frame.essentials() {
         logical_steps_idx.push(db.build_proof_hyp(
             label,
             formula,
@@ -136,6 +139,13 @@ pub fn minimize(db: &Database, label_str: &str) {
         ));
     }
     let essentials_count = logical_steps_idx.len();
+
+    let dv = labelled_dv(&frame, names);
+    let mand_vars = frame
+        .mandatory_vars()
+        .iter()
+        .map(|symbol_atom| names.lookup_float_by_atom(*symbol_atom).statement_atom)
+        .collect::<Vec<_>>();
 
     // Iterate through each logical step, and attempt to minimize.
     let mut minimized_steps = vec![];
@@ -152,7 +162,16 @@ pub fn minimize(db: &Database, label_str: &str) {
             .iter()
             .chain(theorem_rest.iter())
             .par_bridge()
-            .filter_map(|theorem| match_theorem(db, theorem, target_formula, previous_formulas))
+            .filter_map(|theorem| {
+                match_theorem(
+                    db,
+                    theorem,
+                    target_formula,
+                    previous_formulas,
+                    &dv,
+                    &mand_vars,
+                )
+            })
             .min_by(|a, b| a.compare_with(b))
             .unwrap_or_else(|| {
                 panic!(
@@ -209,7 +228,10 @@ fn match_theorem(
     candidate_theorem: &StatementRef<'_>,
     target_formula: &Formula,
     step_formulas: &[Formula],
+    dv: &[(Label, Label)],
+    mand_vars: &[Label],
 ) -> Option<MinimizedStep> {
+    let names = db.name_result();
     let mut substitutions = Substitutions::default();
     let theorem_formula = db.stmt_parse_result().get_formula(candidate_theorem)?;
     target_formula
@@ -217,19 +239,20 @@ fn match_theorem(
         .ok()?;
 
     // Found a theorem which *might* be applied, now we check the hypotheses
-    let theorem_label = db
-        .name_result()
-        .lookup_label(candidate_theorem.label())?
-        .atom;
+    let theorem_label = names.lookup_label(candidate_theorem.label())?.atom;
     let frame = db.get_frame(theorem_label)?;
     let essentials: Vec<_> = frame.essentials().collect();
     if essentials.is_empty() {
+        let substitutions = Box::new(substitutions);
+        let step_dv = labelled_dv(&frame, names);
+        check_dv_constraints(dv, mand_vars, &step_dv, &substitutions)?; // This can be tested with ~hbalw/ax-5
+
         // No hypoteses, we're done!
         Some(MinimizedStep {
             apply: theorem_label,
             hyps: Box::new([]),
             result: target_formula.clone(),
-            substitutions: Box::new(substitutions),
+            substitutions,
         })
     } else {
         // Iterate over all possible combination of steps, for each formula.
@@ -255,6 +278,9 @@ fn match_theorem(
                     subst.extend(&step_subst).ok()?;
                     hyps.push(step_idx);
                 }
+
+                let step_dv = labelled_dv(&frame, names);
+                check_dv_constraints(dv, mand_vars, &step_dv, &subst)?; // This can be tested with ~hbalw/ax-5
                 Some(MinimizedStep {
                     apply: theorem_label,
                     hyps: hyps.into_boxed_slice(),
@@ -263,6 +289,32 @@ fn match_theorem(
                 })
             })
     }
+}
+
+/// Verifies that the dv constraints are not violated.
+fn check_dv_constraints(
+    main_dv: &[(Label, Label)],
+    mand_vars: &[Label],
+    step_dv: &[(Label, Label)],
+    subst: &Substitutions,
+) -> Option<()> {
+    for (l1, l2) in step_dv {
+        if let Some(fmla1) = subst.get(*l1) {
+            if let Some(fmla2) = subst.get(*l2) {
+                fmla1
+                    .variable_iter()
+                    .cartesian_product(fmla2.variable_iter())
+                    .all(|(a1, a2)| {
+                        !mand_vars.contains(&a1)
+                            || !mand_vars.contains(&a2)
+                            || main_dv.contains(&(a1, a2))
+                            || main_dv.contains(&(a2, a1))
+                    })
+                    .then_some(())?;
+            }
+        }
+    }
+    Some(())
 }
 
 /// Convert a proof step in a [ProofTreeArray] to the corresponding [Formula].
@@ -291,6 +343,21 @@ pub fn proof_step_formula(
                 .ok()
         })
         .unwrap_or_else(|| panic!("Could not parse formula: {}", formula_string))
+}
+
+/// Extract the frame'd disjoint variable conditions in terms of labels.
+fn labelled_dv(frame: &Frame, names: &Arc<Nameset>) -> Vec<(Label, Label)> {
+    let mand_vars = frame.mandatory_vars();
+    frame
+        .mandatory_dv
+        .iter()
+        .map(|(i, j)| {
+            (
+                names.lookup_float_by_atom(mand_vars[*i]).statement_atom,
+                names.lookup_float_by_atom(mand_vars[*j]).statement_atom,
+            )
+        })
+        .collect()
 }
 
 /// Utility function to iterate prefixes of slices
