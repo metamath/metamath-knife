@@ -129,6 +129,22 @@ impl Bitset {
             }
     }
 
+    /// Returns true if this bitset is a subset of the other bitset.
+    pub fn is_subset(&self, other: &Bitset) -> bool {
+        (!other.head & self.head == 0)
+            && match (&self.tail, &other.tail) {
+                (Some(my_tail), Some(other_tail)) => {
+                    my_tail
+                        .iter()
+                        .zip(other_tail.iter())
+                        .all(|(&lword, &rword)| !rword & lword == 0)
+                        && other_tail.iter().skip(my_tail.len()).all(|&word| word == 0)
+                }
+                (None, Some(rtail)) => rtail.iter().all(|&word| word == 0),
+                _ => true,
+            }
+    }
+
     /// Returns an iterator over the indices of set bits in the bitset.
     pub fn iter(&self) -> BitsetIter<'_> {
         self.into_iter()
@@ -164,7 +180,7 @@ impl<'a> IntoIterator for &'a Bitset {
 }
 
 /// Iterator for set bits in a bitset.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BitsetIter<'a> {
     bits: usize,
     offset: usize,

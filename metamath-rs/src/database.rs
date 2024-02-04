@@ -631,10 +631,12 @@ impl Database {
     /// than error diagnostics.  It does not save any parsed proof data.
     pub fn verify_usage_pass(&mut self) -> &Arc<UsageResult> {
         if self.usage.is_none() {
+            self.name_pass();
             time(&self.options.clone(), "usage", || {
                 let parse = self.parse_result();
+                let names = self.name_result();
                 let mut usage = UsageResult::default();
-                crate::axiom_use::verify_usage(parse, &mut usage);
+                crate::axiom_use::verify_usage(parse, names, &mut usage);
                 self.usage = Some(Arc::new(usage));
             });
         }

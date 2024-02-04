@@ -5,30 +5,51 @@ use itertools::PeekingNext;
 
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
+use crate::nameck::Nameset;
 use crate::segment::SegmentRef;
 use crate::segment_set::SegmentSet;
 use crate::statement::{CommandToken, StatementAddress, TokenPtr};
 use crate::util::HashMap;
-use crate::StatementType;
 use crate::{as_str, database::time, Database};
+use crate::{StatementRef, StatementType};
 
-/// Diagnostics issued when checking axiom usage in the Database.
-///
+/// Describes the axioms used by a given theorem.
+pub type AxiomUse = Bitset;
+
+impl AxiomUse {
+    /// Returns whether this axiom use is compatible with the provided one,
+    /// i.e. whether is uses the same axioms or fewer.
+    #[inline]
+    pub fn compatible_with(&self, other: &AxiomUse) -> bool {
+        self.is_subset(other)
+    }
+}
+
+/// Axiom dependencies
+/// Including diagnostics issued when checking axiom usage in the Database.
 #[derive(Debug, Default)]
-pub struct UsageResult(Vec<(StatementAddress, Diagnostic)>);
+pub struct UsageResult {
+    axiom_use_map: HashMap<StatementAddress, AxiomUse>,
+    diagnostics: Vec<(StatementAddress, Diagnostic)>,
+}
 
 impl UsageResult {
     /// Returns the list of errors that were generated during the usage check pass.
     #[must_use]
     pub fn diagnostics(&self) -> Vec<(StatementAddress, Diagnostic)> {
-        self.0.clone()
+        self.diagnostics.clone()
+    }
+
+    /// Returns the axioms used by a given statement
+    #[must_use]
+    pub fn get_axiom_use(&self, stmt: &StatementRef<'_>) -> Option<&'_ AxiomUse> {
+        self.axiom_use_map.get(&stmt.address())
     }
 }
 
 struct UsagePass<'a> {
     axiom_use_map: HashMap<TokenPtr<'a>, Bitset>,
     axioms: Vec<TokenPtr<'a>>,
-    result: &'a mut UsageResult,
 }
 
 impl<'a> UsagePass<'a> {
@@ -70,7 +91,13 @@ impl<'a> UsagePass<'a> {
     }
 
     /// Verify that all usage declarations are correct.
-    fn verify_usage(&'a mut self, sset: &'a SegmentSet) {
+    fn verify_usage<'b>(
+        &mut self,
+        sset: &'b SegmentSet,
+        diagnostics: &mut Vec<(StatementAddress, Diagnostic)>,
+    ) where
+        'b: 'a,
+    {
         for sref in sset.segments(..) {
             let mut j_commands: std::slice::Iter<'_, (i32, (crate::Span, Vec<CommandToken>))> =
                 sref.j_commands.iter();
@@ -82,7 +109,7 @@ impl<'a> UsagePass<'a> {
                         {
                             if let Err(diags) = self.parse_command(sref, args) {
                                 for diag in diags {
-                                    self.result.0.push((stmt.address(), diag));
+                                    diagnostics.push((stmt.address(), diag));
                                 }
                             }
                         }
@@ -123,13 +150,18 @@ impl<'a> UsagePass<'a> {
 }
 
 /// Verify the axiom usage
-pub(crate) fn verify_usage(sset: &Arc<SegmentSet>, usage: &mut UsageResult) {
-    UsagePass {
+pub(crate) fn verify_usage(sset: &Arc<SegmentSet>, names: &Arc<Nameset>, usage: &mut UsageResult) {
+    let mut pass = UsagePass {
         axiom_use_map: HashMap::default(),
         axioms: vec![],
-        result: usage,
+    };
+
+    pass.verify_usage(sset, &mut usage.diagnostics);
+
+    for (label, u) in pass.axiom_use_map.drain() {
+        let address = names.lookup_label(label).unwrap().address;
+        usage.axiom_use_map.insert(address, u);
     }
-    .verify_usage(sset);
 }
 
 impl Database {

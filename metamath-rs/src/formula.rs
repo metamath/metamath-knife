@@ -37,6 +37,7 @@ use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::FromIterator;
+use std::mem::replace;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -93,8 +94,17 @@ impl Substitutions {
     }
 
     /// Add all the provided substitutions to this one
-    pub fn extend(&mut self, substitutions: &Substitutions) {
+    /// Fails in case
+    pub fn extend(&mut self, substitutions: &Substitutions) -> Result<(), UnificationError> {
+        for (label, fmla) in &substitutions.0 {
+            if let Some(my_fmla) = self.0.get(label) {
+                if !my_fmla.eq(fmla) {
+                    Err(UnificationError::UnificationFailed)?;
+                }
+            }
+        }
         self.0.extend(substitutions.0.clone());
+        Ok(())
     }
 
     /// Gets the formula the given label is to be substituted with.
@@ -153,6 +163,19 @@ impl<'a> Debug for SubstitutionsRef<'a> {
             dm.entry(
                 &as_str(self.db.name_result().atom_name(*label)),
                 &formula.as_ref(self.db),
+            );
+        }
+        dm.finish()
+    }
+}
+
+impl<'a> Display for SubstitutionsRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut dm = f.debug_map();
+        for (label, formula) in &self.substitutions.0 {
+            dm.entry(
+                &as_str(self.db.name_result().atom_name(*label)),
+                &format!("{}", &formula.as_ref(self.db)),
             );
         }
         dm.finish()
@@ -221,22 +244,50 @@ impl Formula {
         !self.tree.has_children(self.root)
     }
 
+    /// Returns the node obtained when following the given path.
+    #[inline]
+    fn node_by_path(&self, path: &[usize]) -> Option<usize> {
+        let mut node_id = self.root;
+        for index in path {
+            node_id = self.tree.nth_child(node_id, *index)?;
+        }
+        Some(node_id)
+    }
+
     /// Returns the label obtained when following the given path.
     /// Each element of the path gives the index of the child to retrieve.
     /// For example, the empty
     #[must_use]
     pub fn get_by_path(&self, path: &[usize]) -> Option<Label> {
-        let mut node_id = self.root;
-        for index in path {
-            node_id = self.tree.nth_child(node_id, *index)?;
-        }
-        Some(self.tree[node_id])
+        self.node_by_path(path).map(|node_id| self.tree[node_id])
     }
 
-    #[inline]
+    /// Returns whether the node obtained when following the given path is variable
+    #[must_use]
+    pub fn is_variable_by_path(&self, path: &[usize]) -> Option<bool> {
+        self.node_by_path(path)
+            .map(|node_id| self.variables.has_bit(node_id))
+    }
+
     /// Returns whether the node given by `node_id` is a variable.
+    #[inline]
     fn is_variable(&self, node_id: NodeId) -> bool {
         self.variables.has_bit(node_id)
+    }
+
+    /// Returns whether this formula contains the given label.
+    #[must_use]
+    pub fn contains(&self, label: Label) -> bool {
+        self.labels_iter().any(|(l, _)| l == label)
+    }
+
+    /// Iterates through all variables in the formula
+    // Note: One cannot use e.g. `self.variables.iter().map(|node_id| self.tree[node_id])`
+    // Because formulas extracted from substitutions are lazily cloned.
+    pub fn variable_iter(&self) -> impl Iterator<Item = Label> + Clone + '_ {
+        self.labels_iter()
+            .filter(|&(_, is_variable)| is_variable)
+            .map(|(l, _)| l)
     }
 
     /// Returns a subformula, with its root at the given `node_id`
@@ -270,7 +321,10 @@ impl Formula {
         other: &Formula,
         substitutions: &mut Substitutions,
     ) -> Result<(), UnificationError> {
-        self.sub_unify(self.root, other, other.root, substitutions)
+        let mut new_substitutions = substitutions.clone();
+        self.sub_unify(self.root, other, other.root, &mut new_substitutions)?;
+        let _ = replace(substitutions, new_substitutions);
+        Ok(())
     }
 
     /// Unify a sub-formula
@@ -414,7 +468,7 @@ impl PartialEq for Formula {
 /// An iterator through the labels of a formula.
 /// This iterator sequence is depth-first, postfix (post-order).
 /// It provides the label, and a boolean indicating whether the current label is a variable or not.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LabelIter<'a> {
     formula: &'a Formula,
     stack: Vec<SiblingIter<'a, Label>>,
