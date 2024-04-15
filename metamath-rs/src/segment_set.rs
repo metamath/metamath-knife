@@ -147,7 +147,7 @@ pub(crate) struct SegmentSet {
     /// The work queue for use with this database.
     pub(crate) exec: Executor,
     /// Order structure which records the relative order of segment IDs created
-    /// by the SegmentSet.
+    /// by the `SegmentSet`.
     pub(crate) order: Arc<SegmentOrder>,
     /// Track segment and source info in parallel so they can be updated
     /// independently in the slicing case and if a file is renamed.

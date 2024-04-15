@@ -36,7 +36,6 @@ use core::ops::Index;
 use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::iter::FromIterator;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -546,7 +545,7 @@ impl<'a> FormulaRef<'a> {
     ) -> Result<(), E> {
         if self.is_variable(node_id) {
             let label = &self.tree[node_id];
-            if substitutions.0.get(label).is_none() {
+            if !substitutions.0.contains_key(label) {
                 let typecode = self.db.label_typecode(*label);
                 let work_var = wvp.new_work_variable(typecode)?;
                 substitutions.insert(*label, Formula::from_float(work_var, typecode));

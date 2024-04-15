@@ -14,8 +14,7 @@
     trivial_numeric_casts,
     variant_size_differences,
     unreachable_pub,
-    unused,
-    missing_docs
+    unused
 )]
 // all the clippy
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
@@ -29,7 +28,7 @@
 )]
 // // all the clippy lints we don't want
 #![allow(
-    clippy::blocks_in_if_conditions,
+    clippy::blocks_in_conditions,
     clippy::cast_sign_loss,
     clippy::cast_possible_wrap,
     clippy::enum_glob_use,
