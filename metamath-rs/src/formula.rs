@@ -26,6 +26,7 @@ use crate::segment_set::SegmentSet;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
 use crate::tree::NodeId;
+use crate::tree::NodeIter;
 use crate::tree::SiblingIter;
 use crate::tree::Tree;
 use crate::util::fast_extend;
@@ -193,6 +194,13 @@ impl Formula {
             stack: vec![],
             root: Some(self.root),
         }
+    }
+
+    #[inline]
+    /// Iterates through the labels of a formula, depth-first, post-order.
+    #[must_use]
+    pub fn labels_postorder_iter(&self) -> LabelPostorderIter<'_> {
+        LabelPostorderIter(self.tree.node_iter())
     }
 
     /// Augment a formula with a database reference, to produce a [`FormulaRef`].
@@ -411,7 +419,7 @@ impl PartialEq for Formula {
 }
 
 /// An iterator through the labels of a formula.
-/// This iterator sequence is depth-first, postfix (post-order).
+/// This iterator sequence is depth-first, pre-order.
 /// It provides the label, and a boolean indicating whether the current label is a variable or not.
 #[derive(Debug)]
 pub struct LabelIter<'a> {
@@ -447,6 +455,29 @@ impl<'a> Iterator for LabelIter<'a> {
             // Last sibling reached, pop and iterate
             self.stack.pop();
         }
+    }
+}
+
+/// An iterator through the labels of a formula.
+/// This iterator sequence is depth-first, post-order.
+/// It provides the label, and a boolean indicating whether the current label is a variable or not.
+#[derive(Debug)]
+pub struct LabelPostorderIter<'a>(NodeIter<'a, Label>);
+
+impl Iterator for LabelPostorderIter<'_> {
+    type Item = Label;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().copied()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LabelPostorderIter<'_> {
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
