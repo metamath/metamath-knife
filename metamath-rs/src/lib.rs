@@ -37,6 +37,7 @@
     clippy::let_underscore_untyped,
     clippy::missing_errors_doc,
     clippy::module_name_repetitions,
+    clippy::multiple_crate_versions,
     clippy::needless_range_loop,
     clippy::option_if_let_else,
     clippy::redundant_pub_crate,
@@ -73,6 +74,8 @@ pub mod scopeck;
 pub mod statement;
 pub mod typesetting;
 pub mod verify;
+
+#[cfg(feature = "verify_markup")]
 pub mod verify_markup;
 
 #[cfg(feature = "xml")]

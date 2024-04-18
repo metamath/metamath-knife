@@ -5,17 +5,13 @@
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
 use metamath_rs::database::{Database, DbOptions};
-use metamath_rs::diag::BibError;
 use metamath_rs::parser::is_valid_label;
 use metamath_rs::statement::StatementAddress;
-use metamath_rs::verify_markup::{Bibliography, Bibliography2};
-use metamath_rs::SourceInfo;
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::{self, BufWriter};
 use std::mem;
 use std::str::FromStr;
-use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
@@ -31,7 +27,6 @@ fn main() {
         (@arg split: --split "Processes files > 1 MiB in multiple segments")
         (@arg timing: --time "Prints milliseconds after each stage")
         (@arg verify: -v --verify "Checks proof validity")
-        (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
         (@arg stmt_use: --("stmt-use") value_names(&["FILE", "LABELS"]) "Outputs statements directly or indirectly using the given list of statements")
@@ -68,6 +63,11 @@ fn main() {
     let app = clap_app!(@app (app)
         (@arg export_graphml_deps: --("export-graphml-deps") [FILE]
         "Exports all theorem dependencies in the GraphML file format")
+    );
+
+    #[cfg(feature = "verify_markup")]
+    let app = clap_app!(@app (app)
+        (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
     );
 
     let matches = app.get_matches();
@@ -177,13 +177,18 @@ fn main() {
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
+        #[allow(unused_mut)]
         let mut count = db
             .render_diags(diags, |snippet| {
                 println!("{}", DisplayList::from(snippet));
             })
             .len();
 
+        #[cfg(feature = "verify_markup")]
         if matches.is_present("verify_markup") {
+            use metamath_rs::diag::BibError;
+            use metamath_rs::verify_markup::{Bibliography, Bibliography2};
+
             db.scope_pass();
             db.typesetting_pass();
 
@@ -191,7 +196,7 @@ fn main() {
                 assert!(vals.len() <= 2, "expected at most 2 bibliography files");
                 vals.map(|val| {
                     let file = std::fs::read(val).unwrap();
-                    SourceInfo::new(val.to_owned(), Arc::new(file))
+                    metamath_rs::SourceInfo::new(val.to_owned(), std::sync::Arc::new(file))
                 })
                 .collect()
             });
