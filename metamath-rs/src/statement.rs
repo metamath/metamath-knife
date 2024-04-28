@@ -201,7 +201,7 @@ pub struct GlobalRange {
     /// Since scope braces are not allowed to span segments, if a range ends at
     /// all it must be in the same segment where it started, so this can be a
     /// bare `StatementIndex`.  If the range extends to the logical end of the
-    /// database, that is represented with the NO_STATEMENT constant.
+    /// database, that is represented with the `NO_STATEMENT` constant.
     ///
     /// Since the endpoint always points at a `CloseGroup` statement (or, in
     /// erroneous cases, `Eof` or `FileInclude`) which has no label nor math
@@ -468,16 +468,16 @@ pub(crate) struct Statement {
     /// at the beginning of the keyword.
     pub(crate) label: Span,
     /// Start of the most deeply nested group for this statment, or
-    /// NO_STATEMENT.
+    /// `NO_STATEMENT`.
     pub(crate) group: StatementIndex,
-    /// End of the most deeply nested group for this statment, or NO_STATEMENT.
+    /// End of the most deeply nested group for this statment, or `NO_STATEMENT`.
     pub(crate) group_end: StatementIndex,
-    /// Index into span_pool of the first math token.
+    /// Index into `span_pool` of the first math token.
     pub(crate) math_start: usize,
-    /// Index into span_pool of the first proof token / after the last math
+    /// Index into `span_pool` of the first proof token / after the last math
     /// token.
     pub(crate) proof_start: usize,
-    /// Index into span_pool one after the last proof token.
+    /// Index into `span_pool` one after the last proof token.
     pub(crate) proof_end: usize,
 }
 

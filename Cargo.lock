@@ -165,7 +165,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "metamath-knife"
-version = "0.3.6"
+version = "0.3.8"
 dependencies = [
  "annotate-snippets",
  "clap",
@@ -175,7 +175,7 @@ dependencies = [
 
 [[package]]
 name = "metamath-rs"
-version = "0.3.6"
+version = "0.3.8"
 dependencies = [
  "annotate-snippets",
  "assert_matches",

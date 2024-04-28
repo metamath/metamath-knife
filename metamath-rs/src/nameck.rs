@@ -35,7 +35,6 @@ use crate::StatementRef;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
-use std::u32;
 
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup

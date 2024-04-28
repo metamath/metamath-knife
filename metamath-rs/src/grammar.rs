@@ -1460,12 +1460,13 @@ impl Grammar {
         )
     }
 
-    fn parse_statement(
+    /// Parses an individual statement into a formula.
+    pub fn parse_statement(
         &self,
         sref: &StatementRef<'_>,
         nset: &Nameset,
         names: &mut NameReader<'_>,
-    ) -> Result<Option<Formula>, StmtParseError> {
+    ) -> Result<Formula, StmtParseError> {
         if sref.math_len() == 0 {
             return Err(StmtParseError::ParsedStatementNoTypeCode);
         }
@@ -1493,7 +1494,7 @@ impl Grammar {
             convert_to_provable,
             nset,
         )?;
-        Ok(Some(formula))
+        Ok(formula)
     }
 
     /// Returns the typecodes allowed in this grammar
@@ -1775,21 +1776,19 @@ fn parse_statements_single(
     let mut formulas = HashMap::default();
 
     for sref in segment {
-        match match sref.statement_type() {
-            StatementType::Axiom | StatementType::Essential | StatementType::Provable => {
-                grammar.parse_statement(&sref, nset, names)
+        if let StatementType::Axiom | StatementType::Essential | StatementType::Provable =
+            sref.statement_type()
+        {
+            match grammar.parse_statement(&sref, nset, names) {
+                Err(diag) => {
+                    warn!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
+                    diagnostics.insert(sref.address(), diag);
+                    break; // inserted here to stop at first error!
+                }
+                Ok(formula) => {
+                    formulas.insert(sref.address(), formula);
+                }
             }
-            _ => Ok(None),
-        } {
-            Err(diag) => {
-                warn!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
-                diagnostics.insert(sref.address(), diag);
-                break; // inserted here to stop at first error!
-            }
-            Ok(Some(formula)) => {
-                formulas.insert(sref.address(), formula);
-            }
-            _ => {}
         }
     }
 
