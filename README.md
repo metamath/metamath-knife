@@ -70,14 +70,17 @@ FLAGS:
     -v, --verify               Checks proof validity
     -m, --verify-markup        Checks comment markup
         --verify-parse-stmt    Checks that printing parsed statements gives back the original formulas
+    -u, --verify-usage         Checks axiom usage
 
 OPTIONS:
-        --text <NAME> <TEXT>    Provides raw database content on the command line
-        --biblio <FILE>...      Supplies a bibliography file for verify-markup
-                                Can be used one or two times; the second is for exthtml processing
-    -D, --discouraged <FILE>    Regenerates `discouraged` file
-    -e, --export <LABEL>...     Outputs a proof file
-    -j, --jobs <jobs>           Number of threads to use for verification
+        --text <NAME> <TEXT>          Provides raw database content on the command line
+    -X, --axiom-use <FILE>            Generate `axiom-use` file
+        --biblio <FILE>...            Supplies a bibliography file for verify-markup
+                                      Can be used one or two times; the second is for exthtml processing
+    -D, --discouraged <FILE>          Regenerates `discouraged` file
+    -e, --export <LABEL>...           Outputs a proof file
+    -j, --jobs <jobs>                 Number of threads to use for verification
+        --stmt-use <FILE> <LABELS>    Outputs statements directly or indirectly using the given list of statements
 
 ARGS:
     <DATABASE>    Database file to load
