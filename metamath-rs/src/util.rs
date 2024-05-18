@@ -34,8 +34,8 @@ pub(crate) fn fast_extend<T: Copy>(vec: &mut Vec<T>, other: &[T]) {
     unsafe {
         let len = vec.len();
         short_copy(
-            other.get_unchecked(0),
-            vec.get_unchecked_mut(len),
+            other.as_ptr(),
+            vec.as_mut_ptr().add(len),
             other.len(),
         );
         vec.set_len(len + other.len());
