@@ -2,14 +2,17 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 
+mod list_stmt;
+
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
+use list_stmt::list_statements;
 use metamath_rs::database::{Database, DbOptions};
 use metamath_rs::parser::is_valid_label;
 use metamath_rs::statement::StatementAddress;
 use simple_logger::SimpleLogger;
 use std::fs::File;
-use std::io::{self, BufWriter};
+use std::io::{self, stdout, BufWriter};
 use std::mem;
 use std::str::FromStr;
 
@@ -41,6 +44,7 @@ fn main() {
             "Checks that printing parsed statements gives back the original formulas")
         (@arg dump_grammar: -G --("dump-grammar") "Dumps the database's grammar")
         (@arg dump_formula: -F --("dump-formula") "Dumps the formulas of this database")
+        (@arg list_statements: -S --("list-statements") "List all statements of this database")
         (@arg debug: --debug
             "Activates debug logs, including for the grammar building and statement parsing")
         (@arg trace_recalc: --("trace-recalc") "Prints segments as they are recalculated")
@@ -175,6 +179,11 @@ fn main() {
                     )
                 })
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
+        }
+
+        if matches.is_present("list_statements") {
+            db.scope_pass();
+            _ = list_statements(&db, |_label| true, &mut stdout());
         }
 
         #[allow(unused_mut)]
