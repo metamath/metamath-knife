@@ -20,3 +20,9 @@ metamath-rs = { path = "../metamath-rs" }
 name = "metamath-knife"
 path = "src/main.rs"
 doc = false
+
+[features]
+default = ["annotate-snippets/color", "verify_markup"]
+dot = ["metamath-rs/dot"]
+xml = ["metamath-rs/xml"]
+verify_markup = ["metamath-rs/verify_markup"]

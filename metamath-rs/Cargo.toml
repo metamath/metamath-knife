@@ -23,11 +23,14 @@ typed-arena = "2.0"
 # Optional dependencies
 dot-writer = { version = "0.1.2", optional = true }
 xml-rs = { version = "0.8.14", optional = true }
+html5ever = { version = "0.26.0", optional = true }
+scraper = { version = "0.19.0", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
 
 [features]
-default = ["annotate-snippets/color"]
+default = ["annotate-snippets/color", "verify_markup"]
 dot = ["dot-writer"]
 xml = ["xml-rs"]
+verify_markup = ["scraper", "html5ever"]
