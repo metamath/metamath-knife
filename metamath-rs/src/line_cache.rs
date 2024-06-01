@@ -2,7 +2,6 @@
 
 use crate::util::HashMap;
 use std::cmp::Ordering;
-use std::convert::TryFrom;
 
 const PAGE: usize = 256;
 

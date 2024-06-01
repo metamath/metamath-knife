@@ -26,6 +26,7 @@ use crate::segment_set::SegmentSet;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
 use crate::tree::NodeId;
+use crate::tree::NodeIter;
 use crate::tree::SiblingIter;
 use crate::tree::Tree;
 use crate::util::fast_extend;
@@ -36,7 +37,6 @@ use core::ops::Index;
 use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::iter::FromIterator;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -196,6 +196,13 @@ impl Formula {
                 current_id: Some(self.root),
             }],
         }
+    }
+
+    #[inline]
+    /// Iterates through the labels of a formula, depth-first, post-order.
+    #[must_use]
+    pub fn labels_postorder_iter(&self) -> LabelPostorderIter<'_> {
+        LabelPostorderIter(self.tree.node_iter())
     }
 
     /// Augment a formula with a database reference, to produce a [`FormulaRef`].
@@ -469,6 +476,29 @@ impl<'a> Iterator for LabelIter<'a> {
     }
 }
 
+/// An iterator through the labels of a formula.
+/// This iterator sequence is depth-first, post-order.
+/// It provides the label, and a boolean indicating whether the current label is a variable or not.
+#[derive(Debug)]
+pub struct LabelPostorderIter<'a>(NodeIter<'a, Label>);
+
+impl Iterator for LabelPostorderIter<'_> {
+    type Item = Label;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().copied()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LabelPostorderIter<'_> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 /// A [`Formula`] reference in the context of a [`Database`].
 /// This allows the values in the [`Formula`] to be resolved.
 #[derive(Copy, Clone)]
@@ -575,7 +605,7 @@ impl<'a> FormulaRef<'a> {
     ) -> Result<(), E> {
         if self.is_variable(node_id) {
             let label = &self.tree[node_id];
-            if substitutions.0.get(label).is_none() {
+            if !substitutions.0.contains_key(label) {
                 let typecode = self.db.label_typecode(*label);
                 let work_var = wvp.new_work_variable(typecode)?;
                 substitutions.insert(*label, Formula::from_float(work_var, typecode));

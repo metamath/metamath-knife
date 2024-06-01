@@ -1460,12 +1460,13 @@ impl Grammar {
         )
     }
 
-    fn parse_statement(
+    /// Parses an individual statement into a formula.
+    pub fn parse_statement(
         &self,
         sref: &StatementRef<'_>,
         nset: &Nameset,
         names: &mut NameReader<'_>,
-    ) -> Result<Option<Formula>, StmtParseError> {
+    ) -> Result<Formula, StmtParseError> {
         if sref.math_len() == 0 {
             return Err(StmtParseError::ParsedStatementNoTypeCode);
         }
@@ -1473,12 +1474,6 @@ impl Grammar {
         // Type token. It is safe to unwrap here since parser has checked for EmptyMathString error.
         let typecode = nset.get_atom(sref.math_at(0).slice);
         let mut expected_typecode = typecode;
-
-        // Skip syntactic axioms
-        if sref.statement_type() == StatementType::Axiom && expected_typecode != self.provable_type
-        {
-            return Ok(None);
-        }
 
         // If this is a provable statement, prove that this is a wff. Otherwise just use the provided typecode
         if expected_typecode == self.provable_type {
@@ -1499,7 +1494,7 @@ impl Grammar {
             convert_to_provable,
             nset,
         )?;
-        Ok(Some(formula))
+        Ok(formula)
     }
 
     /// Returns the typecodes allowed in this grammar
@@ -1781,21 +1776,19 @@ fn parse_statements_single(
     let mut formulas = HashMap::default();
 
     for sref in segment {
-        match match sref.statement_type() {
-            StatementType::Axiom | StatementType::Essential | StatementType::Provable => {
-                grammar.parse_statement(&sref, nset, names)
+        if let StatementType::Axiom | StatementType::Essential | StatementType::Provable =
+            sref.statement_type()
+        {
+            match grammar.parse_statement(&sref, nset, names) {
+                Err(diag) => {
+                    warn!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
+                    diagnostics.insert(sref.address(), diag);
+                    break; // inserted here to stop at first error!
+                }
+                Ok(formula) => {
+                    formulas.insert(sref.address(), formula);
+                }
             }
-            _ => Ok(None),
-        } {
-            Err(diag) => {
-                warn!(" FAILED to parse {}!", as_str(nset.statement_name(&sref)));
-                diagnostics.insert(sref.address(), diag);
-                break; // inserted here to stop at first error!
-            }
-            Ok(Some(formula)) => {
-                formulas.insert(sref.address(), formula);
-            }
-            _ => {}
         }
     }
 

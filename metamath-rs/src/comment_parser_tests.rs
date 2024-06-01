@@ -326,6 +326,16 @@ fn test_discouragements() {
             usage_discouraged: true,
         }
     );
+    assert_eq!(
+        Discouragements::new(
+            b"A false axiom, experimental.  (Proof modification\r\n\
+            is discouraged.)  (New usage is discouraged.)"
+        ),
+        Discouragements {
+            modification_discouraged: true,
+            usage_discouraged: true,
+        }
+    );
 }
 
 #[track_caller]

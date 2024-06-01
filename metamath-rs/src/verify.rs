@@ -101,7 +101,7 @@ impl ProofBuilder for () {
     type Item = ();
     type Accum = ();
 
-    fn push(&mut self, _: &mut (), (): ()) {}
+    fn push(&mut self, (): &mut (), (): ()) {}
 
     fn build(&mut self, _: StatementAddress, (): (), _: &[u8], _: Range<usize>) {}
 }

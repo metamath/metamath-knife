@@ -20,12 +20,15 @@ use crate::segment_set::SourceInfo;
 use crate::statement::{StatementAddress, NO_STATEMENT};
 use crate::util::{HashMap, HashSet};
 use crate::{Database, Span, StatementRef, StatementType};
+use html5ever::tendril::{stream::Utf8LossyDecoder, Tendril, TendrilSink as _};
 use regex::bytes::Regex;
 use std::ops::Range;
+use std::sync::OnceLock;
 
-lazy_static::lazy_static! {
-    static ref WINDOWS_RESERVED_NAMES: Regex =
-        Regex::new("(?i-u)^(?:CON|PRN|AUX|NUL|(?:COM|LPT)[1-9])$").unwrap();
+fn windows_reserved_names() -> &'static Regex {
+    static WINDOWS_RESERVED_NAMES: OnceLock<Regex> = OnceLock::new();
+    WINDOWS_RESERVED_NAMES
+        .get_or_init(|| Regex::new("(?i-u)^(?:CON|PRN|AUX|NUL|(?:COM|LPT)[1-9])$").unwrap())
 }
 
 impl Database {
@@ -69,7 +72,7 @@ impl Database {
                     stmt.address(),
                     Diagnostic::MMReservedLabel(stmt.label_span()),
                 ))
-            } else if WINDOWS_RESERVED_NAMES.is_match(stmt.label()) {
+            } else if windows_reserved_names().is_match(stmt.label()) {
                 diags.push((
                     stmt.address(),
                     Diagnostic::WindowsReservedLabel(stmt.label_span()),
@@ -421,12 +424,11 @@ fn verify_markup_comment(
     }
 
     fn check_uninterpreted_html(buf: &[u8], sp: Span, diag: &mut impl FnMut(Diagnostic)) {
-        lazy_static::lazy_static! {
-            static ref HTML: Regex = Regex::new("(?i-u)</?HTML>").unwrap();
-        }
+        static HTML: OnceLock<Regex> = OnceLock::new();
+        let html = HTML.get_or_init(|| Regex::new("(?i-u)</?HTML>").unwrap());
         let text = sp.as_ref(buf);
-        if HTML.is_match(text) {
-            if let Some(m) = HTML.find(text) {
+        if html.is_match(text) {
+            if let Some(m) = html.find(text) {
                 diag(Diagnostic::UninterpretedHtml(Span::new2(
                     sp.start + m.start() as u32,
                     sp.start + m.end() as u32,
@@ -437,7 +439,7 @@ fn verify_markup_comment(
 
     let mut temp_buffer = vec![];
     let mut in_math = None;
-    let mut in_html = None;
+    let mut in_html = None::<HtmlParser>;
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
@@ -449,6 +451,9 @@ fn verify_markup_comment(
                     }
                 });
                 check_uninterpreted_html(buf, sp, &mut diag);
+                if let Some(parser) = &mut in_html {
+                    parser.feed(sp.as_ref(buf))
+                }
             }
             CommentItem::StartMathMode(i) => {
                 in_math = Some(i);
@@ -480,8 +485,8 @@ fn verify_markup_comment(
                     }
                 }
             }
-            CommentItem::StartHtml(i) => in_html = Some(i),
-            CommentItem::EndHtml(_) => in_html = None,
+            CommentItem::StartHtml(i) => in_html = Some(HtmlParser::new(i)),
+            CommentItem::EndHtml(i) => in_html.take().unwrap().validate(i + 7, &mut diag),
             CommentItem::LineBreak(_)
             | CommentItem::StartSubscript(_)
             | CommentItem::EndSubscript(_)
@@ -506,8 +511,8 @@ fn verify_markup_comment(
     if let Some(i) = in_math {
         diag(Diagnostic::UnclosedMathMarkup(i as u32, span.end))
     }
-    if let Some(i) = in_html {
-        diag(Diagnostic::UnclosedHtml(i as u32, span.end))
+    if let Some(parser) = in_html {
+        diag(Diagnostic::UnclosedHtml(parser.start as u32, span.end))
     }
 }
 
@@ -521,9 +526,9 @@ pub struct Bibliography(HashSet<Box<[u8]>>);
 /// A pair of bibliography files. This is used to support `set.mm`, which
 /// contains two separate-ish databases inside one metamath file. Bibliography
 /// references in the first part of the file refer to the
-/// [`TypesettingData::html_bibliography`],
-/// while references after the [`TypesettingData::ext_html_label`] go to the
-/// [`TypesettingData::ext_html_bibliography`].
+/// [`html_bibliography`][crate::typesetting::TypesettingData::html_bibliography],
+/// while references after the [`ext_html_label`][crate::typesetting::TypesettingData::ext_html_label] go to the
+/// [`ext_html_bibliography`][crate::typesetting::TypesettingData::ext_html_bibliography].
 #[derive(Debug)]
 pub struct Bibliography2 {
     /// The main bibliography file.
@@ -542,13 +547,13 @@ impl Bibliography {
     /// Parse bibliography file data out of the given [`SourceInfo`], and put
     /// any parse errors in `diags`.
     pub fn parse<'a>(source: &'a SourceInfo, diags: &mut Vec<(&'a SourceInfo, BibError)>) -> Self {
-        lazy_static::lazy_static! {
-            static ref A_NAME: Regex =
-                #[allow(clippy::invalid_regex)] // https://github.com/rust-lang/rust-clippy/issues/10825
-                Regex::new("(?i-u)<a[[:space:]]name=['\"]?([^&>]*?)['\"]?>").unwrap();
-        }
+        static A_NAME: OnceLock<Regex> = OnceLock::new();
+        let a_name = A_NAME.get_or_init(|| {
+            #[allow(clippy::invalid_regex)] // https://github.com/rust-lang/rust-clippy/issues/10825
+            Regex::new("(?i-u)<a[[:space:]]name=['\"]?([^&>]*?)['\"]?>").unwrap()
+        });
         let mut bib = HashMap::default();
-        for captures in A_NAME.captures_iter(&source.text) {
+        for captures in a_name.captures_iter(&source.text) {
             let m = captures.get(0).unwrap();
             let sp = Span::new(m.start(), m.end());
             if let Some(sp2) = bib.insert(captures.get(1).unwrap().as_bytes().into(), sp) {
@@ -562,5 +567,48 @@ impl Bibliography {
     #[must_use]
     pub fn contains(&self, tag: &[u8]) -> bool {
         self.0.contains(tag)
+    }
+}
+
+struct HtmlParser {
+    start: usize,
+    parser: Utf8LossyDecoder<html5ever::Parser<scraper::Html>>,
+    string: String,
+}
+
+impl HtmlParser {
+    fn new(start: usize) -> Self {
+        use html5ever::{local_name, namespace_url, ns};
+        let parser = html5ever::driver::parse_fragment(
+            scraper::Html::new_fragment(),
+            html5ever::ParseOpts::default(),
+            html5ever::QualName::new(None, ns!(html), local_name!("div")),
+            vec![],
+        );
+        Self {
+            start,
+            parser: parser.from_utf8(),
+            string: String::new(),
+        }
+    }
+
+    fn feed(&mut self, text: &[u8]) {
+        self.parser.process(Tendril::from_slice(text));
+        self.string += crate::as_str(text);
+    }
+
+    fn validate(self, end: usize, diag: &mut impl FnMut(Diagnostic)) {
+        let mut errors = self.parser.finish().errors;
+        if !errors.is_empty() {
+            // html5ever has garbage error messages (https://github.com/servo/html5ever/issues/492)
+            // but apparently there aren't any other HTML validators and I'm not going to write one
+            // myself
+            errors.sort();
+            errors.dedup();
+            diag(Diagnostic::HtmlParseError(
+                Span::new(self.start, end),
+                errors,
+            ))
+        }
     }
 }

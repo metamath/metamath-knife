@@ -14,6 +14,7 @@ use std::fmt;
 use std::io;
 use std::io::Write;
 use std::str;
+use std::sync::OnceLock;
 
 /// The error type for [`Database::export_mmp`].
 #[derive(Debug)]
@@ -77,13 +78,13 @@ impl Database {
             as_str(thm_label)
         )?;
         if let Some(comment) = stmt.associated_comment() {
-            lazy_static::lazy_static! {
-                static ref LEADING_WHITESPACE: Regex = Regex::new(r"\n +").unwrap();
-            }
+            static LEADING_WHITESPACE: OnceLock<Regex> = OnceLock::new();
+            let leading_whitespace =
+                LEADING_WHITESPACE.get_or_init(|| Regex::new(r"\n +").unwrap());
             let mut span = comment.span();
             span.start += 2;
             span.end -= 3;
-            let cstr = LEADING_WHITESPACE.replace_all(
+            let cstr = leading_whitespace.replace_all(
                 as_str(span.as_ref(&comment.segment().segment.buffer)),
                 "\n  ",
             );

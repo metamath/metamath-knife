@@ -147,6 +147,7 @@ pub enum Diagnostic {
     GrammarAmbiguous(StatementAddress),
     GrammarCantBuild(&'static str),
     GrammarProvableFloat,
+    HtmlParseError(Span, Vec<Cow<'static, str>>),
     HeaderCommentParseError(HeadingLevel),
     InvalidAxiomRestatement(Span, Span),
     IoError(String),
@@ -815,6 +816,12 @@ impl Diagnostic {
                 "Floating declaration of provable type".into(),
                 stmt,
                 stmt.span(),
+            )]),
+            HtmlParseError(span, msg) => (format!("HTML parse error(s): {}", msg.iter().format(", ")).into(), vec![(
+                AnnotationType::Warning,
+                "in this HTML block".into(),
+                stmt,
+                *span,
             )]),
             HeaderCommentParseError(lvl) => {
                 notes = lvl.diagnostic_note();

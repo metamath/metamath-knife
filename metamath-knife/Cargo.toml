@@ -2,7 +2,7 @@
 name = "metamath-knife"
 readme = "metamath-knife/README.md"
 description = "A command-line tool for Metamath, including parallel and incremental verifier for Metamath databases"
-version = "0.3.6"
+version = "0.3.8"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -20,3 +20,9 @@ metamath-rs = { path = "../metamath-rs" }
 name = "metamath-knife"
 path = "src/main.rs"
 doc = false
+
+[features]
+default = ["annotate-snippets/color", "verify_markup"]
+dot = ["metamath-rs/dot"]
+xml = ["metamath-rs/xml"]
+verify_markup = ["metamath-rs/verify_markup"]

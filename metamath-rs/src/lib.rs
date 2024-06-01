@@ -14,8 +14,7 @@
     trivial_numeric_casts,
     variant_size_differences,
     unreachable_pub,
-    unused,
-    missing_docs
+    unused
 )]
 // all the clippy
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
@@ -29,7 +28,7 @@
 )]
 // // all the clippy lints we don't want
 #![allow(
-    clippy::blocks_in_if_conditions,
+    clippy::blocks_in_conditions,
     clippy::cast_sign_loss,
     clippy::cast_possible_wrap,
     clippy::enum_glob_use,
@@ -38,6 +37,7 @@
     clippy::let_underscore_untyped,
     clippy::missing_errors_doc,
     clippy::module_name_repetitions,
+    clippy::multiple_crate_versions,
     clippy::needless_range_loop,
     clippy::option_if_let_else,
     clippy::redundant_pub_crate,
@@ -75,6 +75,8 @@ pub mod scopeck;
 pub mod statement;
 pub mod typesetting;
 pub mod verify;
+
+#[cfg(feature = "verify_markup")]
 pub mod verify_markup;
 
 #[cfg(feature = "xml")]

@@ -2,20 +2,19 @@
 //! databases.  The entry point for all API operations is in the `database`
 //! module, as is a discussion of the data representation.
 
+mod list_stmt;
+
 use annotate_snippets::display_list::DisplayList;
 use clap::{clap_app, crate_version};
+use list_stmt::list_statements;
 use metamath_rs::database::{Database, DbOptions};
-use metamath_rs::diag::BibError;
 use metamath_rs::parser::is_valid_label;
 use metamath_rs::statement::StatementAddress;
-use metamath_rs::verify_markup::{Bibliography, Bibliography2};
-use metamath_rs::SourceInfo;
 use simple_logger::SimpleLogger;
 use std::fs::File;
-use std::io::{self, BufWriter};
+use std::io::{self, stdout, BufWriter};
 use std::mem;
 use std::str::FromStr;
-use std::sync::Arc;
 
 fn positive_integer(val: String) -> Result<(), String> {
     u32::from_str(&val).map(|_| ()).map_err(|e| format!("{e}"))
@@ -32,7 +31,6 @@ fn main() {
         (@arg timing: --time "Prints milliseconds after each stage")
         (@arg verify: -v --verify "Checks proof validity")
         (@arg verify_defs: --("verify-defs") "Checks definitions")
-        (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
         (@arg discouraged: -D --discouraged [FILE] "Regenerates `discouraged` file")
         (@arg axiom_use: -X --("axiom-use") [FILE] "Generate `axiom-use` file")
         (@arg stmt_use: --("stmt-use") value_names(&["FILE", "LABELS"]) "Outputs statements directly or indirectly using the given list of statements")
@@ -47,6 +45,7 @@ fn main() {
             "Checks that printing parsed statements gives back the original formulas")
         (@arg dump_grammar: -G --("dump-grammar") "Dumps the database's grammar")
         (@arg dump_formula: -F --("dump-formula") "Dumps the formulas of this database")
+        (@arg list_statements: -S --("list-statements") "List all statements of this database")
         (@arg debug: --debug
             "Activates debug logs, including for the grammar building and statement parsing")
         (@arg trace_recalc: --("trace-recalc") "Prints segments as they are recalculated")
@@ -71,6 +70,11 @@ fn main() {
             "Exports all theorem dependencies in the GraphML file format")
         (@arg export_graphml_defs: --("export-graphml-defs") [FILE]
             "Exports all definition dependencies in the GraphML file format")
+    );
+
+    #[cfg(feature = "verify_markup")]
+    let app = clap_app!(@app (app)
+        (@arg verify_markup: -m --("verify-markup") "Checks comment markup")
     );
 
     let matches = app.get_matches();
@@ -194,13 +198,23 @@ fn main() {
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
 
+        if matches.is_present("list_statements") {
+            db.scope_pass();
+            _ = list_statements(&db, |_label| true, &mut stdout());
+        }
+
+        #[allow(unused_mut)]
         let mut count = db
             .render_diags(diags, |snippet| {
                 println!("{}", DisplayList::from(snippet));
             })
             .len();
 
+        #[cfg(feature = "verify_markup")]
         if matches.is_present("verify_markup") {
+            use metamath_rs::diag::BibError;
+            use metamath_rs::verify_markup::{Bibliography, Bibliography2};
+
             db.scope_pass();
             db.typesetting_pass();
 
@@ -208,7 +222,7 @@ fn main() {
                 assert!(vals.len() <= 2, "expected at most 2 bibliography files");
                 vals.map(|val| {
                     let file = std::fs::read(val).unwrap();
-                    SourceInfo::new(val.to_owned(), Arc::new(file))
+                    metamath_rs::SourceInfo::new(val.to_owned(), std::sync::Arc::new(file))
                 })
                 .collect()
             });
