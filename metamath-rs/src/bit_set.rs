@@ -60,6 +60,7 @@ impl Bitset {
     }
 
     fn tail(&self) -> &[usize] {
+        #[allow(clippy::manual_unwrap_or_default)] // clippy#12928
         match self.tail {
             None => Default::default(),
             Some(ref bx) => bx,
