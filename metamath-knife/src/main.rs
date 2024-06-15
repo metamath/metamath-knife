@@ -10,6 +10,7 @@ use list_stmt::list_statements;
 use metamath_rs::database::{Database, DbOptions};
 use metamath_rs::parser::is_valid_label;
 use metamath_rs::statement::StatementAddress;
+use metamath_rs::StatementType;
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::{self, stdout, BufWriter};
@@ -155,7 +156,14 @@ fn main() {
         if matches.is_present("axiom_use") {
             File::create(matches.value_of("axiom_use").unwrap())
                 .and_then(|file| {
-                    db.write_stmt_use(|label| label.starts_with(b"ax-"), &mut BufWriter::new(file))
+                    db.write_stmt_use(
+                        |sref| {
+                            sref.statement_type() == StatementType::Axiom
+                                && sref.proof_slice_at(0) == b"|-"
+                                && !sref.label().starts_with(b"df-")
+                        },
+                        &mut BufWriter::new(file),
+                    )
                 })
                 .unwrap_or_else(|err| diags.push((StatementAddress::default(), err.into())));
         }
@@ -174,7 +182,7 @@ fn main() {
             File::create(output_file_path)
                 .and_then(|file| {
                     db.write_stmt_use(
-                        |label| stmt_list.contains(&label),
+                        |sref| stmt_list.contains(&sref.label()),
                         &mut BufWriter::new(file),
                     )
                 })
