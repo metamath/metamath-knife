@@ -60,6 +60,7 @@ mod util;
 pub mod axiom_use;
 pub mod comment_parser;
 pub mod database;
+pub mod defck;
 pub mod diag;
 pub mod discouraged;
 pub mod export;
@@ -83,6 +84,8 @@ pub mod export_deps;
 
 #[cfg(test)]
 mod comment_parser_tests;
+#[cfg(test)]
+mod defck_tests;
 #[cfg(test)]
 mod formula_tests;
 #[cfg(test)]

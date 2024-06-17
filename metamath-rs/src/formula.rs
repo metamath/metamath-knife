@@ -188,11 +188,13 @@ impl Formula {
     /// Iterates through the labels of a formula, depth-first, pre-order.
     /// Items are the label, and a boolean indicating whether the current label is a variable or not.
     #[must_use]
-    pub const fn labels_iter(&self) -> LabelIter<'_> {
+    pub fn labels_iter(&self) -> LabelIter<'_> {
         LabelIter {
             formula: self,
-            stack: vec![],
-            root: Some(self.root),
+            stack: vec![SiblingIter {
+                tree: &*self.tree,
+                current_id: Some(self.root),
+            }],
         }
     }
 
@@ -208,6 +210,16 @@ impl Formula {
     #[must_use]
     pub const fn as_ref<'a>(&'a self, db: &'a Database) -> FormulaRef<'a> {
         FormulaRef { db, formula: self }
+    }
+
+    /// Augment a formula with a database reference, to produce a [`FormulaRef`].
+    /// The resulting object implements [`Display`], [`Debug`], and [`IntoIterator`].
+    #[must_use]
+    pub const fn root<'a>(&'a self, db: &'a Database) -> SubFormulaRef<'a> {
+        SubFormulaRef {
+            node_id: self.root,
+            f_ref: self.as_ref(db),
+        }
     }
 
     /// Debug only, dumps the internal structure of the formula.
@@ -230,7 +242,8 @@ impl Formula {
 
     /// Returns the label obtained when following the given path.
     /// Each element of the path gives the index of the child to retrieve.
-    /// For example, the empty
+    /// For example, the empty path gives the root, and the path `[0, 2]`
+    /// in `foo(bar(a, b, baz()), d)` gives `baz`.
     #[must_use]
     pub fn get_by_path(&self, path: &[usize]) -> Option<Label> {
         let mut node_id = self.root;
@@ -254,6 +267,16 @@ impl Formula {
             root: node_id,
             variables: self.variables.clone(),
         }
+    }
+
+    /// Returns the subformula rooted at the given path.
+    #[must_use]
+    pub fn sub_formula_by_path(&self, path: &[usize]) -> Option<Formula> {
+        let mut node_id = self.root;
+        for index in path {
+            node_id = self.tree.nth_child(node_id, *index)?;
+        }
+        Some(self.sub_formula(node_id))
     }
 
     /// Check for equality of sub-formulas
@@ -425,7 +448,6 @@ impl PartialEq for Formula {
 pub struct LabelIter<'a> {
     formula: &'a Formula,
     stack: Vec<SiblingIter<'a, Label>>,
-    root: Option<NodeId>,
 }
 
 impl<'a> LabelIter<'a> {
@@ -443,10 +465,6 @@ impl<'a> Iterator for LabelIter<'a> {
     type Item = (Label, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(node_id) = self.root {
-            self.root = None;
-            return Some(self.visit_children(node_id));
-        }
         loop {
             let iter = self.stack.last_mut()?;
             if let Some(node_id) = iter.next() {
@@ -482,7 +500,7 @@ impl ExactSizeIterator for LabelPostorderIter<'_> {
 }
 
 /// A [`Formula`] reference in the context of a [`Database`].
-/// This allows the values in the [`Formula`] to be resolved,
+/// This allows the values in the [`Formula`] to be resolved.
 #[derive(Copy, Clone)]
 pub struct FormulaRef<'a> {
     db: &'a Database,
@@ -497,9 +515,16 @@ impl<'a> std::ops::Deref for FormulaRef<'a> {
     }
 }
 
+impl PartialEq for FormulaRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.root() == other.root()
+    }
+}
+impl Eq for FormulaRef<'_> {}
+
 impl<'a> FormulaRef<'a> {
-    /// Convert the formula back to a flat list of symbols
-    /// This is slow and shall not normally be called except for showing a result to the user.
+    /// Convert the formula back to a flat list of symbols.
+    /// This is slow and should not normally be called except for showing a result to the user.
     #[must_use]
     pub(crate) fn iter(self) -> Flatten<'a> {
         let mut f = Flatten {
@@ -512,8 +537,12 @@ impl<'a> FormulaRef<'a> {
         f
     }
 
+    const fn root(self) -> SubFormulaRef<'a> {
+        self.formula.root(self.db)
+    }
+
     /// Returns a copy of this formula with a new root
-    /// (in the same tree)
+    /// (in the same tree).
     fn to_rerooted(self, new_root: NodeId) -> Formula {
         Formula {
             root: new_root,
@@ -524,7 +553,7 @@ impl<'a> FormulaRef<'a> {
     }
 
     /// Computes the typecode of the given node
-    /// according to the corresponding statement
+    /// according to the corresponding statement.
     fn compute_typecode_at(&self, node_id: NodeId) -> TypeCode {
         self.db.label_typecode(self.formula.tree[node_id])
     }
@@ -672,7 +701,9 @@ impl<'a> IntoIterator for FormulaRef<'a> {
     }
 }
 
-struct SubFormulaRef<'a> {
+/// A reference to a subformula, usable for tree traversals.
+#[derive(Copy, Clone)]
+pub struct SubFormulaRef<'a> {
     node_id: NodeId,
     f_ref: FormulaRef<'a>,
 }
@@ -698,6 +729,94 @@ impl<'a> Debug for SubFormulaRef<'a> {
         dt.finish()
     }
 }
+
+impl<'a> SubFormulaRef<'a> {
+    /// Returns the statement label applied at this tree node.
+    #[must_use]
+    pub fn label(&self) -> Label {
+        self.f_ref.formula.tree[self.node_id]
+    }
+
+    #[inline]
+    /// Returns whether this node is a variable.
+    #[must_use]
+    pub fn is_variable(&self) -> bool {
+        self.f_ref.is_variable(self.node_id)
+    }
+
+    /// Returns an iterator over the list of children of this node.
+    pub fn children(&self) -> SubFormulaChildren<'a> {
+        SubFormulaChildren {
+            iter: self.f_ref.formula.tree.children_iter(self.node_id),
+            f_ref: self.f_ref,
+        }
+    }
+
+    /// Returns the `n`th child of this node.
+    #[must_use]
+    pub fn nth_child(&self, index: usize) -> Option<Self> {
+        self.children().nth(index)
+    }
+
+    /// Returns a reference to the subtree obtained when following the given path.
+    /// Each element of the path gives the index of the child to retrieve.
+    /// For example, the empty path gives the root, and the path `[0, 2]`
+    /// in `foo(bar(a, b, baz(c)), d)` gives `baz(c)`.
+    #[must_use]
+    pub fn get_by_path(mut self, path: &[usize]) -> Option<Self> {
+        for &index in path {
+            self = self.nth_child(index)?;
+        }
+        Some(self)
+    }
+
+    #[inline]
+    /// Iterates through the labels of a formula, depth-first, pre-order.
+    /// Items are the label, and a boolean indicating whether the current label is a variable or not.
+    #[must_use]
+    pub fn labels_iter(&self) -> LabelIter<'_> {
+        LabelIter {
+            formula: self.f_ref.formula,
+            stack: vec![SiblingIter {
+                tree: &*self.f_ref.formula.tree,
+                current_id: Some(self.node_id),
+            }],
+        }
+    }
+}
+
+impl PartialEq for SubFormulaRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.label() == other.label() && self.children() == other.children()
+    }
+}
+impl Eq for SubFormulaRef<'_> {}
+
+/// An iterator over the children of a node.
+#[must_use]
+#[derive(Clone, Debug)]
+pub struct SubFormulaChildren<'a> {
+    iter: SiblingIter<'a, Label>,
+    f_ref: FormulaRef<'a>,
+}
+
+impl<'a> Iterator for SubFormulaChildren<'a> {
+    type Item = SubFormulaRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(SubFormulaRef {
+            node_id: self.iter.next()?,
+            f_ref: self.f_ref,
+        })
+    }
+}
+
+impl PartialEq for SubFormulaChildren<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        Iterator::eq(self.clone(), other.clone())
+    }
+}
+impl Eq for SubFormulaChildren<'_> {}
 
 /// An iterator going through each symbol in a formula
 #[derive(Debug)]

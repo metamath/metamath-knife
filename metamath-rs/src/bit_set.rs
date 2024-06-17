@@ -68,10 +68,7 @@ impl Bitset {
     }
 
     fn tail_mut(&mut self) -> &mut Vec<usize> {
-        if self.tail.is_none() {
-            self.tail = Some(Box::default());
-        }
-        self.tail.as_mut().unwrap()
+        self.tail.get_or_insert_with(Box::default)
     }
 
     /// Adds a single bit to a set.
@@ -85,6 +82,28 @@ impl Bitset {
                 tail.resize(word + 1, 0);
             }
             tail[word] |= 1 << (bit & (bits_per_word() - 1));
+        }
+    }
+
+    /// Removes a single bit from a set.
+    pub fn unset_bit(&mut self, bit: usize) {
+        if bit < bits_per_word() {
+            self.head &= !(1 << bit);
+        } else if let Some(tail) = &mut self.tail {
+            let mut word = bit / bits_per_word() - 1;
+            if word < tail.len() {
+                tail[word] &= !(1 << (bit & (bits_per_word() - 1)));
+                if word + 1 == tail.len() && tail[word] == 0 {
+                    while tail[word] == 0 {
+                        if word == 0 {
+                            self.tail = None;
+                            return;
+                        }
+                        word -= 1;
+                    }
+                    tail.truncate(word + 1);
+                }
+            }
         }
     }
 
@@ -119,6 +138,21 @@ impl Bitset {
             tail[word] |= mask;
             old
         }
+    }
+
+    pub fn is_subset_of(&self, rhs: &Self) -> bool {
+        !rhs.head & self.head == 0
+            && match &self.tail {
+                Some(ltail) => (0..ltail.len()).all(|i| {
+                    let rtail_i = rhs
+                        .tail
+                        .as_ref()
+                        .and_then(|rtail| rtail.get(i).copied())
+                        .unwrap_or(0);
+                    !rtail_i & ltail[i] == 0
+                }),
+                _ => true,
+            }
     }
 
     /// Returns true if this bitset has no bits set.

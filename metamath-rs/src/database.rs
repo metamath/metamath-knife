@@ -99,6 +99,7 @@
 
 use crate::as_str;
 use crate::axiom_use::UsageResult;
+use crate::defck::DefResult;
 use crate::diag;
 use crate::diag::Diagnostic;
 use crate::export;
@@ -404,6 +405,7 @@ pub struct Database {
     outline: Option<Arc<Outline>>,
     grammar: Option<Arc<Grammar>>,
     stmt_parse: Option<Arc<StmtParse>>,
+    definitions: Option<Arc<DefResult>>,
 }
 
 impl Default for Database {
@@ -434,6 +436,7 @@ impl Drop for Database {
             Arc::make_mut(&mut self.segments).clear();
             self.typesetting = None;
             self.outline = None;
+            self.definitions = None;
         });
     }
 }
@@ -458,6 +461,7 @@ impl Database {
             outline: None,
             grammar: None,
             stmt_parse: None,
+            definitions: None,
             prev_nameset: None,
             prev_scopes: None,
             prev_verify: None,
@@ -503,6 +507,7 @@ impl Database {
             self.typesetting = None;
             self.outline = None;
             self.grammar = None;
+            self.definitions = None;
         });
     }
 
@@ -776,6 +781,38 @@ impl Database {
         )
     }
 
+    /// Checks all definitions soundness.
+    pub fn definitions_pass(&mut self) -> &Arc<DefResult> {
+        if self.definitions.is_none() {
+            self.stmt_parse_pass();
+            time(&self.options.clone(), "defck_pass", || {
+                let parse = self.parse_result();
+                let mut definitions = DefResult::default();
+                self.verify_definitions(parse, &mut definitions);
+                self.definitions = Some(Arc::new(definitions));
+            })
+        }
+        self.definitions_result()
+    }
+
+    /// Returns the results of the definition check pass.
+    /// Returns `None` if [`Database::definitions_pass`] was not previously called.
+    #[inline]
+    #[must_use]
+    pub const fn try_definitions_result(&self) -> Option<&Arc<DefResult>> {
+        self.definitions.as_ref()
+    }
+
+    /// Returns the results of the definition check pass.
+    /// Panics if [`Database::definition_pass`] was not previously called.
+    #[inline]
+    #[must_use]
+    pub fn definitions_result(&self) -> &Arc<DefResult> {
+        self.try_definitions_result().expect(
+            "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depending methods."
+        )
+    }
+
     /// A getter method which does not build the outline.
     #[inline]
     #[must_use]
@@ -1016,6 +1053,9 @@ impl Database {
         }
         if let Some(pass) = self.try_typesetting_result() {
             diags.extend_from_slice(&pass.diagnostics)
+        }
+        if let Some(pass) = self.try_definitions_result() {
+            diags.extend(pass.diagnostics())
         }
         diags
     }

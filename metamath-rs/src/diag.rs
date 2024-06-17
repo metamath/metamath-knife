@@ -105,6 +105,24 @@ pub enum Diagnostic {
     CommandIncomplete(Span),
     CommentMarkerNotStart(Span),
     ConstantNotTopLevel,
+    DefCkDuplicateDefinition(Token, StatementAddress),
+    DefCkDuplicateEquality(Token, GlobalSpan, Span),
+    DefCkFreeDummyVars(Box<[Token]>),
+    DefCkFreeDummyVarsJustification(StatementAddress, Box<[Token]>),
+    DefCkParameterDj(Box<[Token]>),
+    DefCkDummyDj(Box<[Token]>, Box<[Token]>),
+    DefCkJustificationDjViolation(StatementAddress, Box<[Token]>),
+    DefCkMalformedDefinition(StatementAddress),
+    DefCkMisnamedAxiom,
+    DefCkMisnamedDefinition,
+    DefCkMisnamedSyntaxAxiom,
+    DefCkMisplacedPrimitive(Span),
+    DefCkMalformedEquality(StatementAddress, Span),
+    DefCkMalformedJustification(GlobalSpan),
+    DefCkMalformedSyntaxAxiom,
+    DefCkMissingDefinition,
+    DefCkSyntaxUsedBeforeDefinition(Token, StatementAddress),
+    DefCkNotAnEquality(Token, Vec<Token>),
     DisjointSingle,
     DjNotVariable(TokenIndex),
     DjRepeatedVariable(TokenIndex, TokenIndex),
@@ -429,6 +447,183 @@ impl Diagnostic {
                 stmt,
                 stmt.span(),
             )]),
+            DefCkDuplicateDefinition(ref tok, prev_saddr) => (format!("Definition Check: Duplicate definition for '{label}'", label = t(tok)).into(), vec![(
+                AnnotationType::Warning,
+                format!("This axiom seems to introduce a definition for '{label}', however a definition already exists.", label = t(tok)).into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "Definition was previously provided here.".into(),
+                sset.statement(*prev_saddr),
+                sset.statement(*prev_saddr).label_span(),
+            )]),
+            &DefCkDuplicateEquality(ref tok, fst, snd) => (format!("Definition Check: Duplicate equality for typecode '{code}'", code = t(tok)).into(), vec![(
+                AnnotationType::Warning,
+                format!("This is the second equality introduced for typecode '{label}'. Each typecode must have a unique equality.", label = t(tok)).into(),
+                stmt,
+                snd,
+            ), (
+                AnnotationType::Note,
+                "Definition was previously provided here.".into(),
+                sset.statement_or_dummy(StatementAddress::new(fst.0, NO_STATEMENT)),
+                fst.1,
+            )]),
+            &DefCkMalformedDefinition(syntax) => ("Definition Check: Malformed definition".into(), vec![(
+                AnnotationType::Error,
+                "Malformed definition".into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "Syntax axiom defined here".into(),
+                sset.statement(syntax),
+                sset.statement(syntax).label_span(),
+            )]),
+            DefCkFreeDummyVars(vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' are free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            DefCkFreeDummyVarsJustification(def, vars) => ("Definition Check: Dummy variable(s) not bound".into(), vec![(
+                AnnotationType::Error,
+                format!("variable(s) '{vars}' are free in this statement", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "while processing this definition".into(),
+                sset.statement(*def),
+                sset.statement(*def).label_span(),
+            )]),
+            DefCkJustificationDjViolation(just, vars) => ("Definition Check: Disjoint variable violation while applying justification".into(), vec![(
+                AnnotationType::Error,
+                format!("variables '{vars}' need to be disjoint", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "justification theorem here".into(),
+                sset.statement(*just),
+                sset.statement(*just).label_span(),
+            )]),
+            DefCkMisnamedAxiom => ("Axioms should start with 'ax-'".into(), vec![(
+                AnnotationType::Warning,
+                "This was identified as an axiom, but it doesn't start with 'ax-'".into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            DefCkMisnamedDefinition => ("Definitions should start with 'df-'".into(), vec![(
+                AnnotationType::Warning,
+                "This was identified as a definition, but it doesn't start with 'df-'".into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            DefCkMisnamedSyntaxAxiom => ("Syntax axioms starting with 'ax-' or 'df-'".into(), vec![(
+                AnnotationType::Warning,
+                "This was identified as a syntax axiom, but it starts with 'ax-' or 'df-'".into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            &DefCkMisplacedPrimitive(span) => ("Definition Check: Misplaced 'primitive' command".into(), vec![(
+                AnnotationType::Warning,
+                "there is no pending definition for this".into(),
+                stmt,
+                span,
+            )]),
+            &DefCkMalformedEquality(prev_saddr, tok) => ("Definition Check: Malformed equality or equality theorem".into(), vec![(
+                AnnotationType::Error,
+                "Malformed equality".into(),
+                stmt,
+                tok,
+            ), (
+                AnnotationType::Note,
+                "declaration here does not have the shape of an equality (theorem)".into(),
+                sset.statement(prev_saddr),
+                sset.statement(prev_saddr).label_span(),
+            )]),
+            &DefCkMalformedJustification(span) => ("Definition Check: Malformed justification theorem".into(), vec![(
+                AnnotationType::Error,
+                "Malformed justification".into(),
+                stmt,
+                stmt.label_span(),
+            ), (
+                AnnotationType::Note,
+                "marked as justification here".into(),
+                sset.statement_or_dummy(StatementAddress::new(span.0, NO_STATEMENT)),
+                span.1,
+            )]),
+            &DefCkMalformedSyntaxAxiom => {
+                notes = &["syntax axioms must have no hypotheses, no repeated variables and no $d"];
+                ("Definition Check: Malformed syntax axiom".into(), vec![(
+                    AnnotationType::Error,
+                    "".into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkMissingDefinition => {
+                notes = &["If this is intentional, consider adding a $( $j primitive ...; $) command"];
+                ("Definition Check: Missing definition or 'primitive'".into(), vec![(
+                    AnnotationType::Error,
+                    "this syntax axiom has no corresponding definition".into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkParameterDj(vars) => ("Definition Check: Parameters must not have $d conditions".into(), vec![(
+                AnnotationType::Error,
+                format!("parameters '{vars}' have a $d condition", vars = vars.iter().map(t).join("', '")).into(),
+                stmt,
+                stmt.label_span(),
+            )]),
+            DefCkDummyDj(params, dummies) if params.is_empty() => {
+                ("Definition Check: Dummies must be disjoint".into(), vec![(
+                    AnnotationType::Error,
+                    format!(
+                        "dummies '{dummies}' must have a $d condition",
+                        dummies = dummies.iter().map(t).join("', '"),
+                    ).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkDummyDj(params, dummies) => {
+                ("Definition Check: Parameters and dummies must be disjoint".into(), vec![(
+                    AnnotationType::Error,
+                    format!(
+                        "parameters '{params}' and dummies '{dummies}' must have a $d condition",
+                        params = params.iter().map(t).join("', '"),
+                        dummies = dummies.iter().map(t).join("', '"),
+                    ).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
+            DefCkSyntaxUsedBeforeDefinition(tok, saddr) => (format!("Definition Check: '{label}' used before definition, or missing definition.", label = t(tok)).into(), vec![(
+                AnnotationType::Error,
+                format!("this expression contains an occurrence of '{label}'", label = t(tok)).into(),
+                stmt,
+                stmt.span(),
+            ), (
+                AnnotationType::Note,
+                "syntax declared here".into(),
+                sset.statement(*saddr),
+                sset.statement(*saddr).label_span(),
+            )]),
+            DefCkNotAnEquality(ref tok, equalities) => {
+                notes = &["No provable axioms should appear between definitions and the corresponding syntax declaration."];
+                ("Definition Check: Not an equality".into(), vec![(
+                    AnnotationType::Error,
+                    format!("This definition does not use an equality.  It is built using '{label}', but the only declared equalities are '{equalities}'", 
+                        label = t(tok),
+                        equalities = equalities.iter().map(t).join("', '"),
+                    ).into(),
+                    stmt,
+                    stmt.label_span(),
+                )])
+            },
             DisjointSingle => ("Disjoint statement with single variable".into(), vec![(
                 AnnotationType::Warning,
                 "A $d statement which lists only one variable is meaningless".into(),
