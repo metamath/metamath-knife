@@ -20,6 +20,7 @@ use crate::segment_set::SourceInfo;
 use crate::statement::{StatementAddress, NO_STATEMENT};
 use crate::util::{HashMap, HashSet};
 use crate::{Database, Span, StatementRef, StatementType};
+use html5ever::tendril::{stream::Utf8LossyDecoder, Tendril, TendrilSink as _};
 use regex::bytes::Regex;
 use std::ops::Range;
 use std::sync::OnceLock;
@@ -438,7 +439,7 @@ fn verify_markup_comment(
 
     let mut temp_buffer = vec![];
     let mut in_math = None;
-    let mut in_html = None;
+    let mut in_html = None::<HtmlParser>;
     for item in CommentParser::new(buf, span) {
         match item {
             CommentItem::Text(sp) => {
@@ -450,6 +451,9 @@ fn verify_markup_comment(
                     }
                 });
                 check_uninterpreted_html(buf, sp, &mut diag);
+                if let Some(parser) = &mut in_html {
+                    parser.feed(sp.as_ref(buf))
+                }
             }
             CommentItem::StartMathMode(i) => {
                 in_math = Some(i);
@@ -481,8 +485,8 @@ fn verify_markup_comment(
                     }
                 }
             }
-            CommentItem::StartHtml(i) => in_html = Some(i),
-            CommentItem::EndHtml(_) => in_html = None,
+            CommentItem::StartHtml(i) => in_html = Some(HtmlParser::new(i)),
+            CommentItem::EndHtml(i) => in_html.take().unwrap().validate(i + 7, &mut diag),
             CommentItem::LineBreak(_)
             | CommentItem::StartSubscript(_)
             | CommentItem::EndSubscript(_)
@@ -507,8 +511,8 @@ fn verify_markup_comment(
     if let Some(i) = in_math {
         diag(Diagnostic::UnclosedMathMarkup(i as u32, span.end))
     }
-    if let Some(i) = in_html {
-        diag(Diagnostic::UnclosedHtml(i as u32, span.end))
+    if let Some(parser) = in_html {
+        diag(Diagnostic::UnclosedHtml(parser.start as u32, span.end))
     }
 }
 
@@ -563,5 +567,48 @@ impl Bibliography {
     #[must_use]
     pub fn contains(&self, tag: &[u8]) -> bool {
         self.0.contains(tag)
+    }
+}
+
+struct HtmlParser {
+    start: usize,
+    parser: Utf8LossyDecoder<html5ever::Parser<scraper::Html>>,
+    string: String,
+}
+
+impl HtmlParser {
+    fn new(start: usize) -> Self {
+        use html5ever::{local_name, namespace_url, ns};
+        let parser = html5ever::driver::parse_fragment(
+            scraper::Html::new_fragment(),
+            html5ever::ParseOpts::default(),
+            html5ever::QualName::new(None, ns!(html), local_name!("div")),
+            vec![],
+        );
+        Self {
+            start,
+            parser: parser.from_utf8(),
+            string: String::new(),
+        }
+    }
+
+    fn feed(&mut self, text: &[u8]) {
+        self.parser.process(Tendril::from_slice(text));
+        self.string += crate::as_str(text);
+    }
+
+    fn validate(self, end: usize, diag: &mut impl FnMut(Diagnostic)) {
+        let mut errors = self.parser.finish().errors;
+        if !errors.is_empty() {
+            // html5ever has garbage error messages (https://github.com/servo/html5ever/issues/492)
+            // but apparently there aren't any other HTML validators and I'm not going to write one
+            // myself
+            errors.sort();
+            errors.dedup();
+            diag(Diagnostic::HtmlParseError(
+                Span::new(self.start, end),
+                errors,
+            ))
+        }
     }
 }

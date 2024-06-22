@@ -34,7 +34,7 @@ struct UsagePass<'a> {
 impl<'a> UsagePass<'a> {
     // Parses the 'usage' commmands in the database,
     fn parse_command(
-        &mut self,
+        &self,
         sref: SegmentRef<'_>,
         args: &[CommandToken],
     ) -> Result<(), Vec<Diagnostic>> {

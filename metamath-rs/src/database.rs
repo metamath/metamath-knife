@@ -996,7 +996,8 @@ impl Database {
     ///
     /// Currently there is no way to incrementally fetch diagnostics, so this
     /// will be a bit slow if there are thousands of errors.
-    pub fn diag_notations(&mut self) -> Vec<(StatementAddress, Diagnostic)> {
+    #[must_use]
+    pub fn diag_notations(&self) -> Vec<(StatementAddress, Diagnostic)> {
         let mut diags = self.parse_result().parse_diagnostics();
         if let Some(pass) = self.try_scope_result() {
             diags.extend(pass.diagnostics())
