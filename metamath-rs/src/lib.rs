@@ -93,6 +93,8 @@ mod parser_tests;
 mod usage_tests;
 #[cfg(test)]
 mod util_tests;
+#[cfg(test)]
+mod verify_tests;
 
 pub use database::Database;
 pub use formula::Formula;
