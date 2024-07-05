@@ -702,20 +702,22 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         }
     }
 
-    if bad {
-        return;
-    }
-
     // we need to do validity checking on global $d _somewhere_, and that
     // happens to be here, but the knowledge of the $d is handled by nameck
     // in that case and we need to not duplicate it
     if sref.in_group() {
-        // record the $d in our local storage, will be deleted in
-        // construct_full_frame when it's no longer in scope
-        state.local_dv.push(LocalDvInfo {
-            valid: sref.scope_range(),
-            vars,
-        });
+        if !bad {
+            // record the $d in our local storage, will be deleted in
+            // construct_full_frame when it's no longer in scope
+            state.local_dv.push(LocalDvInfo {
+                valid: sref.scope_range(),
+                vars,
+            });
+        }
+    } else {
+        // Note, unlike the local case this will use the DV anyway if it has diagnostics...
+        // we have to keep moving the pointer forward or the count will get messed up
+        state.global_dv_pos.0 += 1;
     }
 }
 

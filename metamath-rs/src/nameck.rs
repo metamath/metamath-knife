@@ -107,7 +107,7 @@ where
 
 /// A position in the `dv_info` array.
 #[derive(Debug, Copy, Clone)]
-pub struct DvId(u32);
+pub struct DvId(pub u32);
 
 // that which we keep in the hash slot for math symbols
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
