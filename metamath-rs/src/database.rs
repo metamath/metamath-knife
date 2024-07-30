@@ -122,7 +122,7 @@ use crate::typesetting::TypesettingData;
 use crate::verify;
 use crate::verify::VerifyResult;
 use crate::StatementRef;
-use annotate_snippets::snippet::Snippet;
+use annotate_snippets::Message;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt;
@@ -1024,7 +1024,7 @@ impl Database {
     pub fn render_diags<T>(
         &self,
         diags: Vec<(StatementAddress, Diagnostic)>,
-        f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+        f: impl for<'a> FnOnce(Message<'a>) -> T + Copy,
     ) -> Vec<T> {
         let mut lc = LineCache::default();
         time(&self.options.clone(), "diag", move || {
