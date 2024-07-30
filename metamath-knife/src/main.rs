@@ -179,7 +179,7 @@ fn main() {
         }
 
         #[cfg(feature = "xml")]
-        if let Some(file) = cli.export_graphml_deps {
+        if let Some(file) = &cli.export_graphml_deps {
             File::create(file)
                 .map_err(|err| err.into())
                 .and_then(|file| db.export_graphml_deps(&mut BufWriter::new(file)))
