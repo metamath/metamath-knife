@@ -50,7 +50,12 @@ impl OutlineNode {
 
     /// Build an outline node, with a generic statement address,
     /// which is specific to a segment
-    fn new(name: Token, level: HeadingLevel, segment_id: SegmentId, index: StatementIndex) -> Self {
+    const fn new(
+        name: Token,
+        level: HeadingLevel,
+        segment_id: SegmentId,
+        index: StatementIndex,
+    ) -> Self {
         OutlineNode {
             name,
             level,
