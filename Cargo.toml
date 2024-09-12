@@ -1,36 +1,19 @@
-[package]
+[workspace]
+members = [
+    "metamath-rs",
+    "metamath-knife",
+]
+resolver = "2"
+
+[workspace.package]
 authors = ["David A. Wheeler <dwheeler@dwheeler.com>", "Stefan O'Rear <sorear2@gmail.com>"]
 license = "MIT OR Apache-2.0"
-name = "metamath-knife"
 readme = "README.md"
-version = "0.3.6"
 description = "A parallel and incremental verifier for Metamath databases"
-repository = "https://github.com/david-a-wheeler/metamath-knife"
+repository = "https://github.com/metamath/metamath-knife"
 keywords = ["theorem", "proving", "verifier", "proof", "assistant"]
 categories = ["command-line-utilities", "development-tools", "mathematics"]
 edition = "2021"
-
-[dependencies]
-lazy_static = "1.4"
-itertools = "0.10"
-filetime = "0.2"
-fnv = "1.0"
-regex = { version = "1.5", default-features = false, features = ["std", "perf"] }
-tinyvec = "1.5"
-log = "0.4"
-annotate-snippets = "0.9"
-typed-arena = "2.0"
-
-# Dependencies for standalone executable, not needed for a library
-clap = "2.33"
-simple_logger = "1.13"
-
-# Optional dependencies
-dot-writer = { version = "0.1.2", optional = true }
-
-[features]
-default = ["annotate-snippets/color"]
-dot = ["dot-writer"]
 
 [profile]
 
@@ -44,8 +27,3 @@ codegen-units = 4
 
 [profile.test]
 codegen-units = 4
-
-[[bin]]
-name = "metamath-knife"
-path = "src/main.rs"
-doc = false

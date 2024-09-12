@@ -25,6 +25,10 @@ use crate::scopeck::Hyp;
 use crate::segment_set::SegmentSet;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
+use crate::tree::NodeId;
+use crate::tree::NodeIter;
+use crate::tree::SiblingIter;
+use crate::tree::Tree;
 use crate::util::fast_extend;
 use crate::util::HashMap;
 use crate::verify::ProofBuilder;
@@ -33,13 +37,8 @@ use core::ops::Index;
 use std::collections::hash_map::Iter;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::iter::FromIterator;
 use std::ops::Range;
 use std::sync::Arc;
-
-pub use crate::tree::NodeId;
-pub use crate::tree::SiblingIter;
-pub use crate::tree::Tree;
 
 /// An atom representing a typecode (for "set.mm", that's one of 'wff', 'class', 'setvar' or '|-')
 pub type TypeCode = Atom;
@@ -197,6 +196,13 @@ impl Formula {
             stack: vec![],
             root: Some(self.root),
         }
+    }
+
+    #[inline]
+    /// Iterates through the labels of a formula, depth-first, post-order.
+    #[must_use]
+    pub fn labels_postorder_iter(&self) -> LabelPostorderIter<'_> {
+        LabelPostorderIter(self.tree.node_iter())
     }
 
     /// Augment a formula with a database reference, to produce a [`FormulaRef`].
@@ -415,7 +421,7 @@ impl PartialEq for Formula {
 }
 
 /// An iterator through the labels of a formula.
-/// This iterator sequence is depth-first, postfix (post-order).
+/// This iterator sequence is depth-first, pre-order.
 /// It provides the label, and a boolean indicating whether the current label is a variable or not.
 #[derive(Debug)]
 pub struct LabelIter<'a> {
@@ -451,6 +457,29 @@ impl<'a> Iterator for LabelIter<'a> {
             // Last sibling reached, pop and iterate
             self.stack.pop();
         }
+    }
+}
+
+/// An iterator through the labels of a formula.
+/// This iterator sequence is depth-first, post-order.
+/// It provides the label, and a boolean indicating whether the current label is a variable or not.
+#[derive(Debug)]
+pub struct LabelPostorderIter<'a>(NodeIter<'a, Label>);
+
+impl Iterator for LabelPostorderIter<'_> {
+    type Item = Label;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().copied()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LabelPostorderIter<'_> {
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -549,7 +578,7 @@ impl<'a> FormulaRef<'a> {
     ) -> Result<(), E> {
         if self.is_variable(node_id) {
             let label = &self.tree[node_id];
-            if substitutions.0.get(label).is_none() {
+            if !substitutions.0.contains_key(label) {
                 let typecode = self.db.label_typecode(*label);
                 let work_var = wvp.new_work_variable(typecode)?;
                 substitutions.insert(*label, Formula::from_float(work_var, typecode));
@@ -765,6 +794,17 @@ pub(crate) struct FormulaBuilder {
 
 /// A utility to build a formula.
 impl FormulaBuilder {
+    pub(crate) fn from_formula(fmla: Formula) -> Self {
+        let stack = vec![fmla.root];
+        let tree = (*fmla.tree).clone();
+        let variables = fmla.variables;
+        FormulaBuilder {
+            stack,
+            variables,
+            tree,
+        }
+    }
+
     /// Every REDUCE pops `var_count` subformula items on the stack,
     /// and pushes one single new item, with the popped subformulas as children
     pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {

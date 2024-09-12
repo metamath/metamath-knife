@@ -121,6 +121,11 @@ impl<TreeItem> Tree<TreeItem> {
             );
         }
     }
+
+    /// Returns an iterator over all the nodes in the tree (in postorder)
+    pub(crate) fn node_iter(&self) -> NodeIter<'_, TreeItem> {
+        NodeIter(self.nodes.iter())
+    }
 }
 
 impl<TreeItem> Index<NodeId> for Tree<TreeItem> {
@@ -170,5 +175,26 @@ impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
     fn next(&mut self) -> Option<Self::Item> {
         let current_id = self.current_id;
         std::mem::replace(&mut self.current_id, self.tree.next_sibling(current_id?))
+    }
+}
+
+/// An iterator through all nodes
+#[derive(Debug)]
+pub(crate) struct NodeIter<'a, TreeItem>(std::slice::Iter<'a, TreeNode<TreeItem>>);
+
+impl<'a, TreeItem> Iterator for NodeIter<'a, TreeItem> {
+    type Item = &'a TreeItem;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|node| &node.item)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl<'a, TreeItem> ExactSizeIterator for NodeIter<'a, TreeItem> {
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }

@@ -20,34 +20,14 @@ use crate::statement::NO_STATEMENT;
 use crate::Span;
 use crate::StatementRef;
 use crate::StatementType;
-use annotate_snippets::display_list::FormatOptions;
-use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
+use annotate_snippets::{Level, Message, Snippet};
 use itertools::Itertools;
 use std::borrow::Borrow;
 use std::borrow::Cow;
+use std::error::Error;
+use std::fmt::Display;
 use std::io;
 use typed_arena::Arena;
-
-/// List of passes that generate diagnostics, for use with the
-/// `Database::diag_notations` filter.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum DiagnosticClass {
-    /// Parse errors, which can be observed from a single statement in
-    /// isolation.
-    Parse,
-    /// Scope errors are mostly inter-statement consistency checks which
-    /// invalidate the logical interpretation of a statement.
-    Scope,
-    /// Verify errors do not invalidate the interpretation of statements, but
-    /// affect only proofs.
-    Verify,
-    /// Grammar errors reflect whether the database is unambiguous
-    Grammar,
-    /// Statement Parsing result
-    StmtParse,
-    /// $t statement parsing result
-    Typesetting,
-}
 
 /// The three kinds of markup supported by `$t` typesetting comments.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -148,6 +128,7 @@ pub enum Diagnostic {
     GrammarAmbiguous(StatementAddress),
     GrammarCantBuild(&'static str),
     GrammarProvableFloat,
+    HtmlParseError(Span, Vec<Cow<'static, str>>),
     HeaderCommentParseError(HeadingLevel),
     InvalidAxiomRestatement(Span, Span),
     IoError(String),
@@ -217,6 +198,7 @@ pub enum Diagnostic {
     UnknownKeyword(Span),
     UnknownTypesettingCommand(Span),
     UnmatchedCloseGroup,
+    UsageViolation(Span, Token, Token),
     VariableMissingFloat(TokenIndex),
     VariableRedeclaredAsConstant(TokenIndex, TokenAddress),
     WindowsReservedLabel(Span),
@@ -235,7 +217,7 @@ pub(crate) fn to_annotations<T>(
     sset: &SegmentSet,
     lc: &mut LineCache,
     mut diags: Vec<(StatementAddress, Diagnostic)>,
-    f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+    f: impl for<'a> FnOnce(Message<'a>) -> T + Copy,
 ) -> Vec<T> {
     diags.sort_by(|x, y| sset.order.cmp(&x.0, &y.0));
     diags
@@ -250,14 +232,14 @@ pub(crate) fn to_annotations<T>(
 /// Annotation info
 ///
 /// * `label` - A global error message for the diagnostic
-/// For each annotation:
-/// * `label` - The diagnostic message
-/// * `annotation_type` -  Severity level of the message
-/// * `span` - The location of the error (byte offset within the segment; _this is
-/// not the same as the byte offset in the file_).
+/// * For each annotation:
+///   * `label` - The diagnostic message
+///   * `annotation_type` -  Severity level of the message
+///   * `span` - The location of the error (byte offset within the segment;
+///     _this is not the same as the byte offset in the file_).
 type AnnInfo<'a> = (
     Cow<'a, str>,
-    Vec<(AnnotationType, Cow<'a, str>, StatementRef<'a>, Span)>,
+    Vec<(Level, Cow<'a, str>, StatementRef<'a>, Span)>,
 );
 
 /// Creates a `Snippet` containing a diagnostic annotation.
@@ -270,51 +252,37 @@ type AnnInfo<'a> = (
 #[must_use]
 fn make_snippet_from<'b, T>(
     label: &str,
-    infos: impl Iterator<Item = (AnnotationType, Cow<'b, str>, Span, &'b SourceInfo)>,
+    infos: impl Iterator<Item = (Level, Cow<'b, str>, Span, &'b SourceInfo)>,
     footer: &[&str],
     lc: &mut LineCache,
-    f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+    f: impl for<'a> FnOnce(Message<'a>) -> T,
 ) -> T {
-    let mut slices = vec![];
+    let mut snippets = vec![];
     let arena: Arena<String> = Arena::new();
-    for (annotation_type, label, span, source) in infos {
+    let mut level = None;
+    for (level2, label, span, source) in infos {
+        level.get_or_insert(level2);
         let offs = (span.start + source.span.start) as usize;
         let (line_start, col) = lc.from_offset(&source.text, offs);
         let end_offs = (span.end + source.span.start) as usize;
         let source_start = offs + 1 - col as usize;
         let source_end = LineCache::line_end(&source.text, end_offs);
-        slices.push(Slice {
-            source: as_str(&source.text[source_start..source_end]),
-            line_start: line_start as usize,
-            origin: Some(source.name.as_str()),
-            annotations: vec![SourceAnnotation {
-                label: arena.alloc(label.to_string()),
-                annotation_type,
-                range: (offs - source_start, end_offs - source_start),
-            }],
-            fold: true,
-        });
+        let annotation = level2
+            .span(offs - source_start..end_offs - source_start)
+            .label(arena.alloc(label.to_string()));
+        let snippet = Snippet::source(as_str(&source.text[source_start..source_end]))
+            .line_start(line_start as usize)
+            .origin(source.name.as_str())
+            .fold(true)
+            .annotation(annotation);
+        snippets.push(snippet);
     }
-    f(Snippet {
-        title: Some(Annotation {
-            label: Some(label),
-            id: None,
-            annotation_type: slices[0].annotations[0].annotation_type,
-        }),
-        footer: footer
-            .iter()
-            .map(|msg| Annotation {
-                id: None,
-                label: Some(msg),
-                annotation_type: AnnotationType::Note,
-            })
-            .collect(),
-        slices,
-        opt: FormatOptions {
-            color: true,
-            ..FormatOptions::default()
-        },
-    })
+
+    f(level
+        .unwrap()
+        .title(label)
+        .snippets(snippets)
+        .footers(footer.iter().map(|msg| Level::Note.title(msg))))
 }
 
 /// Creates a `Snippet` containing a diagnostic annotation.
@@ -331,7 +299,7 @@ fn make_snippet<T>(
     (label, infos): AnnInfo<'_>,
     footer: &[&str],
     lc: &mut LineCache,
-    f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+    f: impl for<'a> FnOnce(Message<'a>) -> T,
 ) -> T {
     let iter = (infos.into_iter()).map(|(annotation_type, label, stmt, span)| {
         let source = sset.source_info(stmt.segment().id).borrow();
@@ -346,7 +314,7 @@ impl Diagnostic {
         sset: &SegmentSet,
         stmt: StatementRef<'_>,
         lc: &mut LineCache,
-        f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+        f: impl for<'a> FnOnce(Message<'a>) -> T,
     ) -> T {
         fn t(v: &Token) -> String {
             as_str(v).to_owned()
@@ -354,43 +322,43 @@ impl Diagnostic {
         let mut notes: &[&str] = &[];
         let infos = match self {
             BadCharacter(pos, byte) => ("Invalid character".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 format!("Invalid character (byte value {byte}); Metamath source files are limited to \
                         US-ASCII with controls TAB, CR, LF, FF)").into(),
                 stmt,
                 Span::new(*pos, *pos + 1),
             )]),
             BadCommand(span) => ("Invalid command".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Commands must start with a keyword".into(),
                 stmt,
                 *span,
             )]),
             BadCommentEnd(tok, opener) => ("Bad comment end".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "$) sequence must be surrounded by whitespace to end a comment".into(),
                 stmt,
                 *tok,
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Comment started here".into(),
                 stmt,
                 *opener,
             )]),
             BadExplicitLabel(ref tok) => ("Bad explicit label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 format!("Explicit label {label} does not refer to a hypothesis of the parent step", label = t(tok)).into(),
                 stmt,
                 stmt.span(),
             )]),
             BadFloating => ("Bad floating".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A $f statement must have exactly two math tokens".into(),
                 stmt,
                 stmt.span(),
             )]),
             BadLabel(lbl) => ("Bad label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Statement labels may contain only alphanumeric characters and - _ .".into(),
                 stmt,
                 *lbl,
@@ -399,72 +367,72 @@ impl Diagnostic {
                 notes = &["Avoid uses of escape characters in bibliography tags \
                     since they break regex-based implementations"];
                 ("Invalid escape character".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "Use of ~ or ` in a bibliography tag".into(),
                     stmt,
                     Span::new2(index, index + 1),
                 ), (
-                    AnnotationType::Note,
+                    Level::Note,
                     "computed bibliography span".into(),
                     stmt,
                     span,
                 )])
             }
             ChainBackref(span) => ("Chain backref".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Backreference steps are not permitted to have local labels".into(),
                 stmt,
                 *span,
             )]),
             CommandExpectedAs(span) => ("Expected 'as'".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Expected the keyword 'as' here".into(),
                 stmt,
                 *span,
             )]),
             CommandExpectedString(span) => ("Expected string, got keyword argument".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Expected a string here".into(),
                 stmt,
                 *span,
             )]),
             CommandIncomplete(span) => ("Incomplete command".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This command ended early, it was expecting more arguments".into(),
                 stmt,
                 *span,
             )]),
             CommentMarkerNotStart(marker) => ("Wrong comment marker".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This comment marker must be the first token in the comment to be effective".into(),
                 stmt,
                 *marker,
             )]),
             ConstantNotTopLevel => ("Constant is not at top level".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "$c statements are not allowed in nested groups".into(),
                 stmt,
                 stmt.span(),
             )]),
             DisjointSingle => ("Disjoint statement with single variable".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "A $d statement which lists only one variable is meaningless".into(),
                 stmt,
                 stmt.span(),
             )]),
             DjNotVariable(index) => ("Disjoint constraints are not applicable to constants".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "$d constraints are not applicable to constants".into(),
                 stmt,
                 stmt.math_span(*index),
             )]),
             DjRepeatedVariable(index1, index2) => ("Variable repeated in disjoint statement".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A variable may not be used twice in the same $d constraint".into(),
                 stmt,
                 stmt.math_span(*index1),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Previous appearance was here".into(),
                 stmt,
                 stmt.math_span(*index2),
@@ -472,25 +440,25 @@ impl Diagnostic {
             &DateOrderError(contrib, later) => {
                 notes = &["It is easiest to read the contribution comments when they come in order"];
                 (format!("at {}: Parentheticals should come in chronological order", as_str(stmt.label())).into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "this date...".into(),
                     stmt,
                     contrib,
                 ), (
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "comes after this one".into(),
                     stmt,
                     later,
                 )])
             }
             &DateParseError(span) => ("Failed to parse date".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Expected DD-MMM-YYYY format".into(),
                 stmt,
                 span,
             )]),
             &DefaultAuthor(span) => ("Use of default author".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "There should be a person's name here".into(),
                 stmt,
                 span,
@@ -499,53 +467,53 @@ impl Diagnostic {
                 notes = &["The 'Contributed by' field indicates the first author of a theorem.\n\
                     Use 'Revised by' for subsequent contributions to the same theorem."];
                 ("Statement has multiple contributors".into(), vec![(
-                    AnnotationType::Note,
+                    Level::Note,
                     "First contributor here".into(),
                     stmt,
                     fst,
                 ), (
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "Second contributor here".into(),
                     stmt,
                     snd,
                 )])
             },
             DuplicateExplicitLabel(ref tok) => ("Duplicate explicit label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 format!("Explicit label {label} is used twice in the same step", label = t(tok)).into(),
                 stmt,
                 stmt.span(),
             )]),
             DuplicateLabel(prevstmt) => ("Duplicate label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Statement labels must be unique".into(),
                 stmt,
                 stmt.span(),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Label was previously used here".into(),
                 sset.statement(*prevstmt),
                 sset.statement(*prevstmt).span(),
             )]),
             &DuplicateMarkupDef(kind, fst, snd) => (format!("Duplicate {}", kind.def_name()).into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This token has already been defined".into(),
                 stmt,
                 snd,
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Token was previously defined here".into(),
                 sset.statement_or_dummy(StatementAddress::new(fst.0, NO_STATEMENT)),
                 fst.1,
             )]),
             EmptyFilename => ("Empty filename".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Filename included by a $[ directive must not be empty".into(),
                 stmt,
                 stmt.span(),
             )]),
             EmptyMathString => ("Empty math string".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A math string must have at least one token".into(),
                 stmt,
                 stmt.span(),
@@ -555,112 +523,118 @@ impl Diagnostic {
                     was used at the end of a comment,",
                     "or before <HTML>, a math string, or a bibliography tag"];
                 ("Empty label reference".into(), vec![(
-                    AnnotationType::Error,
+                    Level::Error,
                     "This references nothing".into(),
                     stmt,
                     Span::new2(index, index + 1),
                 )])
             },
             EssentialAtTopLevel => ("Essential at top level".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "$e statements must be inside scope brackets, not at the top level".into(),
                 stmt,
                 stmt.span(),
             )]),
             ExprNotConstantPrefix(index) => ("Expression does not have a constant prefix".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "The math string of an $a, $e, or $p assertion must start with a constant, \
                         not a variable".into(),
                 stmt,
                 stmt.math_span(*index),
             )]),
             FilenameDollar => ("Dollar in filename".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Filenames included by $[ are not allowed to contain the $ character".into(),
                 stmt,
                 stmt.span(),
             )]),
             FilenameSpaces => ("Spaces in filename".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Filenames included by $[ are not allowed to contain whitespace".into(),
                 stmt,
                 stmt.span(),
             )]),
             FloatNotConstant(index) => ("Typecode was not declared".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "The first token of a $f statement must be a declared constant (typecode)".into(),
                 stmt,
                 stmt.math_span(*index),
             )]),
             FloatNotVariable(index) => ("Variable not declared".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "The second token of a $f statement must be a declared variable (to \
                         associate the type)".into(),
                 stmt,
                 stmt.math_span(*index),
             )]),
             FloatRedeclared(saddr) => ("Float redeclared".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "There is already an active $f for this variable".into(),
                 stmt,
                 stmt.span(),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Previous $f was here".into(),
                 sset.statement(*saddr),
                 sset.statement(*saddr).span(),
             )]),
             FormulaVerificationFailed => ("Formula verification failed".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Formula verification failed at this symbol".into(),
                 stmt,
                 stmt.span(),
             )]),
             GrammarAmbiguous(prevstmt) => ("Grammar ambiguous".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Grammar is ambiguous; ".into(),
                 stmt,
                 stmt.span(),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Collision with this statement:".into(),
                 sset.statement(*prevstmt),
                 sset.statement(*prevstmt).span(),
             )]),
             GrammarCantBuild(message) => ("Can't build the grammar".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 (*message).into(),
                 stmt,
                 stmt.span(),
             )]),
             GrammarProvableFloat => ("Floating declaration of provable type".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Floating declaration of provable type".into(),
                 stmt,
                 stmt.span(),
             )]),
+            HtmlParseError(span, msg) => (format!("HTML parse error(s): {}", msg.iter().format(", ")).into(), vec![(
+                Level::Warning,
+                "in this HTML block".into(),
+                stmt,
+                *span,
+            )]),
             HeaderCommentParseError(lvl) => {
                 notes = lvl.diagnostic_note();
                 ("Invalid header comment".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "Could not parse this as a header".into(),
                     stmt,
                     stmt.span(),
                 )])
             },
             InvalidAxiomRestatement(ax_span, th_span) => ("Invalid axiom restatement".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This ax* theorem does not match the corresponding ax-*".into(),
                 stmt,
                 *th_span,
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Axiom ax-* here".into(),
                 stmt,
                 *ax_span,
             )]),
             IoError(ref err) => (format!("I/O error: {error}", error = err.clone()).into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Source file could not be read".into(),
                 stmt,
                 stmt.span(),
@@ -668,32 +642,32 @@ impl Diagnostic {
             LabelContainsUnderscore(span) => {
                 notes = &["Prefer '-' over '_' in labels"];
                 ("Label contains underscore".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "this statement has an underscore".into(),
                     stmt,
                     *span,
                 )])
             },
             LineLengthExceeded(span) => ("Line is too long".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "These characters go over the line limit".into(),
                 stmt,
                 *span,
             )]),
             LocalLabelAmbiguous(span) => ("Local label is ambiguous".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Local label conflicts with the name of an existing statement".into(),
                 stmt,
                 *span,
             )]),
             LocalLabelDuplicate(span) => ("Duplicate local Label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Local label duplicates another label in the same proof".into(),
                 stmt,
                 *span,
             )]),
             &MarkupNeedsWhitespace(index) => ("Markup character requires surrounding whitespace".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Put spaces around this character".into(),
                 stmt,
                 Span::new2(index, index + 1),
@@ -707,84 +681,84 @@ impl Diagnostic {
                     if that_name.is_empty() { "defined in a different mathbox".into() }
                     else { format!("defined in {}'s mathbox", as_str(that_name)).into() };
                 ("Mathbox uses a theorem from another mathbox".into(), vec![
-                    (AnnotationType::Warning, ann1, stmt, this),
-                    (AnnotationType::Note, "it refers to a theorem here...".into(), stmt, span),
-                    (AnnotationType::Note, ann2, stmt, that)
+                    (Level::Warning, ann1, stmt, this),
+                    (Level::Note, "it refers to a theorem here...".into(), stmt, span),
+                    (Level::Note, ann2, stmt, that)
                 ])
             }
             MathboxHeaderFormat(span) => ("Malformed mathbox header".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Expected 'Mathbox for <name>'".into(),
                 stmt,
                 *span,
             )]),
             MalformedAdditionalInfo(span) => ("Malformed additional info".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Malformed additional information".into(),
                 stmt,
                 *span,
             )]),
             MidStatementCommentMarker(marker) => ("Mid-statement comment".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Marked comments are only effective between statements, not inside them".into(),
                 stmt,
                 *marker,
             )]),
-            MissingContributor => ("No contribution comment".into(), vec![(
-                AnnotationType::Warning,
+            MissingContributor => ("Missing or malformed contribution comment".into(), vec![(
+                Level::Warning,
                 "No (Contributed by...) provided for this statement".into(),
                 stmt,
                 stmt.label_span(),
             )]),
             MissingLabel => ("Missing label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "This statement type requires a label".into(),
                 stmt,
                 stmt.span(),
             )]),
             &MissingMarkupDef([html, alt_html, latex], span) => {
                 let msg = html.then_some("htmldef").into_iter()
-                    .chain(alt_html.then_some("althtmldef").into_iter())
-                    .chain(latex.then_some("latexdef").into_iter());
+                    .chain(alt_html.then_some("althtmldef"))
+                    .chain(latex.then_some("latexdef"));
                 (format!("Missing {} for token", msg.format(", ")).into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "This token has not been declared in the $t comment".into(),
                     stmt,
                     span,
                 )])
             },
             MissingProof(math_end) => ("Missing proof".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Provable assertion requires a proof introduced with $= here; use $= ? $. \
                         if you do not have a proof yet".into(),
                 stmt,
                 *math_end,
             )]),
             MMReservedLabel(span) => ("Reserved label".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Labels beginning with 'mm' are reserved for Metamath file names".into(),
                 stmt,
                 *span,
             )]),
             NestedComment(tok, opener) => ("Nested comment".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Nested comments are not supported - comment will end at the first $)".into(),
                 stmt,
                 *tok,
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Comment started here".into(),
                 stmt,
                 *opener,
             )]),
             NotActiveSymbol(index) => ("Inactive symbol".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Token used here must be active in the current scope".into(),
                 stmt,
                 stmt.math_span(*index),
             )]),
             NotAProvableStatement => ("Not a provable statement".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Statement does not start with the provable constant type".into(),
                 stmt,
                 stmt.span(),
@@ -792,7 +766,7 @@ impl Diagnostic {
             OldAltNotDiscouraged if stmt.statement_type() == StatementType::Axiom => {
                 notes = &["Add (New usage is discouraged.) to the comment"];
                 ("OLD/ALT axiom not discouraged".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "OLD and ALT axioms should be discouraged".into(),
                     stmt,
                     stmt.label_span(),
@@ -802,7 +776,7 @@ impl Diagnostic {
                 notes = &["Add (Proof modification is discouraged.) \
                     and (New usage is discouraged.) to the comment"];
                 ("OLD/ALT theorem not discouraged".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "OLD and ALT theorems should be discouraged".into(),
                     stmt,
                     stmt.label_span(),
@@ -811,43 +785,43 @@ impl Diagnostic {
             &ParenOrderError(contrib, later) => {
                 notes = &["The contribution comment should come before any revisions"];
                 ("(Revised by...) precedes (Contributed by...)".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "contribution comment here".into(),
                     stmt,
                     contrib,
                 ), (
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "earlier revision comment".into(),
                     stmt,
                     later,
                 )])
             }
             ProofDvViolation => ("Distinct variable violation".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Disjoint variable constraint violated".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofExcessEnd => ("Proof does not end with a single statement".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Must be exactly one statement on stack at end of proof".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofIncomplete => ("Proof incomplete".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Proof is incomplete".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofInvalidSave => ("Invalid save".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Z must appear immediately after a complete step integer".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofMalformedVarint => ("Proof too long".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Proof step number too long or missing terminator".into(),
                 stmt,
                 stmt.span(),
@@ -856,49 +830,49 @@ impl Diagnostic {
                 notes = &["it doesn't make sense to put this marker on an axiom,\n\
                     because axioms don't have proofs"];
                 ("Axiom contains (Proof modification is discouraged.)".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "This doesn't make sense".into(),
                     stmt,
                     span,
                 )])
             },
             ProofNoSteps => ("Empty proof".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Proof must have at least one step (use ? if deliberately incomplete)".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofUnderflow => ("Proof underflow".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Too few statements on stack to satisfy step's mandatory hypotheses".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofUnterminatedRoster => ("Unterminated roster".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "List of referenced assertions in a compressed proof must be terminated by )".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofWrongExprEnd => ("Proven statement does not match assertion".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Final step statement does not match assertion".into(),
                 stmt,
                 stmt.span(),
             )]),
             ProofWrongTypeEnd => ("Proven statement has wrong typecode".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Final step typecode does not match assertion".into(),
                 stmt,
                 stmt.span(),
             )]),
             RepeatedLabel(l_span, f_span) => ("Repeated label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A statement may have only one label".into(),
                 stmt,
                 *l_span,
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "First label was here".into(),
                 stmt,
                 *f_span,
@@ -907,7 +881,7 @@ impl Diagnostic {
                 notes = &["The '@' character is discouraged in tokens because it is\n\
                     traditionally used to replace '$' in commented out database source code."];
                 ("Token contains '@'".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "Used '@' character here".into(),
                     stmt,
                     *span,
@@ -917,204 +891,204 @@ impl Diagnostic {
                 notes = &["The '?' character is discouraged in tokens because it is\n\
                     sometimes used as a math token search wildcard."];
                 ("Token contains '?'".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "Used '?' character here".into(),
                     stmt,
                     *span,
                 )])
             }
             SpuriousLabel(lspan) => ("Spurious label".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Labels are only permitted for statements of type $a, $e, $f, or $p".into(),
                 stmt,
                 *lspan,
             )]),
             SpuriousProof(math_end) => ("Spurious proof".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Proofs are only allowed on $p assertions".into(),
                 stmt,
                 *math_end,
             )]),
             StepEssenWrong => ("Wrong essential statement".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Step used for $e hypothesis does not match statement".into(),
                 stmt,
                 stmt.span(),
             )]),
             StepEssenWrongType => ("Wrong essential typecode".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Step used for $e hypothesis does not match typecode".into(),
                 stmt,
                 stmt.span(),
             )]),
             StepFloatWrongType => ("Wrong floating typecode".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Step used for $f hypothesis does not match typecode".into(),
                 stmt,
                 stmt.span(),
             )]),
             StepMissing(ref tok) => ("Missing step".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 format!("Step {step} referenced by proof does not correspond to a $p statement (or \
                         is malformed)", step = t(tok)).into(),
                 stmt,
                 stmt.span(),
             )]),
             StepOutOfRange => ("Step out of range".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Step in compressed proof is out of range of defined steps".into(),
                 stmt,
                 stmt.span(),
             )]),
             StepUsedAfterScope(ref tok) => ("Step used after scope".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 format!("Step {step} referenced by proof is a hypothesis not active in this scope", step = t(tok)).into(),
                 stmt,
                 stmt.span(),
             )]),
             StepUsedBeforeDefinition(ref tok) => ("Step used before definition".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 format!("Step {step} referenced by proof has not yet been proved", step = t(tok)).into(),
                 stmt,
                 stmt.span(),
             )]),
             StmtParseError(err) => err.build_info(stmt),
             SymbolDuplicatesLabel(index, saddr) => ("Symbol duplicates label".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Metamath spec forbids symbols which are the same as labels in the same \
                         database".into(),
                 stmt,
                 stmt.math_span(*index),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Symbol was used as a label here".into(),
                 sset.statement(*saddr),
                 sset.statement(*saddr).span(),
             )]),
             SymbolRedeclared(index, taddr) => ("Symbol redeclared".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "This symbol is already active in this scope".into(),
                 stmt,
                 stmt.math_span(*index),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Symbol was previously declared here".into(),
                 stmt,
                 sset.statement(taddr.statement).math_span(taddr.token_index),
             )]),
             TabUsed(span) => ("Tab character used".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Use spaces instead".into(),
                 stmt,
                 *span,
             )]),
             TrailingWhitespace(span) => ("Trailing whitespace".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "whitespace here".into(),
                 stmt,
                 *span,
             )]),
             UnclosedBeforeEof => ("Unclosed before eof".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "${ group must be closed with a $} before end of file".into(),
                 stmt,
                 stmt.span(),
             )]),
             UnclosedBeforeInclude(index) => ("Include not at top level".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "${ group must be closed with a $} before another file can be included".into(),
                 stmt,
                 stmt.span(),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Include statement is here".into(),
                 stmt.segment().statement(*index),
                 stmt.segment().statement(*index).span(),
             )]),
             UnclosedCommandComment(span) => ("Unclosed comment".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "$t/$j comment requires closing */ before end of statement".into(),
                 stmt,
                 *span,
             )]),
             UnclosedCommandString(span) => ("Unclosed string".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A string must be closed with ' or \"".into(),
                 stmt,
                 *span,
             )]),
             UnclosedComment(comment) => ("Unclosed comment".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Comment requires closing $) before end of file".into(),
                 stmt,
                 *comment,
             )]),
             &UnclosedHtml(start, end) => ("Unclosed <HTML>".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "HTML blocks must be closed".into(),
                 stmt,
                 Span::new2(end, end + 2), // the $)
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "HTML block started here".into(),
                 stmt,
                 Span::new2(start, start + 6), // the <HTML>
             )]),
             UnclosedInclude => ("Unclosed include".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "$[ requires a matching $]".into(),
                 stmt,
                 stmt.span(),
             )]),
             UnclosedMath => ("Unclosed math".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A math string must be closed with $= or $.".into(),
                 stmt,
                 stmt.span(),
             )]),
             &UnclosedMathMarkup(start, end) => ("Unclosed math".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A math string must be closed with `".into(),
                 stmt,
                 Span::new2(end, end + 2), // the $)
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Math string started here".into(),
                 stmt,
                 Span::new2(start, start + 1), // the `
             )]),
             UnclosedProof => ("Unclosed proof".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "A proof must be closed with $.".into(),
                 stmt,
                 stmt.span(),
             )]),
             UnconventionalAxiomLabel(span) => ("Unconventional axiom label".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "Axioms should start with 'ax-' or 'df-'".into(),
                 stmt,
                 *span,
             )]),
             UndefinedBibTag(span) => ("Missing bibliography tag".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This tag was not found in the bibliography file".into(),
                 stmt,
                 *span,
             )]),
             UndefinedToken(span, tk) => (format!("Undeclared token '{}'", as_str(tk)).into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This token was not declared in any $v or $c statement".into(),
                 stmt,
                 *span,
             )]),
             UnknownKeyword(kwspan) => ("Unknown keyword".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Statement-starting keyword must be one of $a $c $d $e $f $p $v".into(),
                 stmt,
                 *kwspan,
             )]),
             UnknownTypesettingCommand(kwspan) => ("Unknown $t command".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Typesetting command must be one of:\n\
                 latexdef, htmldef, althtmldef, htmlvarcolor, htmltitle, htmlhome,\n\
                 exthtmltitle, exthtmlhome, exthtmllabel, htmldir, althtmldir,\n\
@@ -1126,46 +1100,53 @@ impl Diagnostic {
                 notes = &[
                     "This character has special meaning in this position, \
                     but it was not interpretable here.",
-                    "Use ~~ or [[ or `` if you mean to include the character literally"
+                    // Zero width space, see #136
+                    "Use ~~ or [[ or `` or _\u{200B}_ if you mean to include the character literally"
                 ];
                 ("Invalid escape character".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "This escape character should be doubled".into(),
                     stmt,
                     Span::new2(index, index + 1),
                 )])
             }
             UninterpretedHtml(tok) => ("incorrect use of <HTML>".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This <HTML> was not interpreted".into(),
                 stmt,
                 *tok,
             )]),
             UnknownLabel(span) => ("Unknown label".into(), vec![(
-                AnnotationType::Warning,
+                Level::Warning,
                 "This is not the label of any statement".into(),
                 stmt,
                 *span,
             )]),
             UnmatchedCloseGroup => ("Unmatched close group".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "This $} does not match any open ${".into(),
                 stmt,
                 stmt.span(),
             )]),
+            UsageViolation(span, label, axiom) => ("Usage violation".into(), vec![(
+                Level::Warning,
+                format!("Statement {label} uses axiom {axiom} despite $j declaring it avoids its usage.", label=as_str(label), axiom=as_str(axiom)).into(),
+                stmt,
+                *span,
+            )]),
             VariableMissingFloat(index) => ("Variable missing float".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Variable token used in statement must have an active $f".into(),
                 stmt,
                 stmt.math_span(*index),
             )]),
             VariableRedeclaredAsConstant(index, taddr) => ("Variable redeclared as a constant".into(), vec![(
-                AnnotationType::Error,
+                Level::Error,
                 "Symbol cannot be used as a variable here and as a constant later".into(),
                 stmt,
                 stmt.math_span(*index),
             ), (
-                AnnotationType::Note,
+                Level::Note,
                 "Symbol will be used as a constant here".into(),
                 sset.statement(taddr.statement),
                 sset.statement(taddr.statement).math_span(taddr.token_index),
@@ -1174,7 +1155,7 @@ impl Diagnostic {
                 notes = &["On windows, it is not legal to name a file any of:\n\
                     CON, PRN, AUX, CLOCK$, NUL, COM[1-9], LPT[1-9]."];
                 ("Windows reserved label".into(), vec![(
-                    AnnotationType::Warning,
+                    Level::Warning,
                     "This label cannot be used as the name of a file on windows".into(),
                     stmt,
                     *span,
@@ -1216,8 +1197,8 @@ impl StmtParseError {
     /// The diagnostic's severity
     #[must_use]
     #[allow(clippy::unused_self)]
-    pub const fn severity(&self) -> AnnotationType {
-        AnnotationType::Error
+    pub const fn severity(&self) -> Level {
+        Level::Error
     }
 
     fn build_info<'a>(&self, stmt: StatementRef<'a>) -> AnnInfo<'a> {
@@ -1263,12 +1244,9 @@ impl StmtParseError {
                 stmt,
                 *span,
             ),
-            StmtParseError::ParsedStatementNoTypeCode => (
-                AnnotationType::Error,
-                "Empty statement".into(),
-                stmt,
-                stmt.span(),
-            ),
+            StmtParseError::ParsedStatementNoTypeCode => {
+                (Level::Error, "Empty statement".into(), stmt, stmt.span())
+            }
         };
         (self.label(), vec![info])
     }
@@ -1277,6 +1255,18 @@ impl StmtParseError {
 impl From<StmtParseError> for Diagnostic {
     fn from(err: StmtParseError) -> Self {
         Diagnostic::StmtParseError(err)
+    }
+}
+
+impl Display for StmtParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label())
+    }
+}
+
+impl Error for StmtParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
     }
 }
 
@@ -1293,18 +1283,18 @@ impl BibError {
         &self,
         source: &SourceInfo,
         lc: &mut LineCache,
-        f: impl for<'a> FnOnce(Snippet<'a>) -> T,
+        f: impl for<'a> FnOnce(Message<'a>) -> T,
     ) -> T {
         let (label, infos): (Cow<'_, str>, Vec<_>) = match self {
             &BibError::DuplicateBib(span, other) => (
                 "duplicate bibliography anchor".into(),
                 vec![
                     (
-                        AnnotationType::Warning,
+                        Level::Warning,
                         "this anchor has already appeared".into(),
                         span,
                     ),
-                    (AnnotationType::Note, "previous occurrence".into(), other),
+                    (Level::Note, "previous occurrence".into(), other),
                 ],
             ),
         };
@@ -1316,7 +1306,7 @@ impl BibError {
     /// Convert a list of diagnostics collected by `diag_notations` to a list of snippets.
     pub fn render_list<T>(
         diags: &[(&SourceInfo, BibError)],
-        f: impl for<'a> FnOnce(Snippet<'a>) -> T + Copy,
+        f: impl for<'a> FnOnce(Message<'a>) -> T + Copy,
     ) -> Vec<T> {
         let mut lc = LineCache::default();
         diags

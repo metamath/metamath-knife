@@ -60,6 +60,7 @@ impl Bitset {
     }
 
     fn tail(&self) -> &[usize] {
+        #[allow(clippy::manual_unwrap_or_default)] // clippy#12928
         match self.tail {
             None => Default::default(),
             Some(ref bx) => bx,
@@ -127,6 +128,11 @@ impl Bitset {
                 None => true,
                 Some(bx) => bx.iter().all(|&word| word == 0),
             }
+    }
+
+    /// Returns an iterator over the indices of set bits in the bitset.
+    pub fn iter(&self) -> BitsetIter<'_> {
+        self.into_iter()
     }
 }
 

@@ -30,7 +30,7 @@ use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::mem;
 use std::str;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// State used by the scanning process
 #[derive(Default)]
@@ -681,7 +681,10 @@ fn collect_definitions(seg: &mut Segment) {
                     });
                 }
             }
-            continue;
+            // Skip further treatment if the statement is not at top-level, except for $j commands.
+            if stmt.stype != AdditionalInfoComment {
+                continue;
+            }
         }
 
         let math = &seg.span_pool[stmt.math_start..stmt.proof_start];
@@ -756,7 +759,8 @@ fn collect_definitions(seg: &mut Segment) {
 }
 
 /// Metamath spec valid label characters are `[-._a-zA-Z0-9]`
-fn is_valid_label(label: &[u8]) -> bool {
+#[must_use]
+pub fn is_valid_label(label: &[u8]) -> bool {
     label
         .iter()
         .all(|&c| c == b'.' || c == b'-' || c == b'_' || c.is_ascii_alphanumeric())
@@ -893,7 +897,11 @@ impl Iterator for CommandIter<'_> {
                     let ch = self.next_char();
                     self.index += 1;
                     if ch == quote {
-                        break;
+                        if self.has_more() && self.next_char() == quote {
+                            self.index += 1;
+                        } else {
+                            break;
+                        }
                     }
                 }
                 CommandToken::String(Span::new(token_start, self.index - 1))
@@ -1008,7 +1016,7 @@ impl SegmentSet {
 
             let sum = |mut rest: std::slice::Iter<'_, CommandToken>| {
                 let mut span_out = as_string(span, rest.next())?;
-                let mut accum: Vec<u8> = span_out.as_ref(buf).into();
+                let mut accum: Vec<u8> = CommandToken::unescape_string(buf, span_out).into();
                 span_out.start -= 1;
                 loop {
                     match rest.next() {
@@ -1020,7 +1028,7 @@ impl SegmentSet {
                         _ => return Err(Diagnostic::CommandIncomplete(span)),
                     }
                     let span2 = as_string(span, rest.next())?;
-                    accum.extend_from_slice(span2.as_ref(buf));
+                    CommandToken::append_unescaped_string(buf, span2, &mut accum);
                     span_out.end = span2.end
                 }
             };
@@ -1039,7 +1047,7 @@ impl SegmentSet {
                     MarkupKind::AltHtml => &mut data.alt_html_defs,
                     MarkupKind::Latex => &mut data.latex_defs,
                 };
-                match map.entry(sp.as_ref(buf).into()) {
+                match map.entry(CommandToken::unescape_string(buf, sp).into()) {
                     Entry::Occupied(e) => {
                         let (sp2, (id2, _), _) = *e.get();
                         data.diagnostics
@@ -1085,28 +1093,38 @@ impl SegmentSet {
     }
 }
 
-pub(crate) struct HeadingComment {
-    pub(crate) header: Span,
-    pub(crate) content: Span,
+/// A parsed heading comment.
+#[derive(Debug, Clone, Copy)]
+pub struct HeadingComment {
+    /// The header part of the heading comment (the text of the header)
+    pub header: Span,
+    /// The content part of the heading comment (descriptive text regarding the header)
+    pub content: Span,
 }
 
 impl HeadingComment {
-    pub(crate) fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
-        lazy_static::lazy_static! {
-            static ref MAJOR_PART: Regex =
-                Regex::new(r"^[ \n]+#{4,}\n *([^\n]*)\n#{4,}\n").unwrap();
-            static ref SECTION: Regex =
-                Regex::new(r"^[ \n]+(?:#\*){2,}#?\n *([^\n]*)\n(?:#\*){2,}#?\n").unwrap();
-            static ref SUBSECTION: Regex =
-                Regex::new(r"^[ \n]+(?:=-){2,}=?\n *([^\n]*)\n(?:=-){2,}=?\n").unwrap();
-            static ref SUBSUBSECTION: Regex =
-                Regex::new(r"^[ \n]+(?:-\.){2,}-?\n *([^\n]*)\n(?:-\.){2,}-?\n").unwrap();
-        }
+    /// Parses a heading comment at the given span in a segment buffer,
+    /// with the specified heading level and span. Returns `None` if this is not a heading comment
+    /// or it is malformed.
+    #[must_use]
+    pub fn parse(buf: &[u8], lvl: HeadingLevel, sp: Span) -> Option<Self> {
+        static MAJOR_PART: OnceLock<Regex> = OnceLock::new();
+        static SECTION: OnceLock<Regex> = OnceLock::new();
+        static SUBSECTION: OnceLock<Regex> = OnceLock::new();
+        static SUBSUBSECTION: OnceLock<Regex> = OnceLock::new();
         let regex = match lvl {
-            HeadingLevel::MajorPart => &*MAJOR_PART,
-            HeadingLevel::Section => &*SECTION,
-            HeadingLevel::SubSection => &*SUBSECTION,
-            HeadingLevel::SubSubSection => &*SUBSUBSECTION,
+            HeadingLevel::MajorPart => MAJOR_PART.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+#{4,}\r?\n *([^\n]*)\r?\n#{4,}\r?\n").unwrap()
+            }),
+            HeadingLevel::Section => SECTION.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+(?:#\*){2,}#?\r?\n *([^\n]*)\r?\n(?:#\*){2,}#?\r?\n").unwrap()
+            }),
+            HeadingLevel::SubSection => SUBSECTION.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+(?:=-){2,}=?\r?\n *([^\n]*)\r?\n(?:=-){2,}=?\r?\n").unwrap()
+            }),
+            HeadingLevel::SubSubSection => SUBSUBSECTION.get_or_init(|| {
+                Regex::new(r"^[ \r\n]+(?:-\.){2,}-?\r?\n *([^\n]*)\r?\n(?:-\.){2,}-?\r?\n").unwrap()
+            }),
             _ => unreachable!(),
         };
         let groups = regex.captures(sp.as_ref(buf))?;
@@ -1117,11 +1135,12 @@ impl HeadingComment {
         })
     }
 
-    pub(crate) fn parse_mathbox_header(&self, buf: &[u8]) -> Option<Span> {
-        lazy_static::lazy_static! {
-            static ref MATHBOX_FOR: Regex = Regex::new(r"^Mathbox for (.*)$").unwrap();
-        }
-        let m = MATHBOX_FOR.captures(self.header.as_ref(buf))?.get(1)?;
+    /// Parses a mathbox heading comment, returning the span of the author name.
+    #[must_use]
+    pub fn parse_mathbox_header(&self, buf: &[u8]) -> Option<Span> {
+        static MATHBOX_FOR: OnceLock<Regex> = OnceLock::new();
+        let mathbox_for = MATHBOX_FOR.get_or_init(|| Regex::new(r"^Mathbox for (.*)$").unwrap());
+        let m = mathbox_for.captures(self.header.as_ref(buf))?.get(1)?;
         Some(Span::new2(
             self.header.start + m.start() as u32,
             self.header.start + m.end() as u32,

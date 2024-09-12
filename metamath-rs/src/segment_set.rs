@@ -19,12 +19,13 @@
 //! `segment_set` implements two levels of caching:
 //!
 //! 1. When a file is loaded from disk, its pathname and modification time are
-//! saved, along with all of the segments which it generated.  If the file
-//! hasn't changed at all, we can reuse the segments after a single `stat`.
+//!    saved, along with all of the segments which it generated.  If the file
+//!    hasn't changed at all, we can reuse the segments after a single `stat`.
 //!
-//! 1. After a file is loaded and split, slices are cached by content.  This
-//! speeds up operation when local changes are made to large files, or when
-//! modification times cannot be used (such as some language server scenarios).
+//! 2. After a file is loaded and split, slices are cached by content.  This
+//!    speeds up operation when local changes are made to large files, or when
+//!    modification times cannot be used (such as some language server
+//!    scenarios).
 //!
 //! In either case, some care is needed to retain only data which is relevant in
 //! the cache.  The caches are discarded on every read, but any data obtained
@@ -147,7 +148,7 @@ pub(crate) struct SegmentSet {
     /// The work queue for use with this database.
     pub(crate) exec: Executor,
     /// Order structure which records the relative order of segment IDs created
-    /// by the SegmentSet.
+    /// by the `SegmentSet`.
     pub(crate) order: Arc<SegmentOrder>,
     /// Track segment and source info in parallel so they can be updated
     /// independently in the slicing case and if a file is renamed.
@@ -337,10 +338,7 @@ impl SegmentSet {
         // read a file from disk (intercessions have already been checked, but
         // the first cache has not) and split/parse it;
         // returns by Result Error on I/O error
-        fn canonicalize_and_read(
-            state: &mut RecState,
-            path: String,
-        ) -> io::Result<Promise<FileSR>> {
+        fn canonicalize_and_read(state: &RecState, path: String) -> io::Result<Promise<FileSR>> {
             let metadata = fs::metadata(&path)?;
             let time = FileTime::from_last_modification_time(&metadata);
 

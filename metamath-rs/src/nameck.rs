@@ -35,7 +35,6 @@ use crate::StatementRef;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::Arc;
-use std::u32;
 
 // An earlier version of this module was tasked with detecting duplicate symbol errors;
 // current task is just lookup
@@ -84,7 +83,7 @@ fn slot_remove<A: Eq, V>(slot: &mut NameSlot<A, V>, address: &A) {
 }
 
 fn autoviv<K: Hash + Eq, V: Default>(map: &mut HashMap<K, V>, key: K) -> &mut V {
-    map.entry(key).or_insert_with(Default::default)
+    map.entry(key).or_default()
 }
 
 fn deviv<K, Q, V, F>(map: &mut HashMap<K, V>, key: &Q, fun: F)
@@ -343,7 +342,7 @@ impl Nameset {
     #[must_use]
     pub fn lookup_label(&self, label: TokenPtr<'_>) -> Option<LookupLabel> {
         self.labels.get(label).and_then(|lslot| {
-            lslot.labels.first().map(|&(addr, _)| LookupLabel {
+            lslot.labels.first().map(|&(addr, ())| LookupLabel {
                 atom: lslot.atom,
                 address: addr,
             })
@@ -358,7 +357,7 @@ impl Nameset {
                 stype,
                 atom: syminfo.atom,
                 address: addr,
-                const_address: syminfo.constant.first().map(|&(addr, _)| addr),
+                const_address: syminfo.constant.first().map(|&(addr, ())| addr),
             })
         })
     }

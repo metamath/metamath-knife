@@ -9,13 +9,12 @@ use crate::statement::{StatementAddress, TokenPtr};
 use crate::util::HashMap;
 use crate::verify::ProofBuilder;
 use crate::{Database, StatementRef, StatementType};
-use std::cmp::{max, Ord, Ordering, PartialOrd};
+use std::cmp::{max, Ordering};
 use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::{self, Write};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
-use std::u16;
 
 /// A tree structure for storing proofs and grammar derivations.
 #[derive(Clone, Debug, Eq)]

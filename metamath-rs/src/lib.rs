@@ -14,8 +14,7 @@
     trivial_numeric_casts,
     variant_size_differences,
     unreachable_pub,
-    unused,
-    missing_docs
+    unused
 )]
 // all the clippy
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
@@ -29,14 +28,16 @@
 )]
 // // all the clippy lints we don't want
 #![allow(
-    clippy::blocks_in_if_conditions,
+    clippy::blocks_in_conditions,
     clippy::cast_sign_loss,
     clippy::cast_possible_wrap,
     clippy::enum_glob_use,
     clippy::if_not_else,
     clippy::inline_always,
+    clippy::let_underscore_untyped,
     clippy::missing_errors_doc,
     clippy::module_name_repetitions,
+    clippy::multiple_crate_versions,
     clippy::needless_range_loop,
     clippy::option_if_let_else,
     clippy::redundant_pub_crate,
@@ -53,9 +54,9 @@
 mod bit_set;
 mod segment;
 mod segment_set;
-mod tree;
 mod util;
 
+pub mod axiom_use;
 pub mod comment_parser;
 pub mod database;
 pub mod diag;
@@ -70,9 +71,15 @@ pub mod parser;
 pub mod proof;
 pub mod scopeck;
 pub mod statement;
+pub mod tree;
 pub mod typesetting;
 pub mod verify;
+
+#[cfg(feature = "verify_markup")]
 pub mod verify_markup;
+
+#[cfg(feature = "xml")]
+pub mod export_deps;
 
 #[cfg(test)]
 mod comment_parser_tests;
@@ -83,6 +90,8 @@ mod grammar_tests;
 #[cfg(test)]
 mod parser_tests;
 #[cfg(test)]
+mod usage_tests;
+#[cfg(test)]
 mod util_tests;
 
 pub use database::Database;
@@ -90,6 +99,7 @@ pub use formula::Formula;
 pub use formula::FormulaRef;
 pub use formula::Label;
 pub use formula::Symbol;
+pub use parser::is_valid_label;
 pub use segment::Comparer;
 pub use segment_set::SourceInfo;
 pub use statement::as_str;

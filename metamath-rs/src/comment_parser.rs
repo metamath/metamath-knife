@@ -14,12 +14,11 @@
 //! corresponding byte string in the file has to be unescaped before
 //! interpretation, using the [`CommentParser::unescape_text`] and
 //! [`CommentParser::unescape_math`] functions.
-use std::fmt::Display;
+use std::{fmt::Display, sync::OnceLock};
 
-use lazy_static::lazy_static;
 use regex::bytes::{CaptureMatches, Match, Regex, RegexSet};
 
-use crate::Span;
+use crate::{statement::unescape, Span};
 
 /// A comment markup item, which represents either a piece of text from the input
 /// or some kind of metadata item like the start or end of an italicized group.
@@ -27,32 +26,32 @@ use crate::Span;
 pub enum CommentItem {
     /// A piece of regular text. The characters in the buffer at the given
     /// span should be interpreted literally, except for the escapes.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
-    /// Note that `[` can also appear unescaped.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
+    /// Note that `[` and `_` can also appear unescaped.
     Text(Span),
     /// A paragraph break, caused by two or more consecutive newlines in the input.
     /// This is a zero-length item (all characters will be present in `Text` nodes
     /// before and after the element), but corresponds roughly to a `<p>` tag in HTML.
     LineBreak(usize),
     /// Start math mode, indicated by a backtick character. The usize points to the character.
-    /// Between [`StartMathMode`] and [`EndMathMode`],
-    /// there will be no comment items other than [`MathToken`].
+    /// Between [`CommentItem::StartMathMode`] and [`CommentItem::EndMathMode`],
+    /// there will be no comment items other than [`CommentItem::MathToken`].
     StartMathMode(usize),
     /// End math mode, indicated by a backtick character. The usize points to the character.
-    /// Between [`StartMathMode`] and [`EndMathMode`],
-    /// there will be no comment items other than [`MathToken`].
+    /// Between [`CommentItem::StartMathMode`] and [`CommentItem::EndMathMode`],
+    /// there will be no comment items other than [`CommentItem::MathToken`].
     EndMathMode(usize),
     /// A single math token. After unescaping this should correspond to a `$c` or `$v` statement
     /// in the database.
     /// Use `unescape_math` to strip the escape character `` ` ``.
     MathToken(Span),
     /// A label of an existing theorem. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
-    /// Note that `[` and `~` can also appear unescaped.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
+    /// Note that `[`, `~`, `_` can also appear unescaped.
     Label(usize, Span),
     /// A link to a web site URL. The `usize` points to the `~` character.
-    /// Use `unescape_text` to strip the text escapes `[`, `~`, and `` ` ``.
-    /// Note that `[` and `~` can also appear unescaped.
+    /// Use `unescape_text` to strip the text escapes `[`, `~`, `` ` ``, and `_`.
+    /// Note that `[`, `~`, `_` can also appear unescaped.
     Url(usize, Span),
     /// The `<HTML>` keyword, which starts HTML mode
     /// (it doesn't actually put `<HTML>` in the output).
@@ -73,28 +72,20 @@ pub enum CommentItem {
     BibTag(Span),
 }
 
+/// Returns true if this is a character that is escaped in [`CommentItem::Text`] fields,
+/// meaning that doubled occurrences are turned into single occurrences.
 #[inline]
-fn unescape(mut buf: &[u8], out: &mut Vec<u8>, is_escape: impl FnOnce(u8) -> bool + Copy) {
-    while let Some(n) = buf.iter().position(|&c| is_escape(c)) {
-        out.extend_from_slice(&buf[..=n]);
-        if buf.get(n + 1) == Some(&buf[n]) {
-            buf = &buf[n + 2..];
-        } else {
-            // this will not normally happen, but in some cases unescaped escapes
-            // are left uninterpreted because they appear in invalid position,
-            // and in that case they should be left as is
-            buf = &buf[n + 1..];
-        }
-    }
-    out.extend_from_slice(buf);
+#[must_use]
+pub const fn is_text_escape(html_mode: bool, c: u8) -> bool {
+    matches!(c, b'`' | b'[' | b'~') || !html_mode && c == b'_'
 }
 
-/// Returns true if this is a character that is escaped in [`CommentItem::Text`],
+/// Returns true if this is a character that is escaped in
 /// [`CommentItem::Label`] and [`CommentItem::Url`] fields,
 /// meaning that doubled occurrences are turned into single occurrences.
 #[inline]
 #[must_use]
-pub const fn is_text_escape(c: u8) -> bool {
+pub const fn is_label_escape(c: u8) -> bool {
     matches!(c, b'`' | b'[' | b'~')
 }
 
@@ -108,9 +99,15 @@ pub const fn is_math_escape(c: u8) -> bool {
 
 impl CommentItem {
     /// Remove text escapes from a markup segment `buf`, generally coming from the
-    /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
-    pub fn unescape_text(buf: &[u8], out: &mut Vec<u8>) {
-        unescape(buf, out, is_text_escape)
+    /// [`CommentItem::Text`] field.
+    pub fn unescape_text(html_mode: bool, buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, |c| is_text_escape(html_mode, c))
+    }
+
+    /// Remove text escapes from a markup segment `buf`, generally coming from the
+    /// [`CommentItem::Label`] or [`CommentItem::Url`] fields.
+    pub fn unescape_label(buf: &[u8], out: &mut Vec<u8>) {
+        unescape(buf, out, is_label_escape)
     }
 
     /// Remove math escapes from a markup segment `buf`, generally coming from the
@@ -140,6 +137,8 @@ pub struct CommentParser<'a> {
     end_subscript: usize,
 }
 
+const CLOSING_PUNCTUATION: &[u8] = b".,;)?!:]'\"_-";
+
 impl<'a> CommentParser<'a> {
     /// Construct a new `CommentParser` from a sub-span of a buffer.
     /// The returned comment items will have spans based on the input span,
@@ -158,9 +157,15 @@ impl<'a> CommentParser<'a> {
     }
 
     /// Remove text escapes from a markup segment `span`, generally coming from the
-    /// [`CommentItem::Text`], [`CommentItem::Label`], or [`CommentItem::Url`] fields.
+    /// [`CommentItem::Text`] field.
     pub fn unescape_text(&self, span: Span, out: &mut Vec<u8>) {
-        CommentItem::unescape_text(span.as_ref(self.buf), out)
+        CommentItem::unescape_text(self.html_mode, span.as_ref(self.buf), out)
+    }
+
+    /// Remove text escapes from a markup segment `span`, generally coming from the
+    /// [`CommentItem::Label`] or [`CommentItem::Url`] fields.
+    pub fn unescape_label(&self, span: Span, out: &mut Vec<u8>) {
+        CommentItem::unescape_label(span.as_ref(self.buf), out)
     }
 
     /// Remove math escapes from a markup segment `span`, generally coming from the
@@ -184,20 +189,7 @@ impl<'a> CommentParser<'a> {
         None
     }
 
-    fn is_subscript(&self) -> Option<()> {
-        const OPENING_PUNCTUATION: &[u8] = b"(['\"";
-        if self.pos == self.end_subscript {
-            return None;
-        }
-        let c = self.buf.get(self.pos.checked_sub(1)?)?;
-        if c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c) {
-            return None;
-        }
-        Some(())
-    }
-
     fn parse_subscript(&self) -> Option<usize> {
-        const CLOSING_PUNCTUATION: &[u8] = b".,;)?!:]'\"_-";
         let c = self.buf.get(self.pos + 1)?;
         if c.is_ascii_whitespace() || CLOSING_PUNCTUATION.contains(c) {
             return None;
@@ -217,7 +209,18 @@ impl<'a> CommentParser<'a> {
         if !self.buf.get(self.pos + 1)?.is_ascii_alphanumeric() {
             return None;
         }
-        let end = (self.pos + 2) + self.buf[self.pos + 2..].iter().position(|&c| c == b'_')?;
+        let mut end = self.pos + 2;
+        loop {
+            if *self.buf.get(end)? == b'_' {
+                if self.buf.get(end + 1) == Some(&b'_') {
+                    end += 2
+                } else {
+                    break;
+                }
+            } else {
+                end += 1
+            }
+        }
         if !self.buf[end - 1].is_ascii_alphanumeric()
             || matches!(self.buf.get(end + 1), Some(c) if c.is_ascii_alphanumeric())
         {
@@ -227,17 +230,22 @@ impl<'a> CommentParser<'a> {
     }
 
     fn parse_underscore(&mut self) -> Option<(usize, CommentItem)> {
+        const OPENING_PUNCTUATION: &[u8] = b"(['\"";
         let start = self.pos;
-        let item = if self.is_subscript().is_some() {
-            let sub_end = self.parse_subscript()?;
-            self.pos += 1;
-            self.end_subscript = sub_end;
-            CommentItem::StartSubscript(start)
-        } else {
+        let is_italic = self.pos == self.end_subscript
+            || (self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos))).map_or(true, |c| {
+                c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c)
+            });
+        let item = if is_italic {
             let it_end = self.parse_italic()?;
             self.pos += 1;
             self.end_italic = it_end;
             CommentItem::StartItalic(start)
+        } else {
+            let sub_end = self.parse_subscript()?;
+            self.pos += 1;
+            self.end_subscript = sub_end;
+            CommentItem::StartSubscript(start)
         };
         Some((start, item))
     }
@@ -295,7 +303,7 @@ impl<'a> CommentParser<'a> {
         while let Some(&c) = self.buf.get(self.pos) {
             match c {
                 b'[' | b'`' if self.buf.get(self.pos + 1) == Some(&c) => self.pos += 2,
-                b' ' | b'\n' | b'`' => break,
+                b' ' | b'\r' | b'\n' | b'`' => break,
                 b'[' if self.parse_bib().is_some() => break,
                 b'<' if self.buf[self.pos..].starts_with(b"<HTML>")
                     || self.buf[self.pos..].starts_with(b"</HTML>") =>
@@ -315,11 +323,31 @@ impl<'a> CommentParser<'a> {
             CommentItem::Label(tilde, Span::new(label_start, self.pos))
         }
     }
+
+    fn trim_space_before_open(&self, lo: usize, pos: usize) -> bool {
+        lo + 2 <= pos
+            && self.buf[pos - 1] == b' '
+            && (b"([".contains(&self.buf[pos - 2])
+                || self.buf[pos - 2] == b'\"'
+                    && pos
+                        .checked_sub(3)
+                        .and_then(|i| self.buf.get(i))
+                        .map_or(true, u8::is_ascii_whitespace))
+    }
+
+    fn trim_space_after_close(&self) -> bool {
+        self.buf.get(self.pos) == Some(&b' ')
+            && self
+                .buf
+                .get(self.pos + 1)
+                .map_or(false, |c| CLOSING_PUNCTUATION.contains(c))
+    }
 }
 
 impl<'a> Iterator for CommentParser<'a> {
     type Item = CommentItem;
 
+    #[allow(clippy::cognitive_complexity)]
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(item) = self.item.take() {
             return Some(item);
@@ -339,6 +367,13 @@ impl<'a> Iterator for CommentParser<'a> {
                     end = self.pos;
                     self.pos += 1;
                     self.item = Some(self.parse_math_delim(end));
+                    if self.math_mode && self.trim_space_before_open(start, end) {
+                        // trim a single space if we are opening math mode after opening punct
+                        end -= 1;
+                    } else if !self.math_mode && self.trim_space_after_close() {
+                        // trim a single space if we are exiting math mode before closing punct
+                        self.pos += 1;
+                    }
                     break;
                 }
             } else if math_token {
@@ -361,7 +396,15 @@ impl<'a> Iterator for CommentParser<'a> {
                     self.pos += 2;
                 } else {
                     end = self.pos;
+                    if self.trim_space_before_open(start, end) {
+                        // trim a single space if we have a label after opening punct
+                        end -= 1;
+                    }
                     self.item = Some(self.parse_label());
+                    if self.trim_space_after_close() {
+                        // trim a single space if we have a label before closing punct
+                        self.pos += 1;
+                    }
                     break;
                 }
             } else if c == b'[' {
@@ -385,18 +428,20 @@ impl<'a> Iterator for CommentParser<'a> {
                 }
                 self.pos += 1;
             } else if c == b'_' {
-                if self.end_italic == self.pos {
+                if self.buf.get(self.pos + 1) == Some(&b'_') {
+                    self.pos += 2;
+                } else if self.end_italic == self.pos {
                     end = self.pos;
                     self.pos += 1;
                     self.item = Some(CommentItem::EndItalic(end));
                     break;
-                }
-                if let Some((pos, item)) = self.parse_underscore() {
+                } else if let Some((pos, item)) = self.parse_underscore() {
                     end = pos;
                     self.item = Some(item);
                     break;
+                } else {
+                    self.pos += 1;
                 }
-                self.pos += 1;
             } else {
                 self.pos += 1;
             }
@@ -427,14 +472,15 @@ impl Discouragements {
     /// is discouraged.
     #[must_use]
     pub fn new(buf: &[u8]) -> Self {
-        lazy_static! {
-            static ref MODIFICATION: RegexSet = RegexSet::new([
-                r"\(Proof[ \n]+modification[ \n]+is[ \n]+discouraged\.\)",
-                r"\(New[ \n]+usage[ \n]+is[ \n]+discouraged\.\)"
+        static MODIFICATION: OnceLock<RegexSet> = OnceLock::new();
+        let modification = MODIFICATION.get_or_init(|| {
+            RegexSet::new([
+                r"\(Proof[ \r\n]+modification[ \r\n]+is[ \r\n]+discouraged\.\)",
+                r"\(New[ \r\n]+usage[ \r\n]+is[ \r\n]+discouraged\.\)",
             ])
-            .unwrap();
-        }
-        let m = MODIFICATION.matches(buf);
+            .unwrap()
+        });
+        let m = modification.matches(buf);
         Self {
             modification_discouraged: m.matched(0),
             usage_discouraged: m.matched(1),
@@ -486,17 +532,17 @@ impl<'a> ParentheticalIter<'a> {
     /// Construct a new parenthetical iterator given a segment buffer and a span in it.
     #[must_use]
     pub fn new(buf: &'a [u8], span: Span) -> Self {
-        lazy_static! {
-            static ref PARENTHETICALS: Regex = Regex::new(concat!(
-                r"\((Contributed|Revised|Proof[ \n]+shortened)",
-                r"[ \n]+by[ \n]+([^,)]+),[ \n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
-                r"\((Proof[ \n]+modification|New[ \n]+usage)[ \n]+is[ \n]+discouraged\.\)",
+        static PARENTHETICALS: OnceLock<Regex> = OnceLock::new();
+        let parentheticals = PARENTHETICALS.get_or_init(|| {
+            Regex::new(concat!(
+                r"\((Contributed|Revised|Proof[ \r\n]+shortened)",
+                r"[ \r\n]+by[ \r\n]+([^,)]+),[ \r\n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
+                r"\((Proof[ \r\n]+modification|New[ \r\n]+usage)[ \r\n]+is[ \r\n]+discouraged\.\)",
             ))
-            .unwrap();
-        }
-
+            .unwrap()
+        });
         Self {
-            matches: PARENTHETICALS.captures_iter(span.as_ref(buf)),
+            matches: parentheticals.captures_iter(span.as_ref(buf)),
             off: span.start,
         }
     }
