@@ -2,23 +2,23 @@
 //! can be done at the same time:
 //!
 //! 1. For `$c $v $f` and labelled statements (`$e $f $a $p`): Check for
-//! duplication
+//!    duplication
 //!
-//! 1. For `$e $d $f $a $p`: Check that all used math symbols are active in
-//! scope
+//! 2. For `$e $d $f $a $p`: Check that all used math symbols are active in
+//!    scope
 //!
-//! 1. For `$a $p`: Compute the frame
+//! 3. For `$a $p`: Compute the frame
 //!
 //! Rules of precedence for error detection and recovery:
 //!
 //! 1. Math symbols and labels are actually in separate namespaces.  We warn
-//! about collisions but otherwise do nothing.  Variables have responsibility
-//! for the warning.
+//!    about collisions but otherwise do nothing.  Variables have responsibility
+//!    for the warning.
 //!
-//! 1. When two definitions have overlapping live ranges, the earlier one wins.
+//! 2. When two definitions have overlapping live ranges, the earlier one wins.
 //!
-//! 1. Constant/nested variable collisions are special because they don't
-//! involve scope overlaps. The constant wins, the variable must notify.
+//! 3. Constant/nested variable collisions are special because they don't
+//!    involve scope overlaps. The constant wins, the variable must notify.
 //!
 //! Since this is always run before the verifier, it focuses on supporting the
 //! verifier; things that the verifier won't use mostly aren't done.  This

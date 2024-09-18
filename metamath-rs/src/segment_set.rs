@@ -19,12 +19,13 @@
 //! `segment_set` implements two levels of caching:
 //!
 //! 1. When a file is loaded from disk, its pathname and modification time are
-//! saved, along with all of the segments which it generated.  If the file
-//! hasn't changed at all, we can reuse the segments after a single `stat`.
+//!    saved, along with all of the segments which it generated.  If the file
+//!    hasn't changed at all, we can reuse the segments after a single `stat`.
 //!
-//! 1. After a file is loaded and split, slices are cached by content.  This
-//! speeds up operation when local changes are made to large files, or when
-//! modification times cannot be used (such as some language server scenarios).
+//! 2. After a file is loaded and split, slices are cached by content.  This
+//!    speeds up operation when local changes are made to large files, or when
+//!    modification times cannot be used (such as some language server
+//!    scenarios).
 //!
 //! In either case, some care is needed to retain only data which is relevant in
 //! the cache.  The caches are discarded on every read, but any data obtained
