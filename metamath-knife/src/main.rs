@@ -105,7 +105,7 @@ struct Cli {
     #[arg(long, value_name("FILE"))]
     export_graphml_deps: Option<String>,
     #[cfg(feature = "verify_markup")]
-    /// Checks comment markup
+    /// Checks comment markup and parses typesetting information
     #[arg(short = 'm', long)]
     verify_markup: bool,
 }
