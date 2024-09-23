@@ -46,44 +46,41 @@ Alternatively using `cargo install`:
 
 Here is the command line help, which gives an idea of the options available:
 ```
-A Metamath database verifier and processing tool
+A command-line tool for Metamath, including parallel and incremental verifier for Metamath databases
 
-USAGE:
-    metamath-knife [FLAGS] [OPTIONS] <DATABASE>
+Usage: metamath-knife [OPTIONS] [DATABASE]
 
-FLAGS:
-        --debug                Activates debug logs, including for the grammar building and statement parsing
-    -F, --dump-formula         Dumps the formulas of this database
-    -G, --dump-grammar         Dumps the database's grammar
-    -T, --dump-typesetting     Dumps typesetting information
-        --free                 Explicitly deallocates working memory before exit
-    -g, --grammar              Checks grammar
-    -h, --help                 Prints help information
-    -O, --outline              Shows database outline
-    -p, --parse-stmt           Parses all statements according to the database's grammar
-    -t, --parse-typesetting    Parses typesetting information
-        --repeat               Demonstrates incremental verifier
-        --split                Processes files > 1 MiB in multiple segments
-        --time                 Prints milliseconds after each stage
-        --trace-recalc         Prints segments as they are recalculated
-    -V, --version              Prints version information
-    -v, --verify               Checks proof validity
-    -m, --verify-markup        Checks comment markup
-        --verify-parse-stmt    Checks that printing parsed statements gives back the original formulas
-    -u, --verify-usage         Checks axiom usage
+Arguments:
+  [DATABASE]  Database file to load
 
-OPTIONS:
-        --text <NAME> <TEXT>          Provides raw database content on the command line
-    -X, --axiom-use <FILE>            Generate `axiom-use` file
-        --biblio <FILE>...            Supplies a bibliography file for verify-markup
-                                      Can be used one or two times; the second is for exthtml processing
-    -D, --discouraged <FILE>          Regenerates `discouraged` file
-    -e, --export <LABEL>...           Outputs a proof file
-    -j, --jobs <jobs>                 Number of threads to use for verification
-        --stmt-use <FILE> <LABELS>    Outputs statements directly or indirectly using the given list of statements
-
-ARGS:
-    <DATABASE>    Database file to load
+Options:
+      --text <NAME> <TEXT>        Provides raw database content on the command line
+      --split                     Processes files > 1 MiB in multiple segments
+      --time                      Prints milliseconds after each stage
+  -v, --verify                    Checks proof validity
+  -D, --discouraged <FILE>        Regenerates `discouraged` file
+  -X, --axiom-use <FILE>          Generate `axiom-use` file
+      --stmt-use <FILE> <LABELS>  Outputs statements directly or indirectly using the given list of statements
+  -u, --verify-usage              Checks axiom usage
+  -O, --outline                   Shows database outline
+  -T, --dump-typesetting          Dumps typesetting information
+  -t, --parse-typesetting         Parses typesetting information
+  -g, --grammar                   Checks grammar
+  -p, --parse-stmt                Parses all statements according to the database's grammar
+      --verify-parse-stmt         Checks that printing parsed statements gives back the original formulas
+  -G, --dump-grammar              Dumps the database's grammar
+  -F, --dump-formula              Dumps the formulas of this database
+  -S, --list-statements           List all statements of this database
+      --debug                     Activates debug logs, including for the grammar building and statement parsing
+      --trace-recalc              Prints segments as they are recalculated
+      --free                      Explicitly deallocates working memory before exit
+      --repeat                    Demonstrates incremental verifier
+  -j, --jobs <JOBS>               Number of threads to use for verification
+  -e, --export <LABEL>            Outputs a proof file
+      --biblio <FILE>             Supplies a bibliography file for verify-markup Can be used one or two times; the second is for exthtml processing
+  -m, --verify-markup             Checks comment markup and parses typesetting information
+  -h, --help                      Print help
+  -V, --version                   Print version
 ```
 
 ## License
