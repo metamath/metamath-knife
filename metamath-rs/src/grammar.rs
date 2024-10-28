@@ -1736,9 +1736,14 @@ impl StmtParse {
         println!("Formula Dump:");
         let sset = db.parse_result();
         let nset = db.name_result();
-        for sps in self.segments.values() {
-            for (&sa, formula) in &sps.formulas {
-                let sref = sset.statement(sa);
+        for seg in sset.segments(..) {
+            let Some(sps) = self.segments.get(&seg.id) else {
+                continue;
+            };
+            for sref in seg.range(..) {
+                let Some(formula) = sps.formulas.get(&sref.address()) else {
+                    continue;
+                };
                 println!(
                     "{}: {}",
                     as_str(nset.statement_name(&sref)),
