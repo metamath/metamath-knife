@@ -163,6 +163,12 @@ pub(crate) struct SiblingIter<'a, TreeItem> {
     current_id: Option<NodeId>,
 }
 
+impl<TreeItem> SiblingIter<'_, TreeItem> {
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.current_id.is_none()
+    }
+}
+
 impl<TreeItem> Iterator for SiblingIter<'_, TreeItem> {
     type Item = NodeId;
 

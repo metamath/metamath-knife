@@ -82,6 +82,13 @@ pub trait ProofBuilder {
     /// The hyp gathering type
     type Accum: Default;
 
+    /// If this returns `false`, `build` may not be passed valid information in `pool` and `expr`.
+    /// This is useful if the information is difficult to obtain. The function should not change
+    /// in value across a proof building operation and the result may be cached by the producer.
+    fn needs_constant(&self) -> bool {
+        true
+    }
+
     /// Add a new hyp to the accumulation type
     fn push(&mut self, hyps: &mut Self::Accum, hyp: Self::Item);
 
@@ -102,6 +109,10 @@ pub trait ProofBuilder {
 impl ProofBuilder for () {
     type Item = ();
     type Accum = ();
+
+    fn needs_constant(&self) -> bool {
+        false
+    }
 
     fn push(&mut self, (): &mut (), (): ()) {}
 

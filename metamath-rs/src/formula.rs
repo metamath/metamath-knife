@@ -519,23 +519,6 @@ impl<'a> FormulaRef<'a> {
         f
     }
 
-    /// Returns a copy of this formula with a new root
-    /// (in the same tree)
-    fn to_rerooted(self, new_root: NodeId) -> Formula {
-        Formula {
-            root: new_root,
-            tree: self.formula.tree.clone(),
-            typecode: self.compute_typecode_at(new_root),
-            variables: self.formula.variables.clone(),
-        }
-    }
-
-    /// Computes the typecode of the given node
-    /// according to the corresponding statement
-    fn compute_typecode_at(&self, node_id: NodeId) -> TypeCode {
-        self.db.label_typecode(self.formula.tree[node_id])
-    }
-
     /// Convert this formula into an s-expression string.
     #[must_use]
     pub fn as_sexpr(&self) -> String {
@@ -623,51 +606,88 @@ impl<'a> FormulaRef<'a> {
     /// and returns the index of that `ProofTree` within `arr`.
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         self,
-        stack_buffer: &mut Vec<u8>,
         arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
     ) -> I {
-        self.sub_build_syntax_proof(self.root, stack_buffer, arr)
+        let nset = self.db.name_result();
+        if arr.needs_constant() {
+            let scope = self.db.scope_result();
+            Self::sub_build_syntax_proof_with_constant(
+                nset,
+                scope,
+                &self.tree,
+                self.root,
+                &mut vec![],
+                arr,
+            )
+        } else {
+            Self::sub_build_syntax_proof_no_constant(nset, &self.tree, self.root, arr)
+        }
     }
 
     /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
     /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
-    // Formulas children nodes are stored in the order of appearance of the variables
-    // in the formula, which is efficient when parsing or rendering the formula from
-    // or into a string of tokens. However, proofs require children nodes
-    // sorted in the order of mandatory floating hypotheses.
-    // This method performs this mapping.
-    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
-        self,
+    ///
+    /// This version of `build_syntax_proof` also constructs the expressions into `stack_buffer`
+    /// to pass to the [`ProofBuilder`], so it has to traverse the tree in textual order instead
+    /// of postorder, even though it yields values to the [`ProofBuilder`] in postorder.
+    fn sub_build_syntax_proof_with_constant<I: Copy, A: Default + FromIterator<I>>(
+        nset: &Nameset,
+        scope: &ScopeResult,
+        tree: &Tree<Atom>,
         node_id: NodeId,
         stack_buffer: &mut Vec<u8>,
         arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
     ) -> I {
-        let nset = self.db.name_result();
-
-        let token = nset.atom_name(self.tree[node_id]);
+        let token = nset.atom_name(tree[node_id]);
+        let frame = scope.get(token).unwrap();
         let address = nset.lookup_label(token).unwrap().address;
-        let frame = self.db.scope_result().get(token).unwrap();
-        let children_hyps = self
-            .tree
+        let mut results = vec![None::<I>; frame.hypotheses.len()];
+        let children = tree.children_iter(node_id);
+        let tos = stack_buffer.len();
+        if children.is_empty() {
+            for part in &frame.target.tail {
+                fast_extend(stack_buffer, &frame.const_pool[part.prefix.clone()]);
+                fast_extend(stack_buffer, nset.atom_name(frame.var_list[part.var]));
+                *stack_buffer.last_mut().unwrap() |= 0x80;
+            }
+        } else {
+            for part in &frame.target.tail {
+                fast_extend(stack_buffer, &frame.const_pool[part.prefix.clone()]);
+                let i = (frame.hypotheses.iter())
+                    .position(|hyp| matches!(*hyp, Hyp::Floating(_, j, _) if j == part.var))
+                    .unwrap();
+                let child = children.clone().nth(i).unwrap();
+                results[i] = Some(Self::sub_build_syntax_proof_with_constant(
+                    nset,
+                    scope,
+                    tree,
+                    child,
+                    stack_buffer,
+                    arr,
+                ));
+            }
+        }
+        fast_extend(stack_buffer, &frame.const_pool[frame.target.rump.clone()]);
+        let n_tos = stack_buffer.len();
+        let hyps = results.into_iter().map(|i| i.unwrap()).collect();
+        arr.build(address, hyps, stack_buffer, tos..n_tos)
+    }
+
+    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
+    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
+    fn sub_build_syntax_proof_no_constant<I: Copy, A: Default + FromIterator<I>>(
+        nset: &Nameset,
+        tree: &Tree<Atom>,
+        node_id: NodeId,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+    ) -> I {
+        let token = nset.atom_name(tree[node_id]);
+        let address = nset.lookup_label(token).unwrap().address;
+        let hyps = tree
             .children_iter(node_id)
-            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr))
-            .collect::<Box<[I]>>();
-        let hyps = frame
-            .hypotheses
-            .iter()
-            .filter_map(|hyp| {
-                if let Hyp::Floating(_sa, index, _) = hyp {
-                    Some(children_hyps[*index])
-                } else {
-                    None
-                }
-            })
+            .map(|s_id| Self::sub_build_syntax_proof_no_constant(nset, tree, s_id, arr))
             .collect();
-        let range = self
-            .to_rerooted(node_id)
-            .as_ref(self.db)
-            .append_to_stack_buffer(stack_buffer);
-        arr.build(address, hyps, stack_buffer, range)
+        arr.build(address, hyps, &[], 0..0)
     }
 }
 
