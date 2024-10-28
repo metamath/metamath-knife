@@ -1705,13 +1705,14 @@ impl StmtParse {
 
     /// Check that printing parsed statements gives back the original formulas
     // TODO(tirix): this could be parallelized
-    pub(crate) fn verify(&self, db: &Database) -> Result<(), (StatementAddress, Diagnostic)> {
+    pub(crate) fn verify(&self, db: &Database) -> Vec<(StatementAddress, Diagnostic)> {
         let sset = db.parse_result();
         let nset = db.name_result();
+        let mut diags = vec![];
         for sps in self.segments.values() {
             for (&sa, formula) in &sps.formulas {
                 let sref = sset.statement(sa);
-                let math_iter = sref.math_iter().flat_map(|token| {
+                let math_iter = sref.math_iter().skip(1).flat_map(|token| {
                     nset.lookup_symbol(token.slice)
                         .ok_or_else(|| {
                             (
@@ -1723,11 +1724,11 @@ impl StmtParse {
                 });
                 let fmla_iter = formula.as_ref(db).iter();
                 if math_iter.ne(fmla_iter) {
-                    return Err((sa, Diagnostic::FormulaVerificationFailed));
+                    diags.push((sa, Diagnostic::FormulaVerificationFailed));
                 }
             }
         }
-        Ok(())
+        diags
     }
 
     /// Writes down all formulas
