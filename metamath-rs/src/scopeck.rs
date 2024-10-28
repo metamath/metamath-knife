@@ -30,7 +30,7 @@
 
 use crate::bit_set::Bitset;
 use crate::diag::Diagnostic;
-use crate::nameck::{Atom, NameReader, NameUsage, Nameset};
+use crate::nameck::{Atom, DvId, NameReader, NameUsage, Nameset};
 use crate::segment::{Comparer, Segment, SegmentOrder, SegmentRef};
 use crate::segment_set::SegmentSet;
 use crate::statement::{
@@ -267,6 +267,9 @@ struct ScopeState<'a> {
     nameset: &'a Nameset,
     /// Name reader, tracks labels and math symbols used in this segment.
     gnames: NameReader<'a>,
+    /// Current position in `nameset.dv_info`; global `$d` statements before this index are
+    /// in effect at this point.
+    global_dv_pos: DvId,
     /// Local `$v` statements in effect at this point.
     local_vars: HashMap<Token, Vec<LocalVarInfo>>,
     /// Local `$f` statements in effect at this point.
@@ -609,7 +612,7 @@ fn construct_full_frame<'a>(
     // any variables added for DV are not mandatory
     iframe.mandatory_count = iframe.var_list.len();
 
-    for (_, vars) in state.gnames.lookup_global_dv() {
+    for (_, vars) in state.nameset.global_dv_before(state.global_dv_pos) {
         scan_dv(&mut iframe, vars)
     }
 
@@ -699,20 +702,22 @@ fn scope_check_dv<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
         }
     }
 
-    if bad {
-        return;
-    }
-
     // we need to do validity checking on global $d _somewhere_, and that
     // happens to be here, but the knowledge of the $d is handled by nameck
     // in that case and we need to not duplicate it
     if sref.in_group() {
-        // record the $d in our local storage, will be deleted in
-        // construct_full_frame when it's no longer in scope
-        state.local_dv.push(LocalDvInfo {
-            valid: sref.scope_range(),
-            vars,
-        });
+        if !bad {
+            // record the $d in our local storage, will be deleted in
+            // construct_full_frame when it's no longer in scope
+            state.local_dv.push(LocalDvInfo {
+                valid: sref.scope_range(),
+                vars,
+            });
+        }
+    } else {
+        // Note, unlike the local case this will use the DV anyway if it has diagnostics...
+        // we have to keep moving the pointer forward or the count will get messed up
+        state.global_dv_pos.0 += 1;
     }
 }
 
@@ -897,6 +902,7 @@ fn scope_check_single(
         order: &sset.order,
         nameset: names,
         gnames: NameReader::new(names),
+        global_dv_pos: names.global_dv_initial(seg.id),
         local_vars: HashMap::default(),
         local_floats: HashMap::default(),
         local_dv: Vec::new(),
