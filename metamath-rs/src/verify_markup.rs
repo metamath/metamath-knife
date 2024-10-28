@@ -516,14 +516,18 @@ fn verify_markup_comment(
     }
 }
 
-/// A parsed bibliography file. A bibliography file is nothing more than an HTML
+/// A parsed bibliography file.
+///
+/// A bibliography file is nothing more than an HTML
 /// file with some anchors (`<A NAME="foo">`) in it; the anchor names are
 /// scraped so that we can cross reference them against bibliography tags
 /// `[foo]` appearing in comments.
 #[derive(Debug)]
 pub struct Bibliography(HashSet<Box<[u8]>>);
 
-/// A pair of bibliography files. This is used to support `set.mm`, which
+/// A pair of bibliography files.
+///
+/// This is used to support `set.mm`, which
 /// contains two separate-ish databases inside one metamath file. Bibliography
 /// references in the first part of the file refer to the
 /// [`html_bibliography`][crate::typesetting::TypesettingData::html_bibliography],

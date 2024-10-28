@@ -59,7 +59,9 @@ enum PreparedStep<'a, D> {
 }
 use self::PreparedStep::*;
 
-/// An entry on the stack is notionally just a string of math symbols, but DV
+/// An entry on the stack.
+///
+/// This is notionally just a string of math symbols, but DV
 /// checking is faster if we track disjoint variables as a bit vector, and the
 /// typecode is not realignable so it can be profitably separated.
 ///

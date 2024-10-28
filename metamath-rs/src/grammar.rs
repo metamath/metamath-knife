@@ -1094,11 +1094,11 @@ impl Grammar {
                             // syntax '|-' as 'wff';
                             self.provable_type = nset
                                 .lookup_symbol(&ty.value(buf))
-                                .ok_or((address, undefined_cmd(ty, buf)))?
+                                .ok_or_else(|| (address, undefined_cmd(ty, buf)))?
                                 .atom;
                             self.typecodes.push(
                                 nset.lookup_symbol(&code.value(buf))
-                                    .ok_or((address, undefined_cmd(code, buf)))?
+                                    .ok_or_else(|| (address, undefined_cmd(code, buf)))?
                                     .atom,
                             );
                         }
@@ -1107,7 +1107,7 @@ impl Grammar {
                                 // syntax 'setvar';
                                 self.typecodes.push(
                                     nset.lookup_symbol(&ty.value(buf))
-                                        .ok_or((address, undefined_cmd(ty, buf)))?
+                                        .ok_or_else(|| (address, undefined_cmd(ty, buf)))?
                                         .atom,
                                 );
                             }
