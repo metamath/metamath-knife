@@ -353,6 +353,10 @@ impl ProofBuilder for ProofTreeArray {
     type Item = usize;
     type Accum = Vec<usize>;
 
+    fn needs_constant(&self) -> bool {
+        self.exprs.is_some()
+    }
+
     fn push(&mut self, hyps: &mut Vec<usize>, hyp: usize) {
         hyps.push(hyp);
     }
