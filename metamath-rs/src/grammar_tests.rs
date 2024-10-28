@@ -252,7 +252,7 @@ fn test_db_43_formula() {
         let formula = stmt_parse.get_formula(&sref).unwrap().as_ref(&db);
         assert_eq!(
             formula.as_sexpr(),
-            "(weq (cab vx (wa (wcel (cv vx) cA) wph)) cB)"
+            "(weq (cab (wa (wcel (cv vx) cA) wph) vx) cB)"
         );
     }
 }
@@ -312,7 +312,7 @@ fn test_garden_path_3() {
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert_eq!(
         formula.as_ref(&db).as_sexpr(),
-        "(weq cA (copab vx vy cB (weq cC cD)))"
+        "(weq cA (copab (weq cC cD) cB vx vy))"
     );
 }
 
