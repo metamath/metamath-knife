@@ -21,7 +21,10 @@ use crate::as_str;
 use crate::bit_set::Bitset;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
+use crate::scopeck::ExprFragment;
+use crate::scopeck::Frame;
 use crate::scopeck::Hyp;
+use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
@@ -359,6 +362,7 @@ impl Formula {
             children_count,
             0,
             self.is_variable(node_id),
+            |_| {},
         );
     }
 
@@ -392,6 +396,7 @@ impl Formula {
                 children_count,
                 0,
                 self.is_variable(node_id),
+                |_| {},
             );
         }
     }
@@ -408,6 +413,7 @@ impl Formula {
             children_count,
             0,
             self.is_variable(node_id),
+            |_| {},
         );
     }
 }
@@ -507,6 +513,7 @@ impl<'a> FormulaRef<'a> {
             stack: vec![],
             sset: self.db.parse_result(),
             nset: self.db.name_result(),
+            scope: self.db.scope_result(),
         };
         f.step_into(self.root);
         f
@@ -703,28 +710,36 @@ impl<'a> Debug for SubFormulaRef<'a> {
 #[derive(Debug)]
 pub struct Flatten<'a> {
     formula: &'a Formula,
-    stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Label>>)>,
+    #[allow(clippy::type_complexity)]
+    stack: Vec<(
+        TokenIter<'a>,
+        Option<(
+            &'a Frame,
+            std::slice::Iter<'a, ExprFragment>,
+            SiblingIter<'a, Label>,
+        )>,
+    )>,
+    scope: &'a ScopeResult,
     sset: &'a SegmentSet,
     nset: &'a Nameset,
 }
 
 impl<'a> Flatten<'a> {
     fn step_into(&mut self, node_id: NodeId) {
-        let label = self.formula.tree[node_id];
-        let sref = self.sset.statement(
-            self.nset
-                .lookup_label(self.nset.atom_name(label))
-                .unwrap()
-                .address,
-        );
+        let atom = self.nset.atom_name(self.formula.tree[node_id]);
+        let sref = self
+            .sset
+            .statement(self.nset.lookup_label(atom).unwrap().address);
         let mut math_iter = sref.math_iter();
+        let frame = self.scope.get(atom).unwrap();
+        let var_iter = frame.target.tail.iter();
         math_iter.next(); // Always skip the typecode token.
-        if self.formula.tree.has_children(node_id) {
-            self.stack
-                .push((math_iter, Some(self.formula.tree.children_iter(node_id))));
+        let children_iter = if self.formula.tree.has_children(node_id) {
+            Some((frame, var_iter, self.formula.tree.children_iter(node_id)))
         } else {
-            self.stack.push((math_iter, None));
+            None
         };
+        self.stack.push((math_iter, children_iter));
     }
 }
 
@@ -732,24 +747,22 @@ impl<'a> Iterator for Flatten<'a> {
     type Item = Symbol;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.stack.is_empty() {
-            return None;
-        }
-        let stack_end = self.stack.len() - 1;
-        let (ref mut math_iter, ref mut sibling_iter) = self.stack[stack_end];
+        let (math_iter, children) = self.stack.last_mut()?;
         if let Some(token) = math_iter.next() {
             // Continue with next token of this syntax
             let symbol = self.nset.lookup_symbol(token.slice).unwrap();
-            match (sibling_iter, symbol.stype) {
+            match (children, symbol.stype) {
                 (_, SymbolType::Constant) | (None, SymbolType::Variable) => Some(symbol.atom),
-                (Some(ref mut iter), SymbolType::Variable) => {
+                (Some((frame, var_iter, children_iter)), SymbolType::Variable) => {
                     // Variable : push into the next child
-                    if let Some(next_child_id) = iter.next() {
-                        self.step_into(next_child_id);
-                        self.next()
-                    } else {
-                        panic!("Empty formula!");
+                    let var = var_iter.next().expect("not enough variables").var;
+                    for (child, hyp) in children_iter.clone().zip(&frame.hypotheses) {
+                        if matches!(*hyp, Hyp::Floating(_, i, _) if i == var) {
+                            self.step_into(child);
+                            return self.next();
+                        }
                     }
+                    panic!("Empty formula!");
                 }
             }
         } else {
@@ -805,11 +818,19 @@ impl FormulaBuilder {
 
     /// Every REDUCE pops `var_count` subformula items on the stack,
     /// and pushes one single new item, with the popped subformulas as children
-    pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {
+    pub(crate) fn reduce(
+        &mut self,
+        label: Label,
+        var_count: u8,
+        offset: u8,
+        is_variable: bool,
+        reorder: impl FnOnce(&mut [NodeId]),
+    ) {
         assert!(self.stack.len() >= (var_count + offset).into());
         let reduce_start = self.stack.len().saturating_sub((var_count + offset).into());
         let reduce_end = self.stack.len().saturating_sub(offset.into());
         let new_node_id = {
+            reorder(&mut self.stack[reduce_start..reduce_end]);
             let children = self.stack.drain(reduce_start..reduce_end);
             self.tree.add_node(label, children.as_slice())
         };
