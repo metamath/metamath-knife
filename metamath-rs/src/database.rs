@@ -958,9 +958,10 @@ impl Database {
 
     /// Verify that printing the formulas of this database gives back the original formulas.
     /// Requires: [`Database::name_pass`], [`Database::stmt_parse_pass`]
-    pub fn verify_parse_stmt(&self) {
+    #[must_use]
+    pub fn verify_parse_stmt(&self) -> Vec<(StatementAddress, Diagnostic)> {
         time(&self.options, "verify_parse_stmt", || {
-            drop(self.stmt_parse_result().verify(self));
+            self.stmt_parse_result().verify(self)
         })
     }
 

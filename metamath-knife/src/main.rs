@@ -161,11 +161,6 @@ fn main() {
             db.typesetting_pass();
         }
 
-        if cli.verify_parse_stmt {
-            db.stmt_parse_pass();
-            db.verify_parse_stmt();
-        }
-
         if cli.verify_usage {
             db.verify_usage_pass();
         }
@@ -224,6 +219,14 @@ fn main() {
         let mut count = db
             .render_diags(diags, |msg| println!("{}", r.render(msg)))
             .len();
+
+        if cli.verify_parse_stmt {
+            db.stmt_parse_pass();
+            let diags = db.verify_parse_stmt();
+            count += db
+                .render_diags(diags, |msg| println!("{}", r.render(msg)))
+                .len();
+        }
 
         #[cfg(feature = "verify_markup")]
         if cli.verify_markup {
