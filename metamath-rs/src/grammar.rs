@@ -1741,7 +1741,7 @@ impl StmtParse {
                 println!(
                     "{}: {}",
                     as_str(nset.statement_name(&sref)),
-                    formula.as_ref(db)
+                    formula.as_ref(db).as_sexpr()
                 );
             }
         }
