@@ -801,8 +801,8 @@ fn get_heading_name(buffer: &[u8], pos: FilePos) -> TokenPtr<'_> {
 }
 
 /// Extract the parser commands out of a $t or $j special comment
-fn commands(buffer: &[u8], ch: u8, pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
-    let mut iter = CommandIter {
+pub(crate) fn commands(buffer: &[u8], ch: u8, pos: FilePos) -> Result<CommandIter<'_>, Diagnostic> {
+    let mut iter: CommandIter<'_> = CommandIter {
         buffer,
         index: pos as usize,
     };
@@ -815,7 +815,7 @@ fn commands(buffer: &[u8], ch: u8, pos: FilePos) -> Result<CommandIter<'_>, Diag
     Ok(iter)
 }
 
-struct CommandIter<'a> {
+pub(crate) struct CommandIter<'a> {
     buffer: &'a [u8],
     index: usize,
 }
@@ -904,6 +904,12 @@ impl Iterator for CommandIter<'_> {
                         }
                     }
                 }
+                if self.has_more()
+                    && !matches!(self.next_char(), b' ' | b'\t' | b'\n' | b'\r' | b';')
+                {
+                    let cspan = Span::new(token_start, self.index);
+                    return Some(Err(Diagnostic::MissingSpaceAfterCommandToken(cspan)));
+                }
                 CommandToken::String(Span::new(token_start, self.index - 1))
             } else {
                 let token_start = self.index;
@@ -920,7 +926,11 @@ impl Iterator for CommandIter<'_> {
             if let Err(diag) = self.skip_white_spaces() {
                 return Some(Err(diag));
             }
-            if self.has_more() && self.next_char() == b';' {
+            if !self.has_more() {
+                let cspan = Span::new(command_start, self.index);
+                return Some(Err(Diagnostic::UnclosedCommand(cspan)));
+            }
+            if self.next_char() == b';' {
                 // Stop if unquoted semicolon $)
                 self.index += 1;
                 return Some(Ok((Span::new(command_start, self.index), command)));
