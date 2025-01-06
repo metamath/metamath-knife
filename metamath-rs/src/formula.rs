@@ -138,7 +138,7 @@ pub struct SubstitutionsRef<'a> {
     substitutions: &'a Substitutions,
 }
 
-impl<'a> std::ops::Deref for SubstitutionsRef<'a> {
+impl std::ops::Deref for SubstitutionsRef<'_> {
     type Target = Substitutions;
 
     fn deref(&self) -> &Self::Target {
@@ -146,7 +146,7 @@ impl<'a> std::ops::Deref for SubstitutionsRef<'a> {
     }
 }
 
-impl<'a> Debug for SubstitutionsRef<'a> {
+impl Debug for SubstitutionsRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dm = f.debug_map();
         for (label, formula) in &self.substitutions.0 {
@@ -428,7 +428,7 @@ pub struct LabelIter<'a> {
     root: Option<NodeId>,
 }
 
-impl<'a> LabelIter<'a> {
+impl LabelIter<'_> {
     #[inline]
     fn visit_children(&mut self, node_id: NodeId) -> (Label, bool) {
         self.stack.push(self.formula.tree.children_iter(node_id));
@@ -439,7 +439,7 @@ impl<'a> LabelIter<'a> {
     }
 }
 
-impl<'a> Iterator for LabelIter<'a> {
+impl Iterator for LabelIter<'_> {
     type Item = (Label, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -489,7 +489,7 @@ pub struct FormulaRef<'a> {
     formula: &'a Formula,
 }
 
-impl<'a> std::ops::Deref for FormulaRef<'a> {
+impl std::ops::Deref for FormulaRef<'_> {
     type Target = Formula;
 
     fn deref(&self) -> &Self::Target {
@@ -677,7 +677,7 @@ struct SubFormulaRef<'a> {
     f_ref: FormulaRef<'a>,
 }
 
-impl<'a> Debug for SubFormulaRef<'a> {
+impl Debug for SubFormulaRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let label_name = as_str(
             self.f_ref
@@ -708,7 +708,7 @@ pub struct Flatten<'a> {
     nset: &'a Nameset,
 }
 
-impl<'a> Flatten<'a> {
+impl Flatten<'_> {
     fn step_into(&mut self, node_id: NodeId) {
         let label = self.formula.tree[node_id];
         let sref = self.sset.statement(
@@ -728,7 +728,7 @@ impl<'a> Flatten<'a> {
     }
 }
 
-impl<'a> Iterator for Flatten<'a> {
+impl Iterator for Flatten<'_> {
     type Item = Symbol;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -762,7 +762,7 @@ impl<'a> Iterator for Flatten<'a> {
     // TODO(tirix): provide an implementation for size_hint?
 }
 
-impl<'a> Display for FormulaRef<'a> {
+impl Display for FormulaRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let nset = &**self.db.name_result();
         write!(f, "{}", as_str(nset.atom_name(self.typecode)))?;
@@ -773,7 +773,7 @@ impl<'a> Display for FormulaRef<'a> {
     }
 }
 
-impl<'a> Debug for FormulaRef<'a> {
+impl Debug for FormulaRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         SubFormulaRef {
             node_id: self.formula.root,

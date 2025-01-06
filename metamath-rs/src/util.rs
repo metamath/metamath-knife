@@ -20,7 +20,7 @@ pub(crate) fn fast_clear<T: Copy>(vec: &mut Vec<T>) {
 
 // emprically, *most* copies in the verifier where fast_extend and extend_from_within
 // are used are 1-2 bytes
-unsafe fn short_copy<T>(src: *const T, dst: *mut T, count: usize) {
+const unsafe fn short_copy<T>(src: *const T, dst: *mut T, count: usize) {
     match count {
         1 => ptr::write(dst, ptr::read(src)),
         2 => ptr::write(dst.cast::<[T; 2]>(), ptr::read(src.cast())),

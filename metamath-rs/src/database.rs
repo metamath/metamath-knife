@@ -530,7 +530,7 @@ impl Database {
     /// Panics if [`Database::name_pass`] was not previously called.
     #[inline]
     #[must_use]
-    pub fn name_result(&self) -> &Arc<Nameset> {
+    pub const fn name_result(&self) -> &Arc<Nameset> {
         self.nameset.as_ref().expect(
             "The database has not run `name_pass()`. Please ensure it is run before calling depending methods."
         )
@@ -574,7 +574,7 @@ impl Database {
     /// properties) can be obtained from this object.
     #[inline]
     #[must_use]
-    pub fn scope_result(&self) -> &Arc<ScopeResult> {
+    pub const fn scope_result(&self) -> &Arc<ScopeResult> {
         self.try_scope_result().expect(
             "The database has not run `scope_pass()`. Please ensure it is run before calling depending methods."
         )
@@ -619,7 +619,7 @@ impl Database {
     /// than error diagnostics.  It does not save any parsed proof data.
     #[inline]
     #[must_use]
-    pub fn verify_result(&self) -> &Arc<VerifyResult> {
+    pub const fn verify_result(&self) -> &Arc<VerifyResult> {
         self.try_verify_result().expect(
             "The database has not run `verify_pass()`. Please ensure it is run before calling depending methods."
         )
@@ -675,7 +675,7 @@ impl Database {
     /// Panics if [`Database::typesetting_pass`] was not previously called.
     #[inline]
     #[must_use]
-    pub fn typesetting_result(&self) -> &Arc<TypesettingData> {
+    pub const fn typesetting_result(&self) -> &Arc<TypesettingData> {
         self.try_typesetting_result().expect(
             "The database has not run `typesetting_pass()`. Please ensure it is run before calling depending methods."
         )
@@ -704,7 +704,7 @@ impl Database {
     /// Panics if [`Database::outline_pass`] was not previously called.
     #[inline]
     #[must_use]
-    pub fn outline_result(&self) -> &Arc<Outline> {
+    pub const fn outline_result(&self) -> &Arc<Outline> {
         self.try_outline_result().expect(
             "The database has not run `outline_pass()`. Please ensure it is run before calling depending methods."
         )
@@ -734,7 +734,7 @@ impl Database {
     /// Panics if [`Database::grammar_pass`] was not previously called.
     #[inline]
     #[must_use]
-    pub fn grammar_result(&self) -> &Arc<Grammar> {
+    pub const fn grammar_result(&self) -> &Arc<Grammar> {
         self.try_grammar_result().expect(
             "The database has not run `grammar_pass()`. Please ensure it is run before calling depending methods."
         )
@@ -770,7 +770,7 @@ impl Database {
     /// Panics if [`Database::stmt_parse_pass`] was not previously called.
     #[inline]
     #[must_use]
-    pub fn stmt_parse_result(&self) -> &Arc<StmtParse> {
+    pub const fn stmt_parse_result(&self) -> &Arc<StmtParse> {
         self.try_stmt_parse_result().expect(
             "The database has not run `stmt_parse_pass()`. Please ensure it is run before calling depending methods."
         )

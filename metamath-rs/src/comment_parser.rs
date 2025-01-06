@@ -344,7 +344,7 @@ impl<'a> CommentParser<'a> {
     }
 }
 
-impl<'a> Iterator for CommentParser<'a> {
+impl Iterator for CommentParser<'_> {
     type Item = CommentItem;
 
     #[allow(clippy::cognitive_complexity)]
@@ -555,7 +555,7 @@ impl<'a> ParentheticalIter<'a> {
     }
 }
 
-impl<'a> Iterator for ParentheticalIter<'a> {
+impl Iterator for ParentheticalIter<'_> {
     type Item = (Span, Parenthetical);
 
     fn next(&mut self) -> Option<Self::Item> {
