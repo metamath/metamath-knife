@@ -314,7 +314,7 @@ pub struct NormalIter<'a> {
     stack: Vec<(usize, usize)>,
 }
 
-impl<'a> Iterator for NormalIter<'a> {
+impl Iterator for NormalIter<'_> {
     type Item = RPNStep;
 
     fn next(&mut self) -> Option<RPNStep> {
@@ -495,7 +495,7 @@ struct ProofTreePrinterImpl<'a, 'b> {
     backref_max: usize,
 }
 
-impl<'a, 'b> ProofTreePrinterImpl<'a, 'b> {
+impl ProofTreePrinterImpl<'_, '_> {
     fn write_word(&mut self, word: &str) -> fmt::Result {
         let len = word.len() as u16;
         if self.chr + len < self.p.line_width {
@@ -793,7 +793,7 @@ fn knapsack_fit(items: &[usize], values: &[u16], mut size: usize, included: &mut
     }
 }
 
-impl<'a> fmt::Display for ProofTreePrinter<'a> {
+impl fmt::Display for ProofTreePrinter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut indent = "\n".to_string();
         for _ in 0..self.indent {

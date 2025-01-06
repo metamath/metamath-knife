@@ -172,7 +172,7 @@ pub struct BitsetIter<'a> {
     buffer: slice::Iter<'a, usize>,
 }
 
-impl<'a> Iterator for BitsetIter<'a> {
+impl Iterator for BitsetIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {

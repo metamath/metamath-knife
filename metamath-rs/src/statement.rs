@@ -765,7 +765,7 @@ impl<'a> Iterator for StatementIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for StatementIter<'a> {
+impl DoubleEndedIterator for StatementIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.slice_iter.next_back().map(|st_ref| StatementRef {
             segment: self.segment,
@@ -775,7 +775,7 @@ impl<'a> DoubleEndedIterator for StatementIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for StatementIter<'a> {
+impl ExactSizeIterator for StatementIter<'_> {
     fn len(&self) -> usize {
         self.slice_iter.len()
     }
@@ -801,7 +801,7 @@ pub struct TokenRef<'a> {
     pub address: TokenAddress,
 }
 
-impl<'a> Deref for TokenRef<'a> {
+impl Deref for TokenRef<'_> {
     type Target = [u8];
 
     #[inline]
@@ -810,7 +810,7 @@ impl<'a> Deref for TokenRef<'a> {
     }
 }
 
-impl<'a> TokenRef<'a> {
+impl TokenRef<'_> {
     /// Get the local index of the token within the statement under iteration.
     #[must_use]
     pub const fn index(self) -> TokenIndex {

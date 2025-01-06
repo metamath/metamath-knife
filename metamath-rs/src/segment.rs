@@ -102,7 +102,7 @@ impl SegmentOrder {
 #[derive(Clone)]
 pub(crate) struct SegmentIter<'a>(std::slice::Iter<'a, SegmentId>);
 
-impl<'a> Iterator for SegmentIter<'a> {
+impl Iterator for SegmentIter<'_> {
     type Item = SegmentId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -114,13 +114,13 @@ impl<'a> Iterator for SegmentIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for SegmentIter<'a> {
+impl ExactSizeIterator for SegmentIter<'_> {
     fn len(&self) -> usize {
         self.0.len()
     }
 }
 
-impl<'a> DoubleEndedIterator for SegmentIter<'a> {
+impl DoubleEndedIterator for SegmentIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.0.next_back().copied()
     }
@@ -183,7 +183,7 @@ impl Comparer<TokenAddress> for Database {
     }
 }
 
-impl<'a, T, C: Comparer<T>> Comparer<T> for &'a C {
+impl<T, C: Comparer<T>> Comparer<T> for &'_ C {
     fn cmp(&self, left: &T, right: &T) -> Ordering {
         (*self).cmp(left, right)
     }
@@ -254,7 +254,7 @@ pub struct SegmentRef<'a> {
     pub id: SegmentId,
 }
 
-impl<'a> Deref for SegmentRef<'a> {
+impl Deref for SegmentRef<'_> {
     type Target = Arc<Segment>;
 
     #[inline]
