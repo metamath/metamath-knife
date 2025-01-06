@@ -104,7 +104,7 @@ impl<TreeItem> Tree<TreeItem> {
     /// Debug only, dumps the internal structure of the tree.
     pub(crate) fn dump<'a, D>(&'a self, display: D)
     where
-        D: Fn(&'a TreeItem) -> &str,
+        D: Fn(&'a TreeItem) -> &'a str,
     {
         for node in &self.nodes {
             println!(
@@ -187,7 +187,7 @@ impl<'a, TreeItem> Iterator for NodeIter<'a, TreeItem> {
     }
 }
 
-impl<'a, TreeItem> ExactSizeIterator for NodeIter<'a, TreeItem> {
+impl<TreeItem> ExactSizeIterator for NodeIter<'_, TreeItem> {
     fn len(&self) -> usize {
         self.0.len()
     }

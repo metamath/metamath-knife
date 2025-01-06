@@ -114,7 +114,7 @@ enum CommentType {
     Heading(HeadingLevel),
 }
 
-impl<'a> Scanner<'a> {
+impl Scanner<'_> {
     /// Record a diagnostic against the nascent statement
     fn diag(&mut self, diag: Diagnostic) {
         self.diagnostics.push((self.statement_index, diag));
