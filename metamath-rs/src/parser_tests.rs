@@ -1,8 +1,9 @@
 use crate::database::Database;
 use crate::diag::Diagnostic;
+use crate::parser::commands;
 use crate::segment::{Comparer, SegmentOrder};
 use crate::statement::{Span, StatementAddress, TokenRef, NO_STATEMENT};
-use crate::StatementType;
+use crate::{as_str, StatementType};
 use std::cmp::Ordering;
 
 #[test]
@@ -149,4 +150,183 @@ parse_test!(
     test_invalid_del,
     b"$c X Y\x7F $.",
     [(0, Diagnostic::BadCharacter(6, 0x7F))]
+);
+
+parse_test!(
+    test_j_valid,
+    b"$( $j usage 'exel' avoids 'ax-5' 'ax-7' 'ax-8' 'ax-9' 'ax-10' 'ax-11'
+       'ax-12' 'ax-13' 'ax-ext' 'ax-sep' 'ax-nul' 'ax-pow'; $)",
+    []
+);
+
+parse_test!(
+    test_j_missing_closing_quote,
+    b"$( $j usage 'exel $)",
+    [(
+        0,
+        Diagnostic::UnclosedCommandString(Span { start: 13, end: 20 })
+    )]
+);
+
+parse_test!(
+    test_j_unclosed_comment,
+    b"$( $j usage /* $)",
+    [(
+        0,
+        Diagnostic::UnclosedCommandComment(Span { start: 12, end: 17 })
+    )]
+);
+
+parse_test!(
+    test_j_missing_whitespace,
+    b"$( $j usage 'exel' avoids 'ax-5' 'ax-7' 'ax-8' 'ax-9' 'ax-10' 'ax-11'
+       'ax-12' 'ax-13''ax-ext' 'ax-sep' 'ax-nul' 'ax-pow'; $)",
+    []
+);
+
+macro_rules! parse_command_test {
+    ($name:ident, $text:expr, $commands:expr) => {
+        #[test]
+        fn $name() {
+            let commands = commands($text, b'j', 0);
+            let parsed = commands.and_then(|iter| {
+                Ok(iter
+                    .map(|command| {
+                        command.and_then(|(span, tokens)| {
+                            Ok((
+                                span,
+                                tokens
+                                    .into_iter()
+                                    .map(|token| as_str(&token.value($text)).to_owned())
+                                    .collect::<Vec<_>>(),
+                            ))
+                        })
+                    })
+                    .collect::<Vec<_>>())
+            });
+            let expected = Ok($commands
+                .into_iter()
+                .map(|item| {
+                    item.and_then(|(start, end, tokens)| {
+                        Ok((
+                            Span::new(start, end),
+                            tokens
+                                .into_iter()
+                                .map(|token| token.to_string())
+                                .collect::<Vec<_>>(),
+                        ))
+                    })
+                })
+                .collect::<Vec<_>>());
+            assert_eq!(parsed, expected);
+        }
+    };
+}
+
+parse_command_test!(
+    test_command_valid,
+    b"$( $j usage 'exel' avoids 'ax-5' 'ax-7' 'ax-8' 'ax-9' 'ax-10' 'ax-11'
+       'ax-12' 'ax-13' 'ax-ext' 'ax-sep' 'ax-nul' 'ax-pow'; $)",
+    [Ok((
+        6,
+        129,
+        [
+            "usage", "exel", "avoids", "ax-5", "ax-7", "ax-8", "ax-9", "ax-10", "ax-11", "ax-12",
+            "ax-13", "ax-ext", "ax-sep", "ax-nul", "ax-pow"
+        ]
+    ))]
+);
+
+parse_command_test!(
+    test_command_comment,
+    b"$( $j usage /* comment, may contain ; * / and ' - ignored */ 'exel' avoids 'ax-5'; $)",
+    [Ok((6, 82, ["usage", "exel", "avoids", "ax-5"]))]
+);
+
+parse_command_test!(
+    test_command_stop_at_end_tag,
+    b"$( $j usage 'exel' avoids 'ax-5'; $) Nothing is parsed here",
+    [Ok((6, 33, ["usage", "exel", "avoids", "ax-5"]))]
+);
+
+type NoCommandType = [Result<(usize, usize, [&'static str; 0]), Diagnostic>; 0];
+const NO_COMMANDS: NoCommandType = [];
+parse_command_test!(test_command_empty_list, b"$( $j $)", NO_COMMANDS);
+
+parse_command_test!(
+    test_command_more_commands,
+    b"$( $j
+            syntax 'wff';
+            syntax '|-' as 'wff';
+            unambiguous 'klr 5';
+        $)",
+    [
+        Ok((18, 31, vec!["syntax", "wff"])),
+        Ok((44, 65, vec!["syntax", "|-", "as", "wff"])),
+        Ok((78, 98, vec!["unambiguous", "klr 5"]))
+    ]
+);
+
+parse_command_test!(
+    test_command_missing_semicolon,
+    b"$( $j usage 'exel' avoids 'ax-5' $)",
+    [Err::<(usize, usize, Vec<&str>), Diagnostic>(
+        Diagnostic::UnclosedCommand(Span::new(6, 35))
+    )]
+);
+
+parse_command_test!(
+    test_command_double_quote_escape,
+    b"$( $j abc \"de\"\"f\" 'ghi'; $)",
+    [Ok((6, 24, ["abc", "de\"f", "ghi"]))]
+);
+
+parse_command_test!(
+    test_command_unclosed_comment,
+    b"$( $j usage /* unclosed comment",
+    [Err::<(usize, usize, Vec<&str>), Diagnostic>(
+        Diagnostic::UnclosedCommandComment(Span::new(12, 31))
+    )]
+);
+
+parse_command_test!(
+    test_command_missing_whitespace,
+    b"$( $j usage 'exel' avoids 'ax-5' 'ax-7' 'ax-8' 'ax-9' 'ax-10' 'ax-11'
+       'ax-12' 'ax-13''ax-ext' 'ax-sep' 'ax-nul' 'ax-pow'; $)",
+    [Ok((
+        6,
+        128,
+        [
+            "usage",
+            "exel",
+            "avoids",
+            "ax-5",
+            "ax-7",
+            "ax-8",
+            "ax-9",
+            "ax-10",
+            "ax-11",
+            "ax-12",
+            "ax-13'ax-ext",
+            "ax-sep",
+            "ax-nul",
+            "ax-pow"
+        ]
+    ))]
+);
+
+parse_command_test!(
+    test_command_missing_closing_quote,
+    b"$( $j usage 'exel' avoids 'ax-5' 'ax-7' 'ax-8' 'ax-9' 'ax-10 'ax-11'
+       'ax-12' 'ax-13' 'ax-ext' 'ax-sep' 'ax-nul' 'ax-pow'; $)",
+    [
+        Err::<(usize, usize, Vec<&str>), Diagnostic>(Diagnostic::MissingSpaceAfterCommandToken(
+            Span::new(55, 62)
+        )),
+        Ok((
+            62,
+            128,
+            vec!["ax-11'", "ax-12", "ax-13", "ax-ext", "ax-sep", "ax-nul", "ax-pow"]
+        ))
+    ]
 );

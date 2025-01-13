@@ -145,6 +145,7 @@ pub enum Diagnostic {
     MissingLabel,
     MissingMarkupDef([bool; 3], Span),
     MissingProof(Span),
+    MissingSpaceAfterCommandToken(Span),
     MMReservedLabel(Span),
     NestedComment(Span, Span),
     NotActiveSymbol(TokenIndex),
@@ -183,6 +184,7 @@ pub enum Diagnostic {
     UnclosedBeforeInclude(StatementIndex),
     UnclosedCommandComment(Span),
     UnclosedCommandString(Span),
+    UnclosedCommand(Span),
     UnclosedComment(Span),
     UnclosedHtml(u32, u32),
     UnclosedInclude,
@@ -734,6 +736,12 @@ impl Diagnostic {
                 stmt,
                 *math_end,
             )]),
+            MissingSpaceAfterCommandToken(span) => ("Missing space after command token".into(), vec![(
+                Level::Error,
+                "A quoted command token must be followed by a space or a semicolon (;)".into(),
+                stmt,
+                *span,
+            )]),
             MMReservedLabel(span) => ("Reserved label".into(), vec![(
                 Level::Warning,
                 "Labels beginning with 'mm' are reserved for Metamath file names".into(),
@@ -1014,6 +1022,12 @@ impl Diagnostic {
             UnclosedCommandString(span) => ("Unclosed string".into(), vec![(
                 Level::Error,
                 "A string must be closed with ' or \"".into(),
+                stmt,
+                *span,
+            )]),
+            UnclosedCommand(span) => ("Unclosed command".into(), vec![(
+                Level::Error,
+                "A command must be closed with a semicolon (;)".into(),
                 stmt,
                 *span,
             )]),

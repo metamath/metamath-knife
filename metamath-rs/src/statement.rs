@@ -362,7 +362,7 @@ impl CommandToken {
         let buf = span.as_ref(buf);
         if buf.contains(&quote) {
             let mut out = vec![];
-            unescape(span.as_ref(buf), &mut out, |c| quote == c);
+            unescape(buf, &mut out, |c| quote == c);
             out.into()
         } else {
             Cow::Borrowed(buf)
