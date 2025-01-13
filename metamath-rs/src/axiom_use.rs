@@ -52,6 +52,9 @@ impl<'a> UsagePass<'a> {
                 let mut diags = vec![];
                 for cmd in axioms {
                     let axiom = &*cmd.value(buf);
+                    if !axiom.starts_with(b"ax-") {
+                        continue;
+                    }
                     if let Some(index) = self.axioms.iter().position(|&x| x == axiom) {
                         if usage.has_bit(index) {
                             // TODO possibly research the usage "path" leading to this error.
@@ -61,6 +64,8 @@ impl<'a> UsagePass<'a> {
                                 axiom.into(),
                             ));
                         }
+                    } else {
+                        diags.push(Diagnostic::UnknownLabel(cmd.full_span()));
                     }
                 }
                 Err(diags)
@@ -72,8 +77,17 @@ impl<'a> UsagePass<'a> {
     /// Verify that all usage declarations are correct.
     fn verify_usage(&'a mut self, sset: &'a SegmentSet) {
         for sref in sset.segments(..) {
+            for stmt in sref.range(..) {
+                if stmt.statement_type() == StatementType::Axiom && stmt.label().starts_with(b"ax-")
+                {
+                    self.axioms.push(stmt.label());
+                }
+            }
+        }
+        for sref in sset.segments(..) {
             let mut j_commands: std::slice::Iter<'_, (i32, (crate::Span, Vec<CommandToken>))> =
                 sref.j_commands.iter();
+            let mut axiom_index = 0;
             for stmt in sref.range(..) {
                 match stmt.statement_type() {
                     StatementType::AdditionalInfoComment => {
@@ -110,8 +124,8 @@ impl<'a> UsagePass<'a> {
                         let label = stmt.label();
                         if label.starts_with(b"ax-") {
                             let mut usage = Bitset::new();
-                            usage.set_bit(self.axioms.len());
-                            self.axioms.push(label);
+                            usage.set_bit(axiom_index);
+                            axiom_index += 1;
                             self.axiom_use_map.insert(label, usage);
                         }
                     }
