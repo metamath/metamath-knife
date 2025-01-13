@@ -392,13 +392,13 @@ fn verify_markup_comment(
     fn ensure_space_before(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
         if i.checked_sub(1)
             .map(|j| buf[j])
-            .map_or(false, |c| !c.is_ascii_whitespace())
+            .is_some_and(|c| !c.is_ascii_whitespace())
         {
             diag(Diagnostic::MarkupNeedsWhitespace(i as u32))
         }
     }
     fn ensure_space_after(buf: &[u8], i: usize, diag: &mut impl FnMut(Diagnostic)) {
-        if buf.get(i + 1).map_or(false, |c| !c.is_ascii_whitespace()) {
+        if buf.get(i + 1).is_some_and(|c| !c.is_ascii_whitespace()) {
             diag(Diagnostic::MarkupNeedsWhitespace(i as u32))
         }
     }

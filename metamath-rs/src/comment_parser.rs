@@ -340,7 +340,7 @@ impl<'a> CommentParser<'a> {
             && self
                 .buf
                 .get(self.pos + 1)
-                .map_or(false, |c| CLOSING_PUNCTUATION.contains(c))
+                .is_some_and(|c| CLOSING_PUNCTUATION.contains(c))
     }
 }
 
