@@ -920,7 +920,7 @@ impl Database {
         let mut arr = ProofTreeArray::default();
         formula
             .as_ref(self)
-            .build_syntax_proof::<usize, Vec<usize>>(&mut vec![], &mut arr);
+            .build_syntax_proof::<usize, Vec<usize>>(&mut arr);
         arr.calc_indent();
         arr
     }

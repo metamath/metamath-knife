@@ -6,6 +6,7 @@
 use crate::diag::{Diagnostic, StmtParseError};
 use crate::formula::{Formula, FormulaBuilder, Label, Symbol, TypeCode};
 use crate::nameck::{Atom, NameReader, Nameset};
+use crate::scopeck::{Hyp, ScopeResult};
 use crate::segment::Segment;
 use crate::segment_set::SegmentSet;
 use crate::statement::{CommandToken, SegmentId, StatementAddress, SymbolType, TokenRef};
@@ -158,10 +159,25 @@ pub struct Grammar {
     logic_type: TypeCode,
     typecodes: Vec<TypeCode>,
     type_conversions: Vec<(TypeCode, TypeCode, Label)>,
+    reorder_cache: HashMap<Atom, Result<Reorder, Box<[u8]>>>,
     nodes: GrammarTree,
     root: NodeId, // The root of the Grammar tree
     diagnostics: HashMap<StatementAddress, Diagnostic>,
     debug: bool,
+}
+
+/// We precalculate several common swapping patterns to reduce space usage
+/// and also to speed up tree construction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Reorder {
+    None,
+    Swap10,
+    Swap021,
+    Swap210,
+    Swap120,
+    Swap201,
+    #[default]
+    Other,
 }
 
 /// A `Reduce` step applies a completed grammar rule to some of the recent parse trees,
@@ -176,15 +192,17 @@ struct Reduce {
     var_count: u8,
     offset: u8,
     is_variable: bool,
+    reorder: Reorder,
 }
 
 impl Reduce {
-    const fn new(label: Label, var_count: u8) -> Self {
+    const fn new(label: Label, reorder: Reorder, var_count: u8) -> Self {
         Reduce {
             label,
             var_count,
             offset: 0,
             is_variable: false,
+            reorder,
         }
     }
 
@@ -194,6 +212,7 @@ impl Reduce {
             var_count: 0,
             offset: 0,
             is_variable: true,
+            reorder: Reorder::None,
         }
     }
 }
@@ -393,6 +412,7 @@ impl Default for Grammar {
             logic_type: TypeCode::default(),
             typecodes: Vec::new(),
             type_conversions: Vec::new(),
+            reorder_cache: HashMap::default(),
             nodes: GrammarTree(Vec::new()),
             root: 0,
             diagnostics: HashMap::default(),
@@ -482,6 +502,48 @@ impl Grammar {
         )
     }
 
+    fn get_reorder(&mut self, scope: &ScopeResult, nset: &Nameset, atom: Label) -> Reorder {
+        if let Some(reorder) = self.reorder_cache.get(&atom) {
+            return match *reorder {
+                Ok(reorder) => reorder,
+                Err(_) => Reorder::Other,
+            };
+        }
+        let reorder_value = (|| -> Option<_> {
+            let frame = scope.get(nset.atom_name(atom))?;
+            if frame.hypotheses.len() != frame.target.tail.len() {
+                return None;
+            }
+
+            let reord = (frame.target.tail.iter())
+                .map(|frag| {
+                    let i = (frame.hypotheses.iter())
+                        .position(|hyp| matches!(*hyp, Hyp::Floating(_, i, _) if i == frag.var))?;
+                    u8::try_from(i).ok()
+                })
+                .collect::<Option<Box<[u8]>>>()?;
+            let diff_bound = (reord.iter().enumerate())
+                .rposition(|(i, &j)| i != usize::from(j))
+                .map_or(0, |n| n + 1);
+            Some(match (diff_bound, &*reord) {
+                (0, _) => Ok(Reorder::None),
+                (2, [1, 0, ..]) => Ok(Reorder::Swap10),
+                (3, [0, 2, 1, ..]) => Ok(Reorder::Swap021),
+                (3, [2, 1, 0, ..]) => Ok(Reorder::Swap210),
+                (3, [1, 2, 0, ..]) => Ok(Reorder::Swap120),
+                (3, [2, 0, 1, ..]) => Ok(Reorder::Swap201),
+                _ => Err(reord),
+            })
+        })()
+        .unwrap_or(Ok(Reorder::None));
+        let reorder = match reorder_value {
+            Ok(reorder) => reorder,
+            Err(_) => Reorder::Other,
+        };
+        self.reorder_cache.insert(atom, reorder_value);
+        reorder
+    }
+
     /// Gets the map of a branch
     fn get_branch(&self, node_id: NodeId) -> &HashMap<(SymbolType, Atom), NextNode> {
         if let GrammarNode::Branch { map } = &self.nodes.get(node_id) {
@@ -545,6 +607,7 @@ impl Grammar {
     /// Build the parse tree, marking variables with their types
     fn add_axiom(
         &mut self,
+        scope: &ScopeResult,
         sref: &StatementRef<'_>,
         nset: &Nameset,
         names: &mut NameReader<'_>,
@@ -580,6 +643,7 @@ impl Grammar {
         }
 
         // We will add this syntax axiom to the grammar tree
+        let reorder = self.get_reorder(scope, nset, this_label);
         let mut node = self.root;
         let mut var_count = 0;
         while let Some(token) = tokens.next() {
@@ -603,7 +667,7 @@ impl Grammar {
             } else {
                 let leaf_node_id = self
                     .nodes
-                    .create_leaf(Reduce::new(this_label, var_count), this_typecode);
+                    .create_leaf(Reduce::new(this_label, reorder, var_count), this_typecode);
                 self.add_branch(node, atom, symbol.stype, &NextNode::new(leaf_node_id))
             } {
                 Ok(next_node) => {
@@ -692,7 +756,7 @@ impl Grammar {
                             debug!("Type Conv adding to {} node id {}", node_id, next_node_id);
                             debug!("{:?}", self.node_id(db, node_id));
                             let mut leaf_label = ref_next_node.leaf_label;
-                            leaf_label.insert(0, Reduce::new(label, 1));
+                            leaf_label.insert(0, Reduce::new(label, Reorder::None, 1));
                             self.add_branch(
                                 node_id,
                                 from_typecode,
@@ -716,7 +780,7 @@ impl Grammar {
                             self.nodes.copy_branches(
                                 next_node_id,
                                 existing_next_node_id,
-                                Reduce::new(label, 1),
+                                Reduce::new(label, Reorder::None, 1),
                             )?;
                         }
                     }
@@ -1154,13 +1218,36 @@ impl Grammar {
         Ok(())
     }
 
-    fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Nameset) {
+    fn do_reduce(&self, formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Nameset) {
         debug!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
         formula_builder.reduce(
             reduce.label,
             reduce.var_count,
             reduce.offset,
             reduce.is_variable,
+            |args| match reduce.reorder {
+                Reorder::None => {}
+                Reorder::Swap10 => args.swap(0, 1),
+                Reorder::Swap021 => args.swap(1, 2),
+                Reorder::Swap210 => args.swap(0, 2),
+                Reorder::Swap120 => {
+                    args.swap(0, 1);
+                    args.swap(0, 2)
+                }
+                Reorder::Swap201 => {
+                    args.swap(0, 1);
+                    args.swap(1, 2)
+                }
+                Reorder::Other => {
+                    if let Some(Err(reorder)) = self.reorder_cache.get(&reduce.label) {
+                        let mut buff = vec![0; args.len()];
+                        for (&i, &arg) in reorder.iter().zip(&*args) {
+                            buff[i as usize] = arg
+                        }
+                        args.copy_from_slice(&buff);
+                    }
+                }
+            },
         );
         //formula_builder.dump(nset);
         debug!(
@@ -1204,7 +1291,7 @@ impl Grammar {
                     mut typecode,
                 } => {
                     // We found a leaf: REDUCE
-                    Self::do_reduce(&mut formula_builder, reduce, nset);
+                    self.do_reduce(&mut formula_builder, reduce, nset);
 
                     if e.expected_typecodes.contains(&typecode) {
                         // We found an expected typecode, pop from the stack and continue
@@ -1223,7 +1310,7 @@ impl Grammar {
                                 }) => {
                                     // Found a sub-formula: First optionally REDUCE and continue
                                     for &reduce in leaf_label {
-                                        Self::do_reduce(&mut formula_builder, reduce, nset);
+                                        self.do_reduce(&mut formula_builder, reduce, nset);
                                     }
 
                                     e.node_id = *next_node_id;
@@ -1245,7 +1332,7 @@ impl Grammar {
                                 .next_var_node(self.root, typecode)
                                 .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
                             for &reduce in leaf_label {
-                                Self::do_reduce(&mut formula_builder, reduce, nset);
+                                self.do_reduce(&mut formula_builder, reduce, nset);
                             }
                             e.node_id = next_node_id;
                         }
@@ -1256,8 +1343,8 @@ impl Grammar {
                                 if *from_typecode == typecode
                                     && e.expected_typecodes.contains(to_typecode)
                                 {
-                                    let reduce = Reduce::new(*label, 1);
-                                    Self::do_reduce(&mut formula_builder, reduce, nset);
+                                    let reduce = Reduce::new(*label, Reorder::None, 1);
+                                    self.do_reduce(&mut formula_builder, reduce, nset);
                                     let typecode =
                                         if *to_typecode == self.logic_type && convert_to_provable {
                                             self.provable_type
@@ -1274,7 +1361,7 @@ impl Grammar {
                             .next_var_node(self.root, typecode)
                             .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
                         for &reduce in leaf_label {
-                            Self::do_reduce(&mut formula_builder, reduce, nset);
+                            self.do_reduce(&mut formula_builder, reduce, nset);
                         }
                         e.node_id = next_node_id;
                     }
@@ -1291,7 +1378,7 @@ impl Grammar {
                         {
                             // Found an atom matching one of our next nodes: First optionally REDUCE and continue
                             for &reduce in leaf_label {
-                                Self::do_reduce(&mut formula_builder, reduce, nset);
+                                self.do_reduce(&mut formula_builder, reduce, nset);
                             }
 
                             // Found an atom matching one of our next nodes: SHIFT, to the next node
@@ -1527,7 +1614,7 @@ impl Grammar {
             .find(|(from_tc, to_tc, _)| *from_tc == source_tc && *to_tc == target_tc)
             .map(|(_, _, label)| {
                 let mut builder = FormulaBuilder::from_formula(fmla);
-                builder.reduce(*label, 1, 0, false);
+                builder.reduce(*label, 1, 0, false, |_| {});
                 builder.build(target_tc)
             })
     }
@@ -1634,6 +1721,7 @@ impl Grammar {
         let mut grammar = Grammar::default();
         let sset = db.parse_result();
         let nset = db.name_result();
+        let scope = db.scope_result();
         // Read information about the grammar from the parser commands
         grammar.initialize(sset, nset);
         grammar.root = grammar.nodes.create_branch();
@@ -1649,7 +1737,7 @@ impl Grammar {
         for segment in segments {
             for sref in segment {
                 if let Err(diag) = match sref.statement_type() {
-                    StatementType::Axiom => grammar.add_axiom(&sref, nset, &mut names),
+                    StatementType::Axiom => grammar.add_axiom(scope, &sref, nset, &mut names),
                     StatementType::Floating => grammar.add_floating(&sref, nset, &mut names),
                     _ => Ok(()),
                 } {
