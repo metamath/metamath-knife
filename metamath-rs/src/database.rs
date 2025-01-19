@@ -413,13 +413,15 @@ impl Default for Database {
 }
 
 pub(crate) fn time<R, F: FnOnce() -> R>(opts: &DbOptions, name: &str, f: F) -> R {
-    let now = Instant::now();
-    let ret = f();
     if opts.timing {
+        let now = Instant::now();
+        let ret = f();
         // no as_msecs :(
         println!("{} {}ms", name, (now.elapsed() * 1000).as_secs());
+        ret
+    } else {
+        f()
     }
-    ret
 }
 
 impl Drop for Database {
