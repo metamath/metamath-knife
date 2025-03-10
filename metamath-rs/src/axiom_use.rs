@@ -9,8 +9,8 @@ use crate::segment::SegmentRef;
 use crate::segment_set::SegmentSet;
 use crate::statement::{CommandToken, StatementAddress, TokenPtr};
 use crate::util::HashMap;
-use crate::StatementType;
 use crate::{as_str, database::time, Database};
+use crate::{StatementRef, StatementType};
 
 /// Diagnostics issued when checking axiom usage in the Database.
 ///
@@ -122,7 +122,7 @@ impl<'a> UsagePass<'a> {
                     }
                     StatementType::Axiom => {
                         let label = stmt.label();
-                        if label.starts_with(b"ax-") {
+                        if !label.starts_with(b"df-") {
                             let mut usage = Bitset::new();
                             usage.set_bit(axiom_index);
                             axiom_index += 1;
@@ -150,7 +150,7 @@ impl Database {
     /// Writes a `stmt_use` file to the given writer.
     pub fn write_stmt_use(
         &self,
-        label_test: impl Fn(&[u8]) -> bool,
+        test: impl Fn(&StatementRef<'_>) -> bool,
         out: &mut impl std::io::Write,
     ) -> Result<(), std::io::Error> {
         time(&self.options.clone(), "stmt_use", || {
@@ -159,7 +159,7 @@ impl Database {
             for sref in self.statements().filter(|stmt| stmt.is_assertion()) {
                 let label = sref.label();
                 let mut usage = Bitset::new();
-                if label_test(label) {
+                if test(&sref) {
                     usage.set_bit(stmt_list.len());
                     stmt_list.push(as_str(label));
                     stmt_use_map.insert(label, usage);
