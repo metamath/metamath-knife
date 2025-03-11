@@ -21,7 +21,10 @@ use crate::as_str;
 use crate::bit_set::Bitset;
 use crate::nameck::Atom;
 use crate::nameck::Nameset;
+use crate::scopeck::ExprFragment;
+use crate::scopeck::Frame;
 use crate::scopeck::Hyp;
+use crate::scopeck::ScopeResult;
 use crate::segment_set::SegmentSet;
 use crate::statement::SymbolType;
 use crate::statement::TokenIter;
@@ -359,6 +362,7 @@ impl Formula {
             children_count,
             0,
             self.is_variable(node_id),
+            |_| {},
         );
     }
 
@@ -392,6 +396,7 @@ impl Formula {
                 children_count,
                 0,
                 self.is_variable(node_id),
+                |_| {},
             );
         }
     }
@@ -408,6 +413,7 @@ impl Formula {
             children_count,
             0,
             self.is_variable(node_id),
+            |_| {},
         );
     }
 }
@@ -507,26 +513,10 @@ impl<'a> FormulaRef<'a> {
             stack: vec![],
             sset: self.db.parse_result(),
             nset: self.db.name_result(),
+            scope: self.db.scope_result(),
         };
         f.step_into(self.root);
         f
-    }
-
-    /// Returns a copy of this formula with a new root
-    /// (in the same tree)
-    fn to_rerooted(self, new_root: NodeId) -> Formula {
-        Formula {
-            root: new_root,
-            tree: self.formula.tree.clone(),
-            typecode: self.compute_typecode_at(new_root),
-            variables: self.formula.variables.clone(),
-        }
-    }
-
-    /// Computes the typecode of the given node
-    /// according to the corresponding statement
-    fn compute_typecode_at(&self, node_id: NodeId) -> TypeCode {
-        self.db.label_typecode(self.formula.tree[node_id])
     }
 
     /// Convert this formula into an s-expression string.
@@ -616,51 +606,88 @@ impl<'a> FormulaRef<'a> {
     /// and returns the index of that `ProofTree` within `arr`.
     pub fn build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
         self,
-        stack_buffer: &mut Vec<u8>,
         arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
     ) -> I {
-        self.sub_build_syntax_proof(self.root, stack_buffer, arr)
+        let nset = self.db.name_result();
+        if arr.needs_constant() {
+            let scope = self.db.scope_result();
+            Self::sub_build_syntax_proof_with_constant(
+                nset,
+                scope,
+                &self.tree,
+                self.root,
+                &mut vec![],
+                arr,
+            )
+        } else {
+            Self::sub_build_syntax_proof_no_constant(nset, &self.tree, self.root, arr)
+        }
     }
 
     /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
     /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
-    // Formulas children nodes are stored in the order of appearance of the variables
-    // in the formula, which is efficient when parsing or rendering the formula from
-    // or into a string of tokens. However, proofs require children nodes
-    // sorted in the order of mandatory floating hypotheses.
-    // This method performs this mapping.
-    fn sub_build_syntax_proof<I: Copy, A: Default + FromIterator<I>>(
-        self,
+    ///
+    /// This version of `build_syntax_proof` also constructs the expressions into `stack_buffer`
+    /// to pass to the [`ProofBuilder`], so it has to traverse the tree in textual order instead
+    /// of postorder, even though it yields values to the [`ProofBuilder`] in postorder.
+    fn sub_build_syntax_proof_with_constant<I: Copy, A: Default + FromIterator<I>>(
+        nset: &Nameset,
+        scope: &ScopeResult,
+        tree: &Tree<Atom>,
         node_id: NodeId,
         stack_buffer: &mut Vec<u8>,
         arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
     ) -> I {
-        let nset = self.db.name_result();
-
-        let token = nset.atom_name(self.tree[node_id]);
+        let token = nset.atom_name(tree[node_id]);
+        let frame = scope.get(token).unwrap();
         let address = nset.lookup_label(token).unwrap().address;
-        let frame = self.db.scope_result().get(token).unwrap();
-        let children_hyps = self
-            .tree
+        let mut results = vec![None::<I>; frame.hypotheses.len()];
+        let children = tree.children_iter(node_id);
+        let tos = stack_buffer.len();
+        if children.is_empty() {
+            for part in &frame.target.tail {
+                fast_extend(stack_buffer, &frame.const_pool[part.prefix.clone()]);
+                fast_extend(stack_buffer, nset.atom_name(frame.var_list[part.var]));
+                *stack_buffer.last_mut().unwrap() |= 0x80;
+            }
+        } else {
+            for part in &frame.target.tail {
+                fast_extend(stack_buffer, &frame.const_pool[part.prefix.clone()]);
+                let i = (frame.hypotheses.iter())
+                    .position(|hyp| matches!(*hyp, Hyp::Floating(_, j, _) if j == part.var))
+                    .unwrap();
+                let child = children.clone().nth(i).unwrap();
+                results[i] = Some(Self::sub_build_syntax_proof_with_constant(
+                    nset,
+                    scope,
+                    tree,
+                    child,
+                    stack_buffer,
+                    arr,
+                ));
+            }
+        }
+        fast_extend(stack_buffer, &frame.const_pool[frame.target.rump.clone()]);
+        let n_tos = stack_buffer.len();
+        let hyps = results.into_iter().map(|i| i.unwrap()).collect();
+        arr.build(address, hyps, stack_buffer, tos..n_tos)
+    }
+
+    /// Stores and returns the index of a [`ProofTree`] in a [`ProofBuilder`],
+    /// corresponding to the syntax proof for the sub-formula with root at the given `node_id`.
+    fn sub_build_syntax_proof_no_constant<I: Copy, A: Default + FromIterator<I>>(
+        nset: &Nameset,
+        tree: &Tree<Atom>,
+        node_id: NodeId,
+        arr: &mut dyn ProofBuilder<Item = I, Accum = A>,
+    ) -> I {
+        let token = nset.atom_name(tree[node_id]);
+        let address = nset.lookup_label(token).unwrap().address;
+        let hyps = tree
             .children_iter(node_id)
-            .map(|s_id| self.sub_build_syntax_proof(s_id, stack_buffer, arr))
-            .collect::<Box<[I]>>();
-        let hyps = frame
-            .hypotheses
-            .iter()
-            .filter_map(|hyp| {
-                if let Hyp::Floating(_sa, index, _) = hyp {
-                    Some(children_hyps[*index])
-                } else {
-                    None
-                }
-            })
+            .map(|s_id| Self::sub_build_syntax_proof_no_constant(nset, tree, s_id, arr))
             .collect();
-        let range = self
-            .to_rerooted(node_id)
-            .as_ref(self.db)
-            .append_to_stack_buffer(stack_buffer);
-        arr.build(address, hyps, stack_buffer, range)
+        arr.build(address, hyps, &[], 0..0)
     }
 }
 
@@ -703,28 +730,36 @@ impl Debug for SubFormulaRef<'_> {
 #[derive(Debug)]
 pub struct Flatten<'a> {
     formula: &'a Formula,
-    stack: Vec<(TokenIter<'a>, Option<SiblingIter<'a, Label>>)>,
+    #[allow(clippy::type_complexity)]
+    stack: Vec<(
+        TokenIter<'a>,
+        Option<(
+            &'a Frame,
+            std::slice::Iter<'a, ExprFragment>,
+            SiblingIter<'a, Label>,
+        )>,
+    )>,
+    scope: &'a ScopeResult,
     sset: &'a SegmentSet,
     nset: &'a Nameset,
 }
 
 impl Flatten<'_> {
     fn step_into(&mut self, node_id: NodeId) {
-        let label = self.formula.tree[node_id];
-        let sref = self.sset.statement(
-            self.nset
-                .lookup_label(self.nset.atom_name(label))
-                .unwrap()
-                .address,
-        );
+        let atom = self.nset.atom_name(self.formula.tree[node_id]);
+        let sref = self
+            .sset
+            .statement(self.nset.lookup_label(atom).unwrap().address);
         let mut math_iter = sref.math_iter();
+        let frame = self.scope.get(atom).unwrap();
+        let var_iter = frame.target.tail.iter();
         math_iter.next(); // Always skip the typecode token.
-        if self.formula.tree.has_children(node_id) {
-            self.stack
-                .push((math_iter, Some(self.formula.tree.children_iter(node_id))));
+        let children_iter = if self.formula.tree.has_children(node_id) {
+            Some((frame, var_iter, self.formula.tree.children_iter(node_id)))
         } else {
-            self.stack.push((math_iter, None));
+            None
         };
+        self.stack.push((math_iter, children_iter));
     }
 }
 
@@ -732,24 +767,22 @@ impl Iterator for Flatten<'_> {
     type Item = Symbol;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.stack.is_empty() {
-            return None;
-        }
-        let stack_end = self.stack.len() - 1;
-        let (ref mut math_iter, ref mut sibling_iter) = self.stack[stack_end];
+        let (math_iter, children) = self.stack.last_mut()?;
         if let Some(token) = math_iter.next() {
             // Continue with next token of this syntax
             let symbol = self.nset.lookup_symbol(token.slice).unwrap();
-            match (sibling_iter, symbol.stype) {
+            match (children, symbol.stype) {
                 (_, SymbolType::Constant) | (None, SymbolType::Variable) => Some(symbol.atom),
-                (Some(ref mut iter), SymbolType::Variable) => {
+                (Some((frame, var_iter, children_iter)), SymbolType::Variable) => {
                     // Variable : push into the next child
-                    if let Some(next_child_id) = iter.next() {
-                        self.step_into(next_child_id);
-                        self.next()
-                    } else {
-                        panic!("Empty formula!");
+                    let var = var_iter.next().expect("not enough variables").var;
+                    for (child, hyp) in children_iter.clone().zip(&frame.hypotheses) {
+                        if matches!(*hyp, Hyp::Floating(_, i, _) if i == var) {
+                            self.step_into(child);
+                            return self.next();
+                        }
                     }
+                    panic!("Empty formula!");
                 }
             }
         } else {
@@ -805,11 +838,19 @@ impl FormulaBuilder {
 
     /// Every REDUCE pops `var_count` subformula items on the stack,
     /// and pushes one single new item, with the popped subformulas as children
-    pub(crate) fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {
+    pub(crate) fn reduce(
+        &mut self,
+        label: Label,
+        var_count: u8,
+        offset: u8,
+        is_variable: bool,
+        reorder: impl FnOnce(&mut [NodeId]),
+    ) {
         assert!(self.stack.len() >= (var_count + offset).into());
         let reduce_start = self.stack.len().saturating_sub((var_count + offset).into());
         let reduce_end = self.stack.len().saturating_sub(offset.into());
         let new_node_id = {
+            reorder(&mut self.stack[reduce_start..reduce_end]);
             let children = self.stack.drain(reduce_start..reduce_end);
             self.tree.add_node(label, children.as_slice())
         };
