@@ -29,7 +29,7 @@ Install Rust, "Rust 2021" (version 1.56.0) or later, preferably using (rustup)[h
 
 Alternatively using `cargo install`:
 
-    cargo install --git https://github.com/david-a-wheeler/metamath-knife
+    cargo install --git https://github.com/metamath/metamath-knife
     # $HOME/.cargo/bin/metamath-knife has been installed, use it as the binary in the following instructions
 
 ## Running
