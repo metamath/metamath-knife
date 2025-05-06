@@ -148,9 +148,8 @@ impl ProofTreeArray {
     }
 
     /// Get the minimum distance from each step to the QED step
-    #[allow(clippy::missing_const_for_fn)] // false positive
     #[must_use]
-    pub fn indent(&self) -> &[u16] {
+    pub const fn indent(&self) -> &[u16] {
         &self.indent
     }
 
@@ -448,9 +447,8 @@ pub struct ProofTreePrinter<'a> {
 
 impl<'a> ProofTreePrinter<'a> {
     /// Construct a new proof tree printer with all the options.
-    #[allow(clippy::missing_const_for_fn)] // false positive
     #[must_use]
-    pub fn new(
+    pub const fn new(
         db: &'a Database,
         thm_label: TokenPtr<'a>,
         style: ProofStyle,

@@ -1540,8 +1540,7 @@ impl Grammar {
         }
     }
 
-    #[allow(clippy::missing_const_for_fn)] // false positive
-    fn node_id<'a>(&'a self, db: &'a Database, node_id: NodeId) -> GrammarNodeIdRef<'a> {
+    const fn node_id<'a>(&'a self, db: &'a Database, node_id: NodeId) -> GrammarNodeIdRef<'a> {
         GrammarNodeIdRef {
             grammar: self,
             node_id,
