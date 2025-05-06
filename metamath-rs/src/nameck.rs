@@ -185,7 +185,7 @@ impl Nameset {
         for (&seg_id, seg) in &self.segments {
             if segs
                 .segment_opt(seg_id)
-                .map_or(true, |sref| !Arc::ptr_eq(sref.segment, seg))
+                .is_none_or(|sref| !Arc::ptr_eq(sref.segment, seg))
             {
                 keys_to_remove.push(seg_id);
             }

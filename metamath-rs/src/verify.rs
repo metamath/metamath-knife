@@ -192,7 +192,7 @@ fn prepare_hypothesis<P: ProofBuilder>(state: &mut VerifyState<'_, P>, hyp: &sco
                 &state.cur_frame.const_pool[expr.rump.clone()],
             );
         }
-    };
+    }
 
     let n_tos = state.stack_buffer.len();
 
