@@ -520,7 +520,7 @@ impl<'a> NameReader<'a> {
     /// Stops the reading process.  The returned usage object can be used to
     /// efficiently test for relevant updates.
     #[must_use]
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // clippy#14294
     pub fn into_usage(self) -> NameUsage {
         NameUsage {
             generation: self.nameset.generation,
