@@ -1147,7 +1147,7 @@ impl<'a> ScopeReader<'a> {
 
     /// Close a read handle, reporting the list of used frames.
     #[must_use]
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // clippy#14294
     pub fn into_usage(self) -> ScopeUsage {
         ScopeUsage {
             generation: self.result.generation,

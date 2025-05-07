@@ -103,7 +103,7 @@ impl ProofTreeArray {
     /// Applies the provided function to each of the logical steps.
     /// It takes 4 parameters:
     /// * `cur` - the index of the step among all proof steps (incuding non-logical ones).
-    ///           This can be used as an index in `ProofTreeArray`'s expressions `exprs` and `indents`.
+    ///   This can be used as an index in `ProofTreeArray`'s expressions `exprs` and `indents`.
     /// * `ix` - the index of the step, when only logical steps are counted,
     /// * `stmt` - the statement applied at this step,
     /// * `hyps` - the indices of the hypotheses for this step (only counting logical hypotheses)
@@ -129,7 +129,7 @@ impl ProofTreeArray {
         for (cur, tree) in self.trees.iter().enumerate() {
             let stmt = sset.statement(tree.address);
             let tc = stmt.math_at(0);
-            let logical = provable_tc.map_or(true, |tref| *tref == *tc);
+            let logical = provable_tc.is_none_or(|tref| *tref == *tc);
             logical_steps.push(if logical {
                 ix += 1;
                 let hyps = tree

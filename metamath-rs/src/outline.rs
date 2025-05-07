@@ -100,6 +100,7 @@ pub enum OutlineNodeRef<'a> {
 
 impl<'a> OutlineNodeRef<'a> {
     /// Creates an `OutlineNodeRef` for the root of this database
+    #[allow(clippy::missing_const_for_fn)] // clippy#14091
     #[must_use]
     pub fn root_node(database: &'a Database) -> Self {
         OutlineNodeRef::Chapter {

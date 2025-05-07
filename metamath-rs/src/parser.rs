@@ -858,7 +858,7 @@ impl CommandIter<'_> {
     }
 
     #[allow(clippy::if_not_else)]
-    fn expect(&mut self, c: u8) -> Result<(), Diagnostic> {
+    const fn expect(&mut self, c: u8) -> Result<(), Diagnostic> {
         if !self.has_more() {
             let cspan = Span::new(self.index, self.buffer.len());
             Err(Diagnostic::UnclosedComment(cspan))

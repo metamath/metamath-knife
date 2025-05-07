@@ -185,7 +185,7 @@ impl Nameset {
         for (&seg_id, seg) in &self.segments {
             if segs
                 .segment_opt(seg_id)
-                .map_or(true, |sref| !Arc::ptr_eq(sref.segment, seg))
+                .is_none_or(|sref| !Arc::ptr_eq(sref.segment, seg))
             {
                 keys_to_remove.push(seg_id);
             }
@@ -520,7 +520,7 @@ impl<'a> NameReader<'a> {
     /// Stops the reading process.  The returned usage object can be used to
     /// efficiently test for relevant updates.
     #[must_use]
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // clippy#14294
     pub fn into_usage(self) -> NameUsage {
         NameUsage {
             generation: self.nameset.generation,

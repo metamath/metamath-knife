@@ -233,9 +233,8 @@ impl<'a> CommentParser<'a> {
         const OPENING_PUNCTUATION: &[u8] = b"(['\"";
         let start = self.pos;
         let is_italic = self.pos == self.end_subscript
-            || (self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos))).map_or(true, |c| {
-                c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c)
-            });
+            || (self.pos.checked_sub(1).and_then(|pos| self.buf.get(pos)))
+                .is_none_or(|c| c.is_ascii_whitespace() || OPENING_PUNCTUATION.contains(c));
         let item = if is_italic {
             let it_end = self.parse_italic()?;
             self.pos += 1;
@@ -270,7 +269,7 @@ impl<'a> CommentParser<'a> {
         }
     }
 
-    fn parse_math_delim(&mut self, at: usize) -> CommentItem {
+    const fn parse_math_delim(&mut self, at: usize) -> CommentItem {
         if self.math_mode {
             self.math_mode = false;
             CommentItem::EndMathMode(at)
@@ -332,7 +331,7 @@ impl<'a> CommentParser<'a> {
                     && pos
                         .checked_sub(3)
                         .and_then(|i| self.buf.get(i))
-                        .map_or(true, u8::is_ascii_whitespace))
+                        .is_none_or(u8::is_ascii_whitespace))
     }
 
     fn trim_space_after_close(&self) -> bool {

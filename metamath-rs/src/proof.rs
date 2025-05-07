@@ -148,6 +148,7 @@ impl ProofTreeArray {
     }
 
     /// Get the minimum distance from each step to the QED step
+    #[allow(clippy::missing_const_for_fn)] // clippy#14091
     #[must_use]
     pub fn indent(&self) -> &[u16] {
         &self.indent
@@ -447,6 +448,7 @@ pub struct ProofTreePrinter<'a> {
 
 impl<'a> ProofTreePrinter<'a> {
     /// Construct a new proof tree printer with all the options.
+    #[allow(clippy::missing_const_for_fn)] // clippy#14091
     #[must_use]
     pub fn new(
         db: &'a Database,
@@ -468,17 +470,17 @@ impl<'a> ProofTreePrinter<'a> {
     }
 
     /// Set the position of the first line of the proof. (The default is `0`.)
-    pub fn set_initial_chr(&mut self, initial_chr: u16) {
+    pub const fn set_initial_chr(&mut self, initial_chr: u16) {
         self.initial_chr = initial_chr;
     }
 
     /// Set the indentation before each line of proof. (The default is `6`.)
-    pub fn set_indent(&mut self, indent: u16) {
+    pub const fn set_indent(&mut self, indent: u16) {
         self.indent = indent;
     }
 
     /// Set the line width for the proof. (The default is `79`.)
-    pub fn set_line_width(&mut self, line_width: u16) {
+    pub const fn set_line_width(&mut self, line_width: u16) {
         self.line_width = line_width;
     }
 }

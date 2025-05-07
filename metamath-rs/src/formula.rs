@@ -724,7 +724,7 @@ impl Flatten<'_> {
                 .push((math_iter, Some(self.formula.tree.children_iter(node_id))));
         } else {
             self.stack.push((math_iter, None));
-        };
+        }
     }
 }
 
