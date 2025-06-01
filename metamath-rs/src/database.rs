@@ -117,6 +117,7 @@ use crate::scopeck;
 use crate::scopeck::ScopeResult;
 use crate::segment::Comparer;
 use crate::segment_set::SegmentSet;
+use crate::statement::CommandToken;
 use crate::statement::StatementAddress;
 use crate::typesetting::TypesettingData;
 use crate::verify;
@@ -897,6 +898,23 @@ impl Database {
             .statement_by_label(label)
             .expect("Invalid label provided to `label_typecode`.");
         self.name_result().get_atom(sref.math_at(0).slice)
+    }
+
+    /// Processes J commands, using function ` f ` provided, and returns a vector collecting all results.
+    pub fn process_j_commands<T>(
+        &self,
+        f: impl for<'a> FnOnce(&'a Vec<CommandToken>, &[u8]) -> Option<T> + Copy,
+    ) -> Vec<T> {
+        let mut results = vec![];
+        for sref in self.segments.segments(..) {
+            let buf = &**sref.buffer;
+            for (_, (_, command)) in &sref.j_commands {
+                if let Some(t) = f(command, buf) {
+                    results.push(t);
+                }
+            }
+        }
+        results
     }
 
     /// Export an mmp file for a given statement.

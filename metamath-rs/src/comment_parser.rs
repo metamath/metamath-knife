@@ -514,6 +514,14 @@ pub enum Parenthetical {
         /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
         date: Span,
     },
+    /// A comment like `(Proposed by by Foo Bar, 12-Mar-2020.)`.
+    ProposedBy {
+        /// The span of the author in the parenthetical
+        author: Span,
+        /// The date, in the form `DD-MMM-YYYY`.
+        /// To parse this further into a date, use the [`Date`] type's [`TryFrom`] impl.
+        date: Span,
+    },
     /// The `(Proof modification is discouraged.)` comment
     ProofModificationDiscouraged,
     /// The `(New usage is discouraged.)` comment
@@ -534,7 +542,7 @@ impl<'a> ParentheticalIter<'a> {
         static PARENTHETICALS: OnceLock<Regex> = OnceLock::new();
         let parentheticals = PARENTHETICALS.get_or_init(|| {
             Regex::new(concat!(
-                r"\((Contributed|Revised|Proof[ \r\n]+shortened)",
+                r"\((Contributed|Revised|Proof[ \r\n]+shortened|Proposed)",
                 r"[ \r\n]+by[ \r\n]+([^,)]+),[ \r\n]+([0-9]{1,2}-[A-Z][a-z]{2}-[0-9]{4})\.\)|",
                 r"\((Proof[ \r\n]+modification|New[ \r\n]+usage)[ \r\n]+is[ \r\n]+discouraged\.\)",
             ))
@@ -544,6 +552,20 @@ impl<'a> ParentheticalIter<'a> {
             matches: parentheticals.captures_iter(span.as_ref(buf)),
             off: span.start,
         }
+    }
+
+    /// Returns the full span of the parentheticals
+    #[must_use]
+    pub fn full_span(mut self) -> Option<Span> {
+        let first = &self.matches.next()?.get(0)?;
+        let end = self
+            .matches
+            .last()
+            .map_or_else(|| Some(first.end()), |c| c.get(0).map(|m| m.end()))?;
+        Some(Span::new2(
+            self.off + first.start() as u32,
+            self.off + end as u32,
+        ))
     }
 
     fn to_span(&self, m: Match<'_>) -> Span {
@@ -566,7 +588,11 @@ impl Iterator for ParentheticalIter<'_> {
             match m.as_bytes()[0] {
                 b'C' => Parenthetical::ContributedBy { author, date },
                 b'R' => Parenthetical::RevisedBy { author, date },
-                b'P' => Parenthetical::ProofShortenedBy { author, date },
+                b'P' => match m.as_bytes()[3] {
+                    b'o' => Parenthetical::ProofShortenedBy { author, date },
+                    b'p' => Parenthetical::ProposedBy { author, date },
+                    _ => unreachable!(),
+                },
                 _ => unreachable!(),
             }
         } else {

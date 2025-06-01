@@ -349,13 +349,13 @@ impl CommandToken {
         }
     }
 
-    /// Remove doubled quote escapes from a [`CommandToken::String`]`(span)`.
+    /// Remove doubled quote escapes from a <code>[CommandToken::String](span)</code>.
     pub fn append_unescaped_string(buf: &[u8], span: Span, out: &mut Vec<u8>) {
         let quote = buf[(span.start - 1) as usize];
         unescape(span.as_ref(buf), out, |c| quote == c)
     }
 
-    /// Remove doubled quote escapes from a [`CommandToken::String`]`(span)`.
+    /// Remove doubled quote escapes from a <code>[CommandToken::String](span)</code>.
     #[must_use]
     pub fn unescape_string(buf: &[u8], span: Span) -> Cow<'_, [u8]> {
         let quote = buf[(span.start - 1) as usize];
@@ -576,6 +576,13 @@ impl<'a> StatementRef<'a> {
     #[must_use]
     pub fn label(&self) -> &'a [u8] {
         self.label_span().as_ref(&self.segment.segment.buffer)
+    }
+
+    /// Obtain a span's text.
+    #[inline]
+    #[must_use]
+    pub fn span_text(&self, span: &Span) -> &'a [u8] {
+        span.as_ref(&self.segment.segment.buffer)
     }
 
     /// An iterator for the symbols in a statement's math string.

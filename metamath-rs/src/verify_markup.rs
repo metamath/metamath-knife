@@ -222,6 +222,9 @@ impl Database {
                                 check_paren(author, date);
                                 laters.push(sp)
                             }
+                            Parenthetical::ProposedBy { author, date } => {
+                                check_paren(author, date);
+                            }
                             Parenthetical::ProofModificationDiscouraged => proof_mod = Some(sp),
                             Parenthetical::NewUsageDiscouraged => new_usage_discouraged = true,
                         }

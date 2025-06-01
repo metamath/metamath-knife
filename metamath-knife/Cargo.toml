@@ -15,6 +15,8 @@ clap = { version = "4.5", features = ["derive"] }
 simple_logger = "5.0"
 annotate-snippets = "0.11"
 metamath-rs = { path = "../metamath-rs" }
+zspell = { version = "0.5.5", optional = true }
+regex = { version = "1.11", optional = true }
 
 [[bin]]
 name = "metamath-knife"
@@ -26,3 +28,4 @@ default = ["verify_markup"]
 dot = ["metamath-rs/dot"]
 xml = ["metamath-rs/xml"]
 verify_markup = ["metamath-rs/verify_markup"]
+spell_check = ["zspell", "regex"]

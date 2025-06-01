@@ -166,6 +166,7 @@ pub enum Diagnostic {
     RepeatedLabel(Span, Span),
     ReservedAtToken(Span),
     ReservedQToken(Span),
+    SpellingMistake(Span),
     SpuriousLabel(Span),
     SpuriousProof(Span),
     StepEssenWrong,
@@ -905,6 +906,12 @@ impl Diagnostic {
                     *span,
                 )])
             }
+            SpellingMistake(span) => ("Possible spelling mistake".into(), vec![(
+                Level::Warning,
+                "This word does not appear in the dictionary".into(),
+                stmt,
+                *span,
+            )]),
             SpuriousLabel(lspan) => ("Spurious label".into(), vec![(
                 Level::Error,
                 "Labels are only permitted for statements of type $a, $e, $f, or $p".into(),

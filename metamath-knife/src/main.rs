@@ -4,6 +4,11 @@
 
 mod list_stmt;
 
+#[cfg(feature = "spell_check")]
+mod spell_check;
+#[cfg(feature = "spell_check")]
+use spell_check::spell_check;
+
 use annotate_snippets::Renderer;
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
@@ -108,6 +113,10 @@ struct Cli {
     /// Checks comment markup and parses typesetting information
     #[arg(short = 'm', long)]
     verify_markup: bool,
+    #[cfg(feature = "spell_check")]
+    /// Checks spelling and grammar in comments
+    #[arg(long)]
+    spell_check: bool,
 }
 
 fn main() {
@@ -263,6 +272,14 @@ fn main() {
             count += BibError::render_list(&bib_diags, |msg| println!("{}", r.render(msg))).len();
 
             let diags = db.verify_markup(bib.as_ref());
+            count += db
+                .render_diags(diags, |msg| println!("{}", r.render(msg)))
+                .len();
+        }
+
+        #[cfg(feature = "spell_check")]
+        if cli.spell_check {
+            let diags = spell_check(&db);
             count += db
                 .render_diags(diags, |msg| println!("{}", r.render(msg)))
                 .len();

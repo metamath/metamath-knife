@@ -262,7 +262,7 @@ impl Scanner<'_> {
 
     /// This is where statements are constructed, factored out between comment
     /// statements and non-comment.
-    fn out_statement(&mut self, stype: StatementType, label: Span) -> Statement {
+    const fn out_statement(&mut self, stype: StatementType, label: Span) -> Statement {
         Statement {
             stype,
             label,
