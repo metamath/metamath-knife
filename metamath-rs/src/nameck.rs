@@ -105,6 +105,10 @@ where
     }
 }
 
+/// A position in the `dv_info` array.
+#[derive(Debug, Copy, Clone)]
+pub struct DvId(pub u32);
+
 // that which we keep in the hash slot for math symbols
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
 struct SymbolInfo {
@@ -313,6 +317,23 @@ impl Nameset {
                 slot_remove(&mut self.dv_info, &StatementAddress::new(id, dvdef.start));
             }
         }
+    }
+
+    /// Looks up the list of global $d statements before index `idx`.
+    #[inline]
+    #[must_use]
+    pub fn global_dv_before(&self, idx: DvId) -> &[(StatementAddress, Vec<Atom>)] {
+        &self.dv_info[..idx.0 as usize]
+    }
+
+    /// Returns the initial position of the global $d index at the start of segment `id`.
+    #[inline]
+    #[must_use]
+    pub fn global_dv_initial(&self, id: SegmentId) -> DvId {
+        let i = self
+            .dv_info
+            .partition_point(|(addr, _)| self.order.lt(&addr.segment_id, &id));
+        DvId(i as u32)
     }
 
     /// Given a name which is known to represent a defined atom, get the atom.
