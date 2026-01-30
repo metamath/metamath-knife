@@ -722,6 +722,8 @@ fn verify_proof<'a, P: ProofBuilder>(
                 } else if ch == b'?' {
                     try_assert!(k == 0, Diagnostic::ProofMalformedVarint);
                     return Err(Diagnostic::ProofIncomplete);
+                } else {
+                    return Err(Diagnostic::ProofMalformedVarint);
                 }
             }
             i += 1;
