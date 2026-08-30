@@ -129,15 +129,12 @@ pub(crate) fn find_chapter_header(mut buffer: &[u8]) -> Option<usize> {
     let mut offset = 0;
     loop {
         // quickly scan for a plausible offset into the horizontal line
-        if let Some(mix) = hunt(buffer) {
-            // check if we actually found a chapter heading
-            if let Some(chap) = is_real(buffer, mix) {
-                return Some(chap + offset);
-            }
-            buffer = &buffer[mix + 1..];
-            offset += mix + 1;
-        } else {
-            return None;
+        let mix = hunt(buffer)?;
+        // check if we actually found a chapter heading
+        if let Some(chap) = is_real(buffer, mix) {
+            return Some(chap + offset);
         }
+        buffer = &buffer[mix + 1..];
+        offset += mix + 1;
     }
 }
