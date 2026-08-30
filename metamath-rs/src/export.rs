@@ -246,10 +246,11 @@ impl Database {
             .get(stmt.label())
             .expect("Statement without scope")
             .as_ref(self)
-            .essentials().enumerate()
+            .essentials()
+            .enumerate()
         {
             let hyp_stmt = self.statement_by_label(label).unwrap();
-            write!(out, "h{}::{} ", hyp+1, as_str(hyp_stmt.label()))?;
+            write!(out, "h{}::{} ", hyp + 1, as_str(hyp_stmt.label()))?;
             for token in hyp_stmt.math_iter() {
                 write!(out, "{} ", as_str(&token))?;
             }
