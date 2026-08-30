@@ -73,7 +73,7 @@ impl GrammarTree {
     }
 
     /// Returns the total number of nodes in this grammar tree.
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.0.len()
     }
 
@@ -1375,7 +1375,7 @@ impl Iterator for FormulaTokenIter<'_> {
                 Span::new(self.last_pos, self.string.len())
             };
             self.last_pos = span.end as usize + 1;
-            while self.chars.peek().map(char::is_ascii_whitespace) == Some(true) {
+            while self.chars.peek().is_some_and(char::is_ascii_whitespace) {
                 self.chars.next();
                 self.last_pos += 1;
             }

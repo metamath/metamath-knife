@@ -178,10 +178,8 @@ impl Iterator for BitsetIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         while self.bits == 0 {
             self.offset += bits_per_word();
-            match self.buffer.next() {
-                Some(bits) => self.bits = *bits,
-                None => return None,
-            }
+            let bits = self.buffer.next()?;
+            self.bits = *bits
         }
         let tz = self.bits.trailing_zeros() as usize;
         self.bits &= self.bits - 1;

@@ -733,7 +733,7 @@ fn scope_check_essential<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>)
 fn scope_check_float<'a>(state: &mut ScopeState<'a>, sref: StatementRef<'a>) {
     let mut bad = false;
     // length checked by the parser with an invalidation
-    assert!(sref.math_len() == 2);
+    assert_eq!(sref.math_len(), 2);
     let const_tok = sref.math_at(0);
     let var_tok = sref.math_at(1);
 
