@@ -349,13 +349,13 @@ impl CommandToken {
         }
     }
 
-    /// Remove doubled quote escapes from a [`CommandToken::String`]`(span)`.
+    /// Remove doubled quote escapes from a <code>[CommandToken::String](Span)</code>.
     pub fn append_unescaped_string(buf: &[u8], span: Span, out: &mut Vec<u8>) {
         let quote = buf[(span.start - 1) as usize];
         unescape(span.as_ref(buf), out, |c| quote == c)
     }
 
-    /// Remove doubled quote escapes from a [`CommandToken::String`]`(span)`.
+    /// Remove doubled quote escapes from a <code>[CommandToken::String](Span)</code>.
     #[must_use]
     pub fn unescape_string(buf: &[u8], span: Span) -> Cow<'_, [u8]> {
         let quote = buf[(span.start - 1) as usize];

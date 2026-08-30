@@ -190,7 +190,7 @@ impl PartialEq for Job {
 impl Eq for Job {}
 impl PartialOrd for Job {
     fn partial_cmp(&self, other: &Job) -> Option<Ordering> {
-        Some(self.0.cmp(&other.0))
+        Some(self.cmp(other))
     }
 }
 impl Ord for Job {
@@ -214,8 +214,8 @@ pub struct Executor {
 /// dispatched tasks.
 impl fmt::Debug for Executor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let g = self.mutex.lock().unwrap();
-        write!(f, "Executor(active={})", g.len())
+        let active = self.mutex.lock().unwrap().len();
+        write!(f, "Executor(active={active})")
     }
 }
 

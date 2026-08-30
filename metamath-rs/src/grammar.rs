@@ -73,7 +73,7 @@ impl GrammarTree {
     }
 
     /// Returns the total number of nodes in this grammar tree.
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.0.len()
     }
 
