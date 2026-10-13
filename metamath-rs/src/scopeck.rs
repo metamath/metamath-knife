@@ -968,7 +968,11 @@ impl ScopeResult {
 /// Extracts scope data for a database.
 ///
 /// Use `ScopeResult::default()` to get an initial state.
-pub(crate) fn scope_check(result: &mut ScopeResult, segments: &SegmentSet, names: &Nameset) {
+pub(crate) fn scope_check(
+    result: &mut ScopeResult,
+    segments: &Arc<SegmentSet>,
+    names: &Arc<Nameset>,
+) {
     result.incremental |= result.frame_index.is_empty();
     result.incremental &= segments.options.incremental;
     result.generation += 1;
