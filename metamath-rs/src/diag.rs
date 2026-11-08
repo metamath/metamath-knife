@@ -128,6 +128,8 @@ pub enum Diagnostic {
     GrammarAmbiguous(StatementAddress),
     GrammarCantBuild(&'static str),
     GrammarProvableFloat,
+    /// A syntax axiom produces a typecode declared `bound`
+    GrammarBoundTypecodeAxiom,
     HtmlParseError(Span, Vec<Cow<'static, str>>),
     HeaderCommentParseError(HeadingLevel),
     InvalidAxiomRestatement(Span, Span),
@@ -600,6 +602,12 @@ impl Diagnostic {
             GrammarCantBuild(message) => ("Can't build the grammar".into(), vec![(
                 Level::Error,
                 (*message).into(),
+                stmt,
+                stmt.span(),
+            )]),
+            GrammarBoundTypecodeAxiom => ("Syntax axiom for a bound typecode".into(), vec![(
+                Level::Error,
+                "Syntax axiom for a bound typecode".into(),
                 stmt,
                 stmt.span(),
             )]),
