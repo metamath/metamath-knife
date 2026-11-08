@@ -398,3 +398,84 @@ grammar_test!(
     1,
     Diagnostic::UndefinedToken(crate::Span::new(23, 30), Box::new(*b"unknown"))
 );
+
+const BOUND_PRE: &str = "$c setvar class wff |- myvar foo $. $v x $.\n";
+
+fn bound_db(j: &str, body: &str) -> Database {
+    mkdb(format!("{BOUND_PRE}{j}\n{body}").as_bytes())
+}
+
+fn bound_diags(j: &str, body: &str) -> Vec<(StatementAddress, Diagnostic)> {
+    let mut db = bound_db(j, body);
+    db.grammar_pass().diagnostics()
+}
+
+fn addr(db: &Database, label: &[u8]) -> StatementAddress {
+    db.statement(label).unwrap().address()
+}
+
+const J_BOUND: &str = "$( $j syntax 'setvar' 'class'; bound 'setvar'; $)";
+
+grammar_test!(
+    bound_constant_body_rejected,
+    b"$c setvar class myvar $.
+    $( $j syntax 'setvar' 'class'; bound 'setvar'; $)
+    wmyvar $a setvar myvar $.",
+    2,
+    2,
+    Diagnostic::GrammarBoundTypecodeAxiom
+);
+
+grammar_test!(
+    bound_variable_body_rejected_not_conversion,
+    b"$c setvar class $. $v x $.
+    $( $j syntax 'setvar' 'class'; bound 'setvar'; $)
+    vx $f setvar x $. bad $a setvar x $.",
+    2,
+    4,
+    Diagnostic::GrammarBoundTypecodeAxiom
+);
+
+#[test]
+fn bound_not_bypassed_by_primitive() {
+    let j = "$( $j syntax 'setvar' 'class'; bound 'setvar'; primitive 'wmyvar'; $)";
+    let mut db = bound_db(j, "wmyvar $a setvar myvar $.");
+    db.grammar_pass();
+    let expected = addr(&db, b"wmyvar");
+    assert_eq!(
+        db.grammar_pass().diagnostics(),
+        vec![(expected, Diagnostic::GrammarBoundTypecodeAxiom)]
+    );
+}
+
+#[test]
+fn bound_several_typecodes() {
+    let j = "$( $j syntax 'setvar' 'class' 'foo'; bound 'setvar' 'foo'; $)";
+    let mut db = bound_db(j, "a1 $a setvar myvar $. a2 $a foo myvar $.");
+    db.grammar_pass();
+    let (a1, a2) = (addr(&db, b"a1"), addr(&db, b"a2"));
+    assert_eq!(
+        db.grammar_pass().diagnostics(),
+        vec![
+            (a1, Diagnostic::GrammarBoundTypecodeAxiom),
+            (a2, Diagnostic::GrammarBoundTypecodeAxiom)
+        ]
+    );
+}
+
+#[test]
+fn bound_absent_no_diagnostic() {
+    let j = "$( $j syntax 'setvar' 'class'; $)";
+    assert!(bound_diags(j, "wmyvar $a setvar myvar $.").is_empty());
+}
+
+#[test]
+fn bound_other_typecodes_unaffected() {
+    assert!(bound_diags(J_BOUND, "vx $f setvar x $. cv $a class x $.").is_empty());
+}
+
+#[test]
+fn bound_undeclared_typecode_ignored() {
+    let j = "$( $j syntax 'setvar' 'class'; bound 'undeclared'; $)";
+    assert!(bound_diags(j, "vx $f setvar x $. cv $a class x $.").is_empty());
+}

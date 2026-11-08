@@ -155,6 +155,7 @@ impl GrammarTree {
 #[derive(Debug)]
 pub struct Grammar {
     provable_type: TypeCode,
+    bound_typecodes: Vec<TypeCode>,
     logic_type: TypeCode,
     typecodes: Vec<TypeCode>,
     type_conversions: Vec<(TypeCode, TypeCode, Label)>,
@@ -390,6 +391,7 @@ impl Default for Grammar {
     fn default() -> Self {
         Grammar {
             provable_type: TypeCode::default(),
+            bound_typecodes: Vec::new(),
             logic_type: TypeCode::default(),
             typecodes: Vec::new(),
             type_conversions: Vec::new(),
@@ -428,6 +430,13 @@ impl Grammar {
                         for sort in rest {
                             self.typecodes
                                 .push(nset.lookup_symbol(&sort.value(buf)).unwrap().atom)
+                        }
+                    }
+                    [Keyword(cmd), rest @ ..] if cmd.as_ref(buf) == b"bound" => {
+                        for sort in rest {
+                            if let Some(s) = nset.lookup_symbol(&sort.value(buf)) {
+                                self.bound_typecodes.push(s.atom);
+                            }
                         }
                     }
                     _ => {}
@@ -561,6 +570,11 @@ impl Grammar {
         // In case of a non-syntax axiom, skip it.
         if this_typecode == self.provable_type {
             return Ok(());
+        }
+
+        // A bound typecode has variables only: no syntax axiom may produce it.
+        if self.bound_typecodes.contains(&this_typecode) {
+            return Err(Diagnostic::GrammarBoundTypecodeAxiom);
         }
 
         // Detect "type conversion" syntax axioms: ~cv for set.mm
