@@ -398,3 +398,276 @@ grammar_test!(
     1,
     Diagnostic::UndefinedToken(crate::Span::new(23, 30), Box::new(*b"unknown"))
 );
+
+// ---- Work-variable hook in `parse_formula_with` (0601a) ----
+
+use crate::diag::StmtParseError;
+use crate::formula::{Label, TypeCode};
+use crate::grammar::{FormulaNodeBuilder, ParseToken, TokenKind};
+
+const WORK_VAR_DB: &[u8] = b"
+    $c |- wff class setvar ( ) -> = $.
+    $( $j syntax 'class'; syntax 'setvar'; syntax 'wff'; syntax '|-' as 'wff'; type_conversions; $)
+    $v ph ps x A B $.
+    wph $f wff ph $.
+    wps $f wff ps $.
+    vx $f setvar x $.
+    cA $f class A $.
+    cB $f class B $.
+    cv $a class x $.
+    wi $a wff ( ph -> ps ) $.
+    weq $a wff A = B $.
+";
+
+#[derive(Clone, Copy, Debug)]
+enum TestToken {
+    Sym(FormulaToken),
+    Work(u32, TypeCode),
+}
+
+impl ParseToken for TestToken {
+    type WorkVar = u32;
+    fn span(&self) -> Span {
+        match self {
+            TestToken::Sym(t) => t.span,
+            TestToken::Work(..) => Span::NULL,
+        }
+    }
+    fn kind(&self) -> TokenKind<u32> {
+        match *self {
+            TestToken::Sym(t) => TokenKind::Symbol(t.symbol),
+            TestToken::Work(id, tc) => TokenKind::WorkVar(id, tc),
+        }
+    }
+}
+
+/// Renders s-expressions in `as_sexpr`'s format (work variables as `&W<id>`) and logs calls.
+struct SexprBuilder<'a> {
+    names: &'a Nameset,
+    log: Vec<String>,
+}
+
+impl<'a> SexprBuilder<'a> {
+    fn new(names: &'a Nameset) -> Self {
+        SexprBuilder { names, log: vec![] }
+    }
+    fn name(&self, atom: Label) -> String {
+        as_str(self.names.atom_name(atom)).to_owned()
+    }
+}
+
+impl FormulaNodeBuilder for SexprBuilder<'_> {
+    type Node = String;
+    type WorkVar = u32;
+    fn variable(&mut self, label: Label) -> String {
+        let n = self.name(label);
+        self.log.push(format!("variable({n})"));
+        n
+    }
+    fn work_var(&mut self, id: u32, typecode: TypeCode) -> String {
+        let tc = self.name(typecode);
+        self.log.push(format!("work_var({id}, {tc})"));
+        let prefix = match tc.as_str() {
+            "class" => "&C",
+            "setvar" => "&S",
+            _ => "&W",
+        };
+        format!("{prefix}{id}")
+    }
+    fn node(&mut self, label: Label, children: Vec<String>) -> String {
+        let n = self.name(label);
+        self.log
+            .push(format!("node({n}, {} children)", children.len()));
+        if children.is_empty() {
+            n
+        } else {
+            format!("({n} {})", children.join(" "))
+        }
+    }
+}
+
+fn tc(names: &Nameset, t: &[u8]) -> TypeCode {
+    names.lookup_symbol(t).unwrap().atom
+}
+
+/// Tokenizes a space-separated string; `&W<n>`, `&C<n>`, `&S<n>` are wff, class, setvar work variables.
+fn work_toks(s: &str, names: &Nameset) -> Vec<TestToken> {
+    s.split_whitespace()
+        .map(|t| {
+            let kind = match t.get(..2) {
+                Some("&W") => Some(b"wff".as_slice()),
+                Some("&C") => Some(b"class".as_slice()),
+                Some("&S") => Some(b"setvar".as_slice()),
+                _ => None,
+            };
+            match kind {
+                Some(k) => TestToken::Work(t[2..].parse().unwrap(), tc(names, k)),
+                None => TestToken::Sym(FormulaToken {
+                    symbol: names.lookup_symbol(t.as_bytes()).unwrap().atom,
+                    span: Span::default(),
+                }),
+            }
+        })
+        .collect()
+}
+
+fn parse_with(
+    grammar: &crate::grammar::Grammar,
+    names: &Nameset,
+    s: &str,
+    expected: &[TypeCode],
+    convert_to_provable: bool,
+) -> (Result<(String, TypeCode), StmtParseError>, Vec<String>) {
+    let toks = work_toks(s, names);
+    let mut builder = SexprBuilder::new(names);
+    let res = grammar.parse_formula_with(
+        &mut toks.into_iter().map(Ok),
+        expected,
+        convert_to_provable,
+        names,
+        &mut builder,
+    );
+    (res, builder.log)
+}
+
+#[test]
+fn work_var_basic() {
+    let mut db = mkdb(WORK_VAR_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let wff = tc(&names, b"wff");
+    let (res, log) = parse_with(&grammar, &names, "( &W1 -> ph )", &[wff], false);
+    assert_eq!(res.unwrap(), ("(wi &W1 wph)".to_owned(), wff));
+    assert_eq!(
+        log,
+        vec!["work_var(1, wff)", "variable(wph)", "node(wi, 2 children)"]
+    );
+    assert!(names.lookup_symbol(b"&W1").is_none());
+}
+
+#[test]
+fn work_var_matches_declared_variable() {
+    let mut db = mkdb(WORK_VAR_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let wff = tc(&names, b"wff");
+    for s in [
+        "( &W1 -> ph )",
+        "( ph -> &W1 )",
+        "( ( &W1 -> &W2 ) -> ph )",
+        "&W1",
+    ] {
+        let (work, _) = parse_with(&grammar, &names, s, &[wff], false);
+        let (work_sexpr, work_tc) = work.unwrap();
+        // Replace each wff work variable with `ps`, then render `wps` back as its `&W<id>`.
+        let mut ids = vec![];
+        let declared: Vec<&str> = s
+            .split_whitespace()
+            .map(|t| {
+                if let Some(id) = t.strip_prefix("&W") {
+                    ids.push(id.to_owned());
+                    "ps"
+                } else {
+                    t
+                }
+            })
+            .collect();
+        let (decl, _) = parse_with(&grammar, &names, &declared.join(" "), &[wff], false);
+        let (decl_sexpr, decl_tc) = decl.unwrap();
+        let mut ids = ids.into_iter();
+        let rendered = decl_sexpr
+            .split("wps")
+            .map(str::to_owned)
+            .reduce(|acc, part| format!("{acc}&W{}{part}", ids.next().unwrap()))
+            .unwrap();
+        assert_eq!(work_sexpr, rendered, "for {s}");
+        assert_eq!(work_tc, decl_tc, "for {s}");
+    }
+}
+
+#[test]
+fn work_var_wrong_typecode() {
+    let mut db = mkdb(WORK_VAR_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let wff = tc(&names, b"wff");
+    for (work, declared) in [("( &C1 -> ph )", "( A -> ph )"), ("&C1", "A")] {
+        let (res, _) = parse_with(&grammar, &names, work, &[wff], false);
+        let mut toks = work_toks(declared, &names).into_iter().map(|t| match t {
+            TestToken::Sym(t) => Ok(t),
+            TestToken::Work(..) => unreachable!(),
+        });
+        let expected = grammar.parse_formula(&mut toks, &[wff], false, &names);
+        let (Err(got), Err(want)) = (res, expected) else {
+            panic!("expected both to fail for {work}");
+        };
+        assert_eq!(
+            std::mem::discriminant(&got),
+            std::mem::discriminant(&want),
+            "for {work}: {got:?} vs {want:?}"
+        );
+    }
+}
+
+#[test]
+fn work_var_type_conversion() {
+    let mut db = mkdb(WORK_VAR_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let wff = tc(&names, b"wff");
+    let class = tc(&names, b"class");
+    let (res, log) = parse_with(&grammar, &names, "&S1", &[class], false);
+    assert_eq!(res.unwrap(), ("(cv &S1)".to_owned(), class));
+    assert!(log.contains(&"node(cv, 1 children)".to_owned()), "{log:?}");
+    let (res, _) = parse_with(&grammar, &names, "&S1 = A", &[wff], false);
+    assert_eq!(res.unwrap(), ("(weq (cv &S1) cA)".to_owned(), wff));
+}
+
+#[test]
+fn work_var_convert_to_provable() {
+    let mut db = mkdb(WORK_VAR_DB);
+    let names = db.name_pass().clone();
+    let grammar = db.grammar_pass().clone();
+    let wff = tc(&names, b"wff");
+    let provable = tc(&names, b"|-");
+    let (res, _) = parse_with(&grammar, &names, "( &W1 -> ph )", &[wff], true);
+    assert_eq!(res.unwrap(), ("(wi &W1 wph)".to_owned(), provable));
+}
+
+#[test]
+fn node_builder_garden_path_parity() {
+    for (text, labels) in [
+        (
+            GARDEN_PATH_DB,
+            &[b"formula1".as_slice(), b"formula2", b"formula3"][..],
+        ),
+        (GRAMMAR_DB_43, &[b"check".as_slice()][..]),
+    ] {
+        let mut db = mkdb(text);
+        let names = db.name_pass().clone();
+        let grammar = db.grammar_pass().clone();
+        let stmt_parse = db.stmt_parse_pass().clone();
+        let wff = tc(&names, b"wff");
+        for &label in labels {
+            let sref = db.statement(label).unwrap();
+            let expected = stmt_parse
+                .get_formula(&sref)
+                .unwrap()
+                .as_ref(&db)
+                .as_sexpr();
+            let mut reader = crate::nameck::NameReader::new(&names);
+            let mut builder = SexprBuilder::new(&names);
+            let (got, typecode) = grammar
+                .parse_formula_with(
+                    &mut sref.token_iter(&mut reader).map(|t| t.map(TestToken::Sym)),
+                    &[wff],
+                    true,
+                    &names,
+                    &mut builder,
+                )
+                .unwrap();
+            assert_eq!(got, expected, "for {}", as_str(label));
+            assert_eq!(typecode, tc(&names, b"|-"));
+        }
+    }
+}

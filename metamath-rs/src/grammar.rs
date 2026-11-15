@@ -469,13 +469,13 @@ impl Grammar {
         }
     }
 
-    fn too_short(
-        last_token: FormulaToken,
+    fn too_short<T: ParseToken>(
+        last_token: T,
         map: &HashMap<(SymbolType, Atom), NextNode>,
         nset: &Nameset,
     ) -> StmtParseError {
         StmtParseError::ParsedStatementTooShort(
-            last_token.span,
+            last_token.span(),
             map.keys()
                 .find(|k| k.0 == SymbolType::Constant)
                 .map(|(_, expected_symbol)| nset.atom_name(*expected_symbol).into()),
@@ -1140,29 +1140,38 @@ impl Grammar {
         Ok(())
     }
 
-    fn do_shift(
+    fn do_shift<T: ParseToken>(
         &self,
-        symbol_iter: &mut dyn Iterator<Item = Result<FormulaToken, StmtParseError>>,
+        symbol_iter: &mut impl Iterator<Item = Result<T, StmtParseError>>,
         nset: &Nameset,
     ) -> Result<(), StmtParseError> {
         if let Some(token) = symbol_iter.next() {
             let token = token?;
             if self.debug {
-                debug!("   SHIFT {:?}", as_str(nset.atom_name(token.symbol)));
+                match token.kind() {
+                    TokenKind::Symbol(symbol) => {
+                        debug!("   SHIFT {:?}", as_str(nset.atom_name(symbol)));
+                    }
+                    TokenKind::WorkVar(_, typecode) => {
+                        debug!(
+                            "   SHIFT work variable of type {:?}",
+                            as_str(nset.atom_name(typecode))
+                        );
+                    }
+                }
             }
         }
         Ok(())
     }
 
-    fn do_reduce(formula_builder: &mut FormulaBuilder, reduce: Reduce, nset: &Nameset) {
+    fn do_reduce<W, S: ReduceSink<W>>(sink: &mut S, reduce: Reduce, nset: &Nameset) {
         debug!("   REDUCE {:?}", as_str(nset.atom_name(reduce.label)));
-        formula_builder.reduce(
+        sink.reduce(
             reduce.label,
             reduce.var_count,
             reduce.offset,
             reduce.is_variable,
         );
-        //formula_builder.dump(nset);
         debug!(
             " {:?} {} {}",
             as_str(nset.atom_name(reduce.label)),
@@ -1179,18 +1188,69 @@ impl Grammar {
         convert_to_provable: bool,
         nset: &Nameset,
     ) -> Result<Formula, StmtParseError> {
+        self.parse_formula_generic(
+            symbol_iter,
+            expected_typecodes,
+            convert_to_provable,
+            nset,
+            FormulaBuilder::default(),
+        )
+    }
+
+    /// Parses the given list of tokens, which may include work variables
+    /// (see [`TokenKind::WorkVar`]), and emits the resulting syntax tree through
+    /// the caller-supplied `builder`.
+    ///
+    /// A work variable of typecode `tc` parses exactly as a declared variable of
+    /// typecode `tc` would. Returns the root node and the final typecode (after
+    /// any final type conversion and after `convert_to_provable`).
+    pub fn parse_formula_with<T, B>(
+        &self,
+        symbol_iter: &mut impl Iterator<Item = Result<T, StmtParseError>>,
+        expected_typecodes: &[TypeCode],
+        convert_to_provable: bool,
+        nset: &Nameset,
+        builder: &mut B,
+    ) -> Result<(B::Node, TypeCode), StmtParseError>
+    where
+        T: ParseToken,
+        B: FormulaNodeBuilder<WorkVar = T::WorkVar>,
+    {
+        self.parse_formula_generic(
+            symbol_iter,
+            expected_typecodes,
+            convert_to_provable,
+            nset,
+            NodeBuilderSink {
+                builder,
+                stack: Vec::new(),
+            },
+        )
+    }
+
+    /// The parser proper, generic over the token type and the reduce sink.
+    fn parse_formula_generic<T: ParseToken, S: ReduceSink<T::WorkVar>>(
+        &self,
+        symbol_iter: &mut impl Iterator<Item = Result<T, StmtParseError>>,
+        expected_typecodes: &[TypeCode],
+        convert_to_provable: bool,
+        nset: &Nameset,
+        mut sink: S,
+    ) -> Result<S::Output, StmtParseError> {
         struct StackElement {
             node_id: NodeId,
             expected_typecodes: Box<[TypeCode]>,
         }
 
-        let mut formula_builder = FormulaBuilder::default();
         let mut symbol_enum = symbol_iter.peekable();
         let Ok(mut last_token) = symbol_enum
             .peek()
             .ok_or(StmtParseError::ParsedStatementNoTypeCode)?
         else {
-            return Err(symbol_enum.next().unwrap().unwrap_err());
+            return match symbol_enum.next() {
+                Some(Err(err)) => Err(err),
+                _ => unreachable!(),
+            };
         };
         let mut e = StackElement {
             node_id: self.root,
@@ -1198,110 +1258,54 @@ impl Grammar {
         };
         let mut stack = vec![];
         loop {
-            match *self.nodes.get(e.node_id) {
-                GrammarNode::Leaf {
-                    reduce,
-                    mut typecode,
-                } => {
+            // Either a leaf is reached (REDUCE), or a work variable is consumed at the root:
+            // both yield the typecode of the item just built.
+            let mut typecode = match *self.nodes.get(e.node_id) {
+                GrammarNode::Leaf { reduce, typecode } => {
                     // We found a leaf: REDUCE
-                    Self::do_reduce(&mut formula_builder, reduce, nset);
-
-                    if e.expected_typecodes.contains(&typecode) {
-                        // We found an expected typecode, pop from the stack and continue
-                        if let Some(popped) = stack.pop() {
-                            e = popped;
-                            debug!(
-                                " ++ Finished parsing formula, found typecode {:?}, back to {}",
-                                as_str(nset.atom_name(typecode)),
-                                e.node_id
-                            );
-                            let map = self.get_branch(e.node_id);
-                            match map.get(&(SymbolType::Variable, typecode)) {
-                                Some(NextNode {
-                                    next_node_id,
-                                    leaf_label,
-                                }) => {
-                                    // Found a sub-formula: First optionally REDUCE and continue
-                                    for &reduce in leaf_label {
-                                        Self::do_reduce(&mut formula_builder, reduce, nset);
-                                    }
-
-                                    e.node_id = *next_node_id;
-                                    debug!("   Next Node: {:?}", e.node_id);
-                                }
-                                None => {
-                                    debug!("TODO");
-                                }
-                            }
-                        } else if symbol_enum.peek().is_none() {
-                            // We popped the last element from the stack and we are at the end of the math string, success
-                            if typecode == self.logic_type && convert_to_provable {
-                                typecode = self.provable_type;
-                            }
-                            return Ok(formula_builder.build(typecode));
-                        } else {
-                            // There are still symbols to parse, continue from root
-                            let (next_node_id, leaf_label) = self
-                                .next_var_node(self.root, typecode)
-                                .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
-                            for &reduce in leaf_label {
-                                Self::do_reduce(&mut formula_builder, reduce, nset);
-                            }
-                            e.node_id = next_node_id;
-                        }
-                    } else {
-                        // We have parsed everything but did not obtain an expected typecode, try a type conversion.
-                        if symbol_enum.peek().is_none() {
-                            for (from_typecode, to_typecode, label) in &self.type_conversions {
-                                if *from_typecode == typecode
-                                    && e.expected_typecodes.contains(to_typecode)
-                                {
-                                    let reduce = Reduce::new(*label, 1);
-                                    Self::do_reduce(&mut formula_builder, reduce, nset);
-                                    let typecode =
-                                        if *to_typecode == self.logic_type && convert_to_provable {
-                                            self.provable_type
-                                        } else {
-                                            *to_typecode
-                                        };
-                                    return Ok(formula_builder.build(typecode));
-                                }
-                            }
-                        }
-                        // We have not found the expected typecode, continue from root
-                        debug!(" ++ Wrong type obtained, continue.");
-                        let (next_node_id, leaf_label) = self
-                            .next_var_node(self.root, typecode)
-                            .ok_or(StmtParseError::UnparseableStatement(last_token.span))?;
-                        for &reduce in leaf_label {
-                            Self::do_reduce(&mut formula_builder, reduce, nset);
-                        }
-                        e.node_id = next_node_id;
-                    }
+                    Self::do_reduce(&mut sink, reduce, nset);
+                    typecode
                 }
                 GrammarNode::Branch { ref map } => {
                     if let Some(&Ok(token)) = symbol_enum.peek() {
                         last_token = token;
-                        debug!("   {:?}", as_str(nset.atom_name(token.symbol)));
+                        let work_var_typecode = match token.kind() {
+                            TokenKind::Symbol(symbol) => {
+                                debug!("   {:?}", as_str(nset.atom_name(symbol)));
+                                if let Some(NextNode {
+                                    next_node_id,
+                                    leaf_label,
+                                }) = map.get(&(SymbolType::Constant, symbol))
+                                {
+                                    // Found an atom matching one of our next nodes: First optionally REDUCE and continue
+                                    for &reduce in leaf_label {
+                                        Self::do_reduce(&mut sink, reduce, nset);
+                                    }
 
-                        if let Some(NextNode {
-                            next_node_id,
-                            leaf_label,
-                        }) = map.get(&(SymbolType::Constant, token.symbol))
-                        {
-                            // Found an atom matching one of our next nodes: First optionally REDUCE and continue
-                            for &reduce in leaf_label {
-                                Self::do_reduce(&mut formula_builder, reduce, nset);
+                                    // Found an atom matching one of our next nodes: SHIFT, to the next node
+                                    self.do_shift(&mut symbol_enum, nset)?;
+                                    e.node_id = *next_node_id;
+                                    debug!("   Next Node: {:?}", e.node_id);
+                                    continue;
+                                }
+                                None
                             }
-
-                            // Found an atom matching one of our next nodes: SHIFT, to the next node
-                            self.do_shift(&mut symbol_enum, nset)?;
-                            e.node_id = *next_node_id;
-                            debug!("   Next Node: {:?}", e.node_id);
+                            TokenKind::WorkVar(id, typecode) if e.node_id == self.root => {
+                                // A work variable at the root: consume it and continue
+                                // as on reaching a variable's leaf of that typecode.
+                                self.do_shift(&mut symbol_enum, nset)?;
+                                sink.work_var(id, typecode);
+                                Some(typecode)
+                            }
+                            // A work variable matches no constant
+                            TokenKind::WorkVar(..) => None,
+                        };
+                        if let Some(typecode) = work_var_typecode {
+                            typecode
                         } else {
                             // No matching constant, search among variables
                             if map.is_empty() || e.node_id == self.root {
-                                return Err(StmtParseError::UnparseableStatement(token.span));
+                                return Err(StmtParseError::UnparseableStatement(token.span()));
                             }
 
                             debug!(
@@ -1319,6 +1323,7 @@ impl Grammar {
                                     })
                                     .collect(),
                             };
+                            continue;
                         }
                     } else {
                         if let Some(token) = symbol_enum.next() {
@@ -1327,8 +1332,188 @@ impl Grammar {
                         return Err(Grammar::too_short(last_token, map, nset));
                     }
                 }
+            };
+
+            if e.expected_typecodes.contains(&typecode) {
+                // We found an expected typecode, pop from the stack and continue
+                if let Some(popped) = stack.pop() {
+                    e = popped;
+                    debug!(
+                        " ++ Finished parsing formula, found typecode {:?}, back to {}",
+                        as_str(nset.atom_name(typecode)),
+                        e.node_id
+                    );
+                    let map = self.get_branch(e.node_id);
+                    match map.get(&(SymbolType::Variable, typecode)) {
+                        Some(NextNode {
+                            next_node_id,
+                            leaf_label,
+                        }) => {
+                            // Found a sub-formula: First optionally REDUCE and continue
+                            for &reduce in leaf_label {
+                                Self::do_reduce(&mut sink, reduce, nset);
+                            }
+
+                            e.node_id = *next_node_id;
+                            debug!("   Next Node: {:?}", e.node_id);
+                        }
+                        None => {
+                            debug!("TODO");
+                        }
+                    }
+                } else if symbol_enum.peek().is_none() {
+                    // We popped the last element from the stack and we are at the end of the math string, success
+                    if typecode == self.logic_type && convert_to_provable {
+                        typecode = self.provable_type;
+                    }
+                    return Ok(sink.finish(typecode));
+                } else {
+                    // There are still symbols to parse, continue from root
+                    let (next_node_id, leaf_label) = self
+                        .next_var_node(self.root, typecode)
+                        .ok_or_else(|| StmtParseError::UnparseableStatement(last_token.span()))?;
+                    for &reduce in leaf_label {
+                        Self::do_reduce(&mut sink, reduce, nset);
+                    }
+                    e.node_id = next_node_id;
+                }
+            } else {
+                // We have parsed everything but did not obtain an expected typecode, try a type conversion.
+                if symbol_enum.peek().is_none() {
+                    for (from_typecode, to_typecode, label) in &self.type_conversions {
+                        if *from_typecode == typecode && e.expected_typecodes.contains(to_typecode)
+                        {
+                            let reduce = Reduce::new(*label, 1);
+                            Self::do_reduce(&mut sink, reduce, nset);
+                            let typecode = if *to_typecode == self.logic_type && convert_to_provable
+                            {
+                                self.provable_type
+                            } else {
+                                *to_typecode
+                            };
+                            return Ok(sink.finish(typecode));
+                        }
+                    }
+                }
+                // We have not found the expected typecode, continue from root
+                debug!(" ++ Wrong type obtained, continue.");
+                let (next_node_id, leaf_label) = self
+                    .next_var_node(self.root, typecode)
+                    .ok_or_else(|| StmtParseError::UnparseableStatement(last_token.span()))?;
+                for &reduce in leaf_label {
+                    Self::do_reduce(&mut sink, reduce, nset);
+                }
+                e.node_id = next_node_id;
             }
         }
+    }
+}
+
+/// The kind of a token handed to [`Grammar::parse_formula_with`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenKind<W> {
+    /// A database symbol (constant or declared variable).
+    Symbol(Symbol),
+    /// A work variable: not a database symbol, identified by the caller's `W`,
+    /// and parsed as a variable of the given typecode.
+    WorkVar(W, TypeCode),
+}
+
+/// A token which [`Grammar::parse_formula_with`] can parse.
+pub trait ParseToken: Copy {
+    /// The caller's work-variable identifier.
+    type WorkVar;
+    /// The span of this token, used for error reporting.
+    fn span(&self) -> Span;
+    /// What this token is.
+    fn kind(&self) -> TokenKind<Self::WorkVar>;
+}
+
+impl ParseToken for FormulaToken {
+    type WorkVar = std::convert::Infallible;
+    #[inline]
+    fn span(&self) -> Span {
+        self.span
+    }
+    #[inline]
+    fn kind(&self) -> TokenKind<Self::WorkVar> {
+        TokenKind::Symbol(self.symbol)
+    }
+}
+
+/// A caller-supplied builder of syntax tree nodes, used by [`Grammar::parse_formula_with`].
+pub trait FormulaNodeBuilder {
+    /// The node type built.
+    type Node;
+    /// The caller's work-variable identifier.
+    type WorkVar;
+    /// Builds a node for a declared variable, given its floating hypothesis label.
+    fn variable(&mut self, label: Label) -> Self::Node;
+    /// Builds a node for a work variable of the given typecode.
+    fn work_var(&mut self, id: Self::WorkVar, typecode: TypeCode) -> Self::Node;
+    /// Builds a node for a syntax axiom (or type conversion) with the given children,
+    /// in order of appearance in the syntax axiom's math string.
+    fn node(&mut self, label: Label, children: Vec<Self::Node>) -> Self::Node;
+}
+
+/// The reduce-level interface the parser drives.
+trait ReduceSink<W> {
+    type Output;
+    fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool);
+    fn work_var(&mut self, id: W, typecode: TypeCode);
+    fn finish(self, typecode: TypeCode) -> Self::Output;
+}
+
+impl ReduceSink<std::convert::Infallible> for FormulaBuilder {
+    type Output = Formula;
+    #[inline]
+    fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {
+        FormulaBuilder::reduce(self, label, var_count, offset, is_variable);
+    }
+    #[inline]
+    fn work_var(&mut self, id: std::convert::Infallible, _typecode: TypeCode) {
+        match id {}
+    }
+    #[inline]
+    fn finish(self, typecode: TypeCode) -> Formula {
+        self.build(typecode)
+    }
+}
+
+/// Adapts a [`FormulaNodeBuilder`] to the reduce-level interface.
+struct NodeBuilderSink<'a, B: FormulaNodeBuilder> {
+    builder: &'a mut B,
+    stack: Vec<B::Node>,
+}
+
+impl<B: FormulaNodeBuilder> ReduceSink<B::WorkVar> for NodeBuilderSink<'_, B> {
+    type Output = (B::Node, TypeCode);
+
+    fn reduce(&mut self, label: Label, var_count: u8, offset: u8, is_variable: bool) {
+        assert!(self.stack.len() >= usize::from(var_count) + usize::from(offset));
+        let reduce_start = self.stack.len() - usize::from(var_count) - usize::from(offset);
+        let reduce_end = self.stack.len() - usize::from(offset);
+        let node = if is_variable && var_count == 0 {
+            self.builder.variable(label)
+        } else {
+            let children: Vec<B::Node> = self.stack.drain(reduce_start..reduce_end).collect();
+            self.builder.node(label, children)
+        };
+        self.stack.insert(reduce_start, node);
+    }
+
+    fn work_var(&mut self, id: B::WorkVar, typecode: TypeCode) {
+        let node = self.builder.work_var(id, typecode);
+        self.stack.push(node);
+    }
+
+    fn finish(mut self, typecode: TypeCode) -> Self::Output {
+        assert!(
+            self.stack.len() == 1,
+            "Final formula building state does not have one root - {} items",
+            self.stack.len()
+        );
+        (self.stack.pop().unwrap(), typecode)
     }
 }
 
