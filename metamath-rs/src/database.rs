@@ -818,7 +818,6 @@ impl Database {
     }
 
     /// Iterates over all the statements
-    #[must_use]
     pub fn statements(&self) -> impl DoubleEndedIterator<Item = StatementRef<'_>> + Clone + '_ {
         self.segments.segments(..).flatten()
     }

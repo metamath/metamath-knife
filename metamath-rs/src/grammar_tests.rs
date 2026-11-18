@@ -10,6 +10,8 @@ use crate::statement::SegmentId;
 use crate::statement::StatementAddress;
 use crate::Span;
 
+const NO_DIAGS: [(StatementAddress, Diagnostic); 0] = [];
+
 macro_rules! sa {
     ($id: expr, $index:expr) => {
         StatementAddress {
@@ -71,9 +73,9 @@ fn test_db_stmt_parse() {
     let sset = db.parse_result().clone();
     let grammar = db.grammar_pass().clone();
     let stmt_parse = db.stmt_parse_pass().clone();
-    assert!(sset.parse_diagnostics().is_empty());
-    assert!(grammar.diagnostics().is_empty());
-    assert!(stmt_parse.diagnostics().is_empty());
+    assert_eq!(sset.parse_diagnostics(), NO_DIAGS);
+    assert_eq!(grammar.diagnostics(), NO_DIAGS);
+    assert_eq!(stmt_parse.diagnostics(), NO_DIAGS);
 }
 
 #[test]
@@ -286,7 +288,7 @@ fn test_garden_path_1() {
     let mut db = mkdb(GARDEN_PATH_DB);
     let sset = db.parse_result().clone();
     let stmt_parse = db.stmt_parse_pass().clone();
-    assert!(sset.parse_diagnostics().is_empty());
+    assert_eq!(sset.parse_diagnostics(), NO_DIAGS);
     let sref = db.statement(b"formula1").unwrap();
     let formula = stmt_parse.get_formula(&sref).unwrap();
     assert_eq!(formula.as_ref(&db).as_sexpr(), "(weq cA (csn (cop cB cC)))");
