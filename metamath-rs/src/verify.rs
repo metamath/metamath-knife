@@ -218,7 +218,7 @@ fn prepare_hypothesis<P: ProofBuilder>(state: &mut VerifyState<'_, P>, hyp: &sco
 fn prepare_named_hyp<P: ProofBuilder>(state: &mut VerifyState<'_, P>, label: TokenPtr<'_>) -> bool {
     for hyp in &*state.cur_frame.hypotheses {
         if let Essential(addr, _) = *hyp {
-            assert!(addr.segment_id == state.this_seg.id);
+            assert_eq!(addr.segment_id, state.this_seg.id);
             // we don't allow $e statements to be valid across segments, so this
             // can be done as a local lookup in this_seg.  Since we always
             // invalidate the VerifySegment if the current segment has changed
@@ -906,7 +906,7 @@ impl Database {
             dv_map: &dummy_frame.optional_dv,
         };
 
-        assert!(stmt.statement_type() == StatementType::Provable);
+        assert_eq!(stmt.statement_type(), StatementType::Provable);
         let frame = state.scoper.get(stmt.label()).unwrap();
         state.cur_frame = frame;
         verify_proof(&mut state, stmt)
